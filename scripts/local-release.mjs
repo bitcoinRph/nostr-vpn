@@ -38,12 +38,12 @@ const defaultEnvFiles = [
   join(repoRoot, '.env.release.local'),
   join(repoRoot, '.env.zapstore.local'),
 ]
-const macosSigningRequiredEnv = [
+const macosSigningP12RequiredEnv = [
   'MACOS_SIGNING_IDENTITY',
   'MACOS_CERTIFICATE_P12',
   'MACOS_CERTIFICATE_PASSWORD',
 ]
-const macosNotarizationRequiredEnv = [
+const macosNotarizationP12RequiredEnv = [
   'MACOS_NOTARIZE_APPLE_ID',
   'MACOS_NOTARIZE_APP_PASSWORD',
   'MACOS_NOTARIZE_TEAM_ID',
@@ -183,10 +183,25 @@ function missingEnvVars(names, env) {
 }
 
 function detectLocalMacosReleaseCapabilities(env) {
-  const missingSigning = missingEnvVars(macosSigningRequiredEnv, env)
-  const missingNotarization = missingEnvVars(macosNotarizationRequiredEnv, env)
+  // Login-keychain mode: identity already in login keychain, notary creds stored
+  // as a notarytool keychain profile. No secrets need to live in env vars.
+  const signingIdentity = String(env.MACOS_SIGNING_IDENTITY ?? '').trim()
+  const notaryProfile = String(env.MACOS_NOTARY_PROFILE ?? '').trim()
+  if (signingIdentity && notaryProfile) {
+    return {
+      mode: 'login-keychain',
+      signingReady: true,
+      notarizationReady: true,
+      missingSigning: [],
+      missingNotarization: [],
+    }
+  }
 
+  // Legacy / CI-compatible mode: p12 + base64 + apple-id/password/team-id env vars.
+  const missingSigning = missingEnvVars(macosSigningP12RequiredEnv, env)
+  const missingNotarization = missingEnvVars(macosNotarizationP12RequiredEnv, env)
   return {
+    mode: 'p12',
     signingReady: missingSigning.length === 0,
     notarizationReady: missingNotarization.length === 0,
     missingSigning,
@@ -347,7 +362,21 @@ function findFirstFile(root, matcher) {
   return match ? join(root, match) : null
 }
 
-function prepareLocalMacosSigning(env, { dryRun }) {
+function prepareLocalMacosSigning(env, { mode, dryRun }) {
+  if (mode === 'login-keychain') {
+    // Identity already lives in the user's login keychain; just verify it's there.
+    const identities = run('security', ['find-identity', '-v', '-p', 'codesigning'], {
+      capture: true,
+      dryRun,
+    })
+    if (!dryRun && !identities.includes(env.MACOS_SIGNING_IDENTITY)) {
+      throw new Error(
+        `Expected signing identity not found in login keychain: ${env.MACOS_SIGNING_IDENTITY}`,
+      )
+    }
+    return { keychainPath: null, cleanup() {} }
+  }
+
   const tempRoot = dryRun ? join(os.tmpdir(), 'nvpn-local-signing-dry-run') : mkdtempSync(join(os.tmpdir(), 'nvpn-local-signing-'))
   const keychainPath = join(tempRoot, 'nvpn-signing.keychain-db')
   const certPath = join(tempRoot, 'nvpn-signing-cert.p12')
@@ -405,7 +434,10 @@ function prepareLocalMacosSigning(env, { dryRun }) {
 
 function signLocalMacosApp({ appPath, env, keychainPath, dryRun }) {
   const entitlementsPath = join(guiRoot, 'src-tauri', 'Release.entitlements')
-  const args = ['--force', '--deep', '--options', 'runtime', '--timestamp', '--keychain', keychainPath]
+  const args = ['--force', '--deep', '--options', 'runtime', '--timestamp']
+  if (keychainPath) {
+    args.push('--keychain', keychainPath)
+  }
   if (existsSync(entitlementsPath)) {
     args.push('--entitlements', entitlementsPath)
   }
@@ -415,9 +447,24 @@ function signLocalMacosApp({ appPath, env, keychainPath, dryRun }) {
   run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath], { dryRun })
 }
 
-function notarizeLocalMacosApp({ appPath, env, dryRun }) {
+function notarytoolAuthArgs(env, mode) {
+  if (mode === 'login-keychain') {
+    return ['--keychain-profile', env.MACOS_NOTARY_PROFILE]
+  }
+  return [
+    '--apple-id',
+    env.MACOS_NOTARIZE_APPLE_ID,
+    '--password',
+    env.MACOS_NOTARIZE_APP_PASSWORD,
+    '--team-id',
+    env.MACOS_NOTARIZE_TEAM_ID,
+  ]
+}
+
+function notarizeLocalMacosApp({ appPath, env, mode, dryRun }) {
   const tempRoot = dryRun ? join(os.tmpdir(), 'nvpn-local-notary-dry-run') : mkdtempSync(join(os.tmpdir(), 'nvpn-local-notary-'))
   const notaryZipPath = join(tempRoot, 'nvpn-notarize.zip')
+  const authArgs = notarytoolAuthArgs(env, mode)
 
   try {
     run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, notaryZipPath], { dryRun })
@@ -427,12 +474,7 @@ function notarizeLocalMacosApp({ appPath, env, dryRun }) {
         'notarytool',
         'submit',
         notaryZipPath,
-        '--apple-id',
-        env.MACOS_NOTARIZE_APPLE_ID,
-        '--password',
-        env.MACOS_NOTARIZE_APP_PASSWORD,
-        '--team-id',
-        env.MACOS_NOTARIZE_TEAM_ID,
+        ...authArgs,
         '--wait',
         '--output-format',
         'json',
@@ -447,17 +489,7 @@ function notarizeLocalMacosApp({ appPath, env, dryRun }) {
           try {
             run(
               'xcrun',
-              [
-                'notarytool',
-                'log',
-                submission.id,
-                '--apple-id',
-                env.MACOS_NOTARIZE_APPLE_ID,
-                '--password',
-                env.MACOS_NOTARIZE_APP_PASSWORD,
-                '--team-id',
-                env.MACOS_NOTARIZE_TEAM_ID,
-              ],
+              ['notarytool', 'log', submission.id, ...authArgs],
               { dryRun },
             )
           } catch {}
@@ -856,7 +888,7 @@ function buildMacosArtifacts({ env, pnpmInvocation, tag, dryRun, builtLines, all
   let signingContext = null
   try {
     if (capabilities.signingReady) {
-      signingContext = prepareLocalMacosSigning(env, { dryRun })
+      signingContext = prepareLocalMacosSigning(env, { mode: capabilities.mode, dryRun })
       signLocalMacosApp({
         appPath: appPathForZip,
         env,
@@ -866,7 +898,7 @@ function buildMacosArtifacts({ env, pnpmInvocation, tag, dryRun, builtLines, all
       signed = true
 
       if (capabilities.notarizationReady) {
-        notarizeLocalMacosApp({ appPath: appPathForZip, env, dryRun })
+        notarizeLocalMacosApp({ appPath: appPathForZip, env, mode: capabilities.mode, dryRun })
         notarized = true
       }
     }
