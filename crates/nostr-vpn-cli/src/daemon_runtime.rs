@@ -1198,10 +1198,15 @@ pub(crate) fn spawn_daemon_process(args: &ConnectArgs, config_path: &Path) -> Re
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_file_path)
+        .with_context(|| format!("failed to truncate {}", log_file_path.display()))?;
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .truncate(true)
         .open(&log_file_path)
         .with_context(|| format!("failed to open {}", log_file_path.display()))?;
     let _ = set_daemon_runtime_file_permissions(&log_file_path);
