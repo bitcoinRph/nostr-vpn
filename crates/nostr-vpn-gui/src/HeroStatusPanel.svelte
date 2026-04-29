@@ -12,6 +12,7 @@
     selectedExitNodeBadgeText,
   } from './lib/app-view'
   import { nodeNameDnsPreview } from './lib/node-name.js'
+  import { shouldShowVpnDataDisclosure } from './lib/vpn-disclosure.js'
   import type { SettingsPatch, UiState } from './lib/types'
 
   export let state: UiState | null = null
@@ -72,7 +73,7 @@
       {/if}
     </div>
 
-    {#if vpnControlSupported}
+    {#if shouldShowVpnDataDisclosure(state)}
       <div class="vpn-data-disclosure" data-testid="vpn-data-disclosure">
         <strong>VPN data:</strong> Nostr VPN uses your public key, network membership, peer
         endpoints, relay choices, and traffic counters only to run the VPN you configure. Packet
