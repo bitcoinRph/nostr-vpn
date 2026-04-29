@@ -123,7 +123,7 @@ pub(crate) async fn connect_session(args: ConnectArgs) -> Result<()> {
     let mut last_nat_punch_attempt: Option<(String, Instant)> = None;
     let mut reconnect_attempt = 0u32;
     let mut reconnect_due = Instant::now();
-    let mut last_network_check_at = unix_timestamp();
+    let mut last_network_check_at = WallTimeJumpObserver::new(unix_timestamp());
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
@@ -249,6 +249,7 @@ pub(crate) async fn connect_session(args: ConnectArgs) -> Result<()> {
                 let resumed_after_sleep = observe_wall_time_jump(
                     &mut last_network_check_at,
                     now,
+                    Instant::now(),
                     MAJOR_LINK_CHANGE_TIME_JUMP_SECS,
                 );
                 if resumed_after_sleep {
@@ -848,7 +849,7 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
     let mut reconnect_due = Instant::now();
     let mut last_mesh_count = 0_usize;
     let mut last_nat_punch_attempt: Option<(String, Instant)> = None;
-    let mut last_network_check_at = unix_timestamp();
+    let mut last_network_check_at = WallTimeJumpObserver::new(unix_timestamp());
     let mut last_log_compact_check = Instant::now();
     write_daemon_state(
         &state_file,
@@ -1125,6 +1126,7 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                 let resumed_after_sleep = observe_wall_time_jump(
                     &mut last_network_check_at,
                     now,
+                    Instant::now(),
                     MAJOR_LINK_CHANGE_TIME_JUMP_SECS,
                 );
                 if resumed_after_sleep {

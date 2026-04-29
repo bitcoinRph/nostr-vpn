@@ -1,6 +1,7 @@
 use crate::*;
 use nostr_vpn_core::signaling::SignalPayload;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 #[test]
 fn daemon_session_requires_remote_participants_to_be_active() {
@@ -43,19 +44,38 @@ fn daemon_reconnect_backoff_is_bounded_exponential() {
 
 #[test]
 fn wall_time_jump_detection_flags_sleep_resume_after_threshold() {
+    let observed_at = Instant::now();
     assert!(!wall_time_jump_detected(
         0,
         1_000,
+        observed_at,
+        observed_at,
         MAJOR_LINK_CHANGE_TIME_JUMP_SECS
     ));
     assert!(!wall_time_jump_detected(
         1_000,
         1_000 + MAJOR_LINK_CHANGE_TIME_JUMP_SECS - 1,
+        observed_at,
+        observed_at + Duration::from_secs(MAJOR_LINK_CHANGE_TIME_JUMP_SECS - 1),
         MAJOR_LINK_CHANGE_TIME_JUMP_SECS,
     ));
     assert!(wall_time_jump_detected(
         1_000,
         1_000 + MAJOR_LINK_CHANGE_TIME_JUMP_SECS,
+        observed_at,
+        observed_at,
+        MAJOR_LINK_CHANGE_TIME_JUMP_SECS,
+    ));
+}
+
+#[test]
+fn wall_time_jump_detection_ignores_busy_loop_delays() {
+    let observed_at = Instant::now();
+    assert!(!wall_time_jump_detected(
+        1_000,
+        1_000 + MAJOR_LINK_CHANGE_TIME_JUMP_SECS + 5,
+        observed_at,
+        observed_at + Duration::from_secs(MAJOR_LINK_CHANGE_TIME_JUMP_SECS + 5),
         MAJOR_LINK_CHANGE_TIME_JUMP_SECS,
     ));
 }
