@@ -75,22 +75,22 @@
   </div>
 
   <div class="service-panel-copy">
-    <div class="service-panel-title">
-      {serviceActionInFlight
-        ? 'Updating the background service'
-        : serviceRepairPromptRecommended
-        ? 'Reinstall the service to finish this app update'
-        : serviceSetupRequired
-          ? 'Install once for reliable background VPN'
-          : 'Enable the service to keep VPN control out of the GUI process'}
-    </div>
-    <div class="service-panel-text">
-      {serviceActionInFlight
-        ? 'Waiting for the service install or launchd restart to finish. This panel will update automatically when the new daemon is ready.'
-        : serviceRepairPromptRecommended
-        ? 'The running background service looks older than this app. Reinstall it once so the daemon matches the current version.'
-        : 'Required for background startup, resilient reconnects, and avoiding repeated admin prompts.'}
-    </div>
+    {#if serviceActionInFlight}
+      <div class="service-panel-title">Updating the background service</div>
+      <div class="service-panel-text">
+        Waiting for the service install or launchd restart to finish. This panel will update automatically when the new daemon is ready.
+      </div>
+    {:else if serviceRepairPromptRecommended}
+      <div class="service-panel-title">Reinstall the service to finish this app update</div>
+      <div class="service-panel-text">
+        The running background service looks older than this app. Reinstall it once so the daemon matches the current version.
+      </div>
+    {:else if serviceSetupRequired}
+      <div class="service-panel-title">Install once for reliable background VPN</div>
+      <div class="service-panel-text">
+        Required for background startup, resilient reconnects, and avoiding repeated admin prompts.
+      </div>
+    {/if}
     {#if state.serviceStatusDetail}
       <div class="service-panel-detail" data-testid="service-status-detail">
         {state.serviceStatusDetail}
