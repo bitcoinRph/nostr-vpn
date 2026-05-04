@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.20 - 2026-05-05
+
+Changes since `0.3.19` on 2026-05-04.
+
+### Added
+
+- Local release pipeline now builds Linux x64 desktop artifacts in Docker: signed AppImage and Debian package alongside an `x86_64-unknown-linux-musl` static CLI tarball. Uses a new `Dockerfile.linux-release` (Tauri/GTK toolchain + Rust + musl-tools); requires only Docker on the host. Wired in as the `linux` release step alongside `macos` / `android` / `windows`.
+
+### Removed
+
+- The boilerplate "Linux release artifacts are not built by this host script unless run on Linux or extended with a working local cross toolchain." line that the script unconditionally appended to the skipped section of release notes from non-Linux hosts. With Docker doing the Linux build natively, the disclaimer is obsolete.
+
 ## 0.3.19 - 2026-05-04
 
 Changes since `0.3.18` earlier on 2026-05-04.

@@ -70,7 +70,7 @@ Options:
   --release-tree <name>    htree release tree name (default: releases/nostr-vpn)
   --stage-dir <path>       Directory used for staged release metadata
   --env-file <path>        Extra dotenv file to load (repeatable)
-  --only <csv>             Limit steps to verify,macos,android,windows
+  --only <csv>             Limit steps to verify,macos,android,linux,windows
   --skip <csv>             Skip steps by name
   --allow-unsigned-macos   Build the macOS app without signing when local signing inputs are unavailable
   --help                   Show this help
@@ -697,6 +697,61 @@ Copy-Item $installer.FullName ${psQuote(`${distPath}\\${installerName}`)} -Force
   }
 }
 
+function buildLinuxArtifacts({ tag, dryRun, builtLines }) {
+  if (!commandExists('docker')) {
+    throw new SkipStepError('Skipping Linux artifacts because docker is not on PATH.')
+  }
+
+  const imageName = 'nostr-vpn-linux-release'
+  run('docker', ['build', '-f', 'Dockerfile.linux-release', '-t', imageName, '.'], {
+    cwd: repoRoot,
+    dryRun,
+  })
+
+  const linuxAppImageName = `nostr-vpn-${tag}-linux-x64.AppImage`
+  const linuxDebName = `nostr-vpn-${tag}-linux-x64.deb`
+  const linuxCliTarball = `nvpn-${tag}-x86_64-unknown-linux-musl.tar.gz`
+
+  if (!dryRun) {
+    rmSync(join(distDir, linuxAppImageName), { force: true })
+    rmSync(join(distDir, linuxDebName), { force: true })
+    rmSync(join(distDir, linuxCliTarball), { force: true })
+  }
+
+  // Single-shot build inside the container: pnpm install (only the GUI pkg
+  // it actually needs), tauri AppImage + deb bundle, musl CLI tarball, and
+  // copy the renamed artifacts straight into /work/dist.
+  const innerScript = [
+    'set -euo pipefail',
+    'pnpm --dir crates/nostr-vpn-gui install --frozen-lockfile',
+    'pnpm --dir crates/nostr-vpn-gui exec tauri build --bundles appimage,deb --ci',
+    'mkdir -p dist',
+    `cp "$(ls -1t target/release/bundle/appimage/*.AppImage | head -1)" "dist/${linuxAppImageName}"`,
+    `cp "$(ls -1t target/release/bundle/deb/*.deb | head -1)" "dist/${linuxDebName}"`,
+    'cargo build --release --target x86_64-unknown-linux-musl -p nostr-vpn-cli',
+    `tar -czf "dist/${linuxCliTarball}" -C target/x86_64-unknown-linux-musl/release nvpn`,
+  ].join(' && ')
+
+  run(
+    'docker',
+    [
+      'run',
+      '--rm',
+      '-v',
+      `${repoRoot}:/work`,
+      '-w',
+      '/work',
+      imageName,
+      'bash',
+      '-lc',
+      innerScript,
+    ],
+    { dryRun },
+  )
+
+  builtLines.push('Built Linux x64 AppImage, deb, and musl CLI in Docker.')
+}
+
 function ensureAndroidSdkEnv(env) {
   const updated = { ...env }
 
@@ -1128,6 +1183,7 @@ function main() {
       allowUnsignedMacos,
     })],
     ['android', () => buildAndroidArtifacts({ env, pnpmInvocation, tag, dryRun: options.dryRun, builtLines })],
+    ['linux', () => buildLinuxArtifacts({ tag, dryRun: options.dryRun, builtLines })],
     ['windows', () => buildWindowsArtifacts({ env, tag, dryRun: options.dryRun, builtLines })],
   ]
 
@@ -1149,13 +1205,6 @@ function main() {
       }
       skippedLines.push(`${name} build failed: ${error.message}`)
     }
-  }
-
-  if (
-    !skippedLines.some((line) => line.startsWith('Linux')) &&
-    process.platform !== 'linux'
-  ) {
-    skippedLines.push('Linux release artifacts are not built by this host script unless run on Linux or extended with a working local cross toolchain.')
   }
 
   const commit = resolveReleaseCommit(tag, { dryRun: options.dryRun })

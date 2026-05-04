@@ -180,7 +180,6 @@ test('renderReleaseNotes omits CLI skip boilerplate and can link assets', () => 
     skippedLines: [
       'verify skipped by CLI options.',
       'windows skipped by CLI options.',
-      'Linux release artifacts are not built by this host script unless run on Linux.',
     ],
   })
 
@@ -190,5 +189,4 @@ test('renderReleaseNotes omits CLI skip boilerplate and can link assets', () => 
   )
   assert.doesNotMatch(notes, /verify skipped by CLI options/)
   assert.doesNotMatch(notes, /windows skipped by CLI options/)
-  assert.match(notes, /Linux release artifacts are not built by this host script unless run on Linux\./)
 })
