@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.19 - 2026-05-04
+
+Changes since `0.3.18` earlier on 2026-05-04.
+
+### Fixed
+
+- In-app updater install no longer fails with `manifest was not found at manifest.json`. The plugin's `check()` defaulted `manifest_path` to `"release.json"` (matching what `htree release publish` writes), but `download_and_install()` defaulted to `"manifest.json"` — so checks succeeded and installs failed. Worked around by pinning `manifest_path: "release.json"` in `tauri.conf.json`; the plugin-side default is also being fixed upstream.
+
 ## 0.3.18 - 2026-05-04
 
 Changes since `0.3.17` earlier on 2026-05-04.
