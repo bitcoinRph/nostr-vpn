@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import {
   androidReleaseAssetName,
   autoDetectWindowsVmName,
+  buildReleaseManifestFiles,
   buildReleaseManifest,
   linuxReleaseTargetsForDockerPlatform,
   normalizeTag,
@@ -554,6 +555,31 @@ function verifyPackagedMacosArtifact({ appPath, signed, notarized, dryRun }) {
   }
 }
 
+function assertMacosAppVersion({ appPath, tag, dryRun }) {
+  if (dryRun) {
+    return
+  }
+
+  const expectedVersion = tag.replace(/^v/, '')
+  const infoPlistPath = join(appPath, 'Contents', 'Info.plist')
+  const shortVersion = run(
+    '/usr/libexec/PlistBuddy',
+    ['-c', 'Print :CFBundleShortVersionString', infoPlistPath],
+    { capture: true },
+  )
+  const bundleVersion = run(
+    '/usr/libexec/PlistBuddy',
+    ['-c', 'Print :CFBundleVersion', infoPlistPath],
+    { capture: true },
+  )
+
+  if (shortVersion !== expectedVersion || bundleVersion !== expectedVersion) {
+    throw new Error(
+      `macOS app bundle version mismatch: expected ${expectedVersion}, got CFBundleShortVersionString=${shortVersion || '<empty>'}, CFBundleVersion=${bundleVersion || '<empty>'}.`,
+    )
+  }
+}
+
 function defaultSharedWindowsRepoPath() {
   if (process.platform !== 'darwin') {
     return null
@@ -981,9 +1007,11 @@ function buildMacosArtifacts({ env, pnpmInvocation, tag, dryRun, builtLines, all
 
   const macosAppTarPath = join(distDir, `nostr-vpn-${tag}-macos-arm64.app.tar.gz`)
   const macosDmgPath = join(distDir, `nostr-vpn-${tag}-macos-arm64.dmg`)
+  const macosBundleDir = join(repoRoot, 'target', 'aarch64-apple-darwin', 'release', 'bundle', 'macos')
   if (!dryRun) {
     rmSync(macosAppTarPath, { force: true })
     rmSync(macosDmgPath, { force: true })
+    rmSync(macosBundleDir, { recursive: true, force: true })
   }
 
   const capabilities = detectLocalMacosReleaseCapabilities(env)
@@ -1001,13 +1029,16 @@ function buildMacosArtifacts({ env, pnpmInvocation, tag, dryRun, builtLines, all
   )
 
   const appPath = findFirstFile(
-    join(repoRoot, 'target', 'aarch64-apple-darwin', 'release', 'bundle', 'macos'),
+    macosBundleDir,
     (entry) => entry.endsWith('.app'),
   )
   if (!dryRun && !appPath) {
     throw new Error('No macOS .app bundle found in build output.')
   }
   const appPathForZip = appPath || '<macos-app-bundle>'
+  if (appPath) {
+    assertMacosAppVersion({ appPath, tag, dryRun })
+  }
 
   let signed = false
   let notarized = false
@@ -1159,7 +1190,9 @@ function stageRelease({
     assetPaths: stagedAssetPaths,
   })
 
-  writeFileSync(join(stageDir, 'release.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+  for (const [fileName, text] of buildReleaseManifestFiles(manifest)) {
+    writeFileSync(join(stageDir, fileName), text)
+  }
   writeFileSync(
     join(stageDir, 'notes.md'),
     renderReleaseNotes({

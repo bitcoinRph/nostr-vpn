@@ -340,6 +340,17 @@ export function buildReleaseManifest({ tag, commit, createdAt, assetPaths }) {
   }
 }
 
+export function buildReleaseManifestFiles(manifest) {
+  const text = `${JSON.stringify(manifest, null, 2)}\n`
+  return [
+    ['release.json', text],
+    // Legacy tauri-plugin-hashtree-updater builds used manifest.json during
+    // install even though checks read release.json. Keep both names identical
+    // so old installed apps can update into a fixed build.
+    ['manifest.json', text],
+  ]
+}
+
 export function renderReleaseNotes({
   tag,
   commit,

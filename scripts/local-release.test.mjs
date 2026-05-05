@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import {
   androidReleaseAssetName,
   autoDetectWindowsVmName,
+  buildReleaseManifestFiles,
   buildReleaseManifest,
   describeAsset,
   extractChangelogSection,
@@ -194,6 +195,18 @@ test('buildReleaseManifest records staged assets with sizes', () => {
   assert.equal(manifest.assets[0].name, 'nostr-vpn-v0.2.27-windows-x64-setup.exe')
   assert.equal(manifest.assets[1].name, 'nvpn-v0.2.27-x86_64-pc-windows-msvc.zip')
   assert.equal(manifest.assets[0].path, 'assets/nostr-vpn-v0.2.27-windows-x64-setup.exe')
+})
+
+test('buildReleaseManifestFiles writes legacy manifest alias', () => {
+  const manifest = {
+    id: 'v0.3.23',
+    assets: [{ name: 'nostr-vpn-v0.3.23-macos-arm64.app.tar.gz' }],
+  }
+
+  const files = buildReleaseManifestFiles(manifest)
+  assert.deepEqual(files.map(([name]) => name), ['release.json', 'manifest.json'])
+  assert.equal(files[0][1], files[1][1])
+  assert.deepEqual(JSON.parse(files[0][1]), manifest)
 })
 
 test('extractChangelogSection returns the matching version body', () => {
