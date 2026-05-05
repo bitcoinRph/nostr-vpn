@@ -146,6 +146,7 @@ fn spawn_node_record_publisher(args: &Args) -> Result<()> {
             let record = NodeRecord {
                 mode: NodeRecordMode::PublicService,
                 services: services.clone(),
+                data_plane: None,
                 updated_at: unix_timestamp(),
                 expires_at: unix_timestamp() + publish_interval_secs * 3,
             };
