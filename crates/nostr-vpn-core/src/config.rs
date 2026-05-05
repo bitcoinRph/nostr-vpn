@@ -1408,10 +1408,10 @@ mod tests {
     }
 
     #[test]
-    fn data_plane_defaults_keep_existing_wireguard_runtime() {
+    fn data_plane_defaults_use_fips_private_mesh_with_wireguard_exit() {
         let config = AppConfig::default();
 
-        assert_eq!(config.private_data_plane, PrivateDataPlane::WireGuard);
+        assert_eq!(config.private_data_plane, PrivateDataPlane::Fips);
         assert_eq!(config.exit_data_plane, ExitDataPlane::WireGuard);
     }
 

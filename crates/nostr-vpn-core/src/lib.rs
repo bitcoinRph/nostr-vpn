@@ -5,6 +5,7 @@ pub mod control;
 pub mod crypto;
 pub mod data_plane;
 pub mod diagnostics;
+pub mod fips_mesh;
 pub mod join_requests;
 pub mod magic_dns;
 pub mod nat;

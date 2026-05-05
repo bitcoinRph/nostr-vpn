@@ -3,14 +3,12 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const FIPS_PRIVATE_IP_PROTOCOL: &str = "nostr-vpn/ip/1";
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrivateDataPlane {
-    #[default]
     #[serde(rename = "wireguard")]
     WireGuard,
+    #[default]
     Fips,
 }
 
@@ -55,7 +53,6 @@ impl fmt::Display for ExitDataPlane {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FipsDataPlaneCapability {
-    pub protocol: String,
     pub endpoint_npub: String,
     pub network_scope: String,
     #[serde(default)]
@@ -65,7 +62,6 @@ pub struct FipsDataPlaneCapability {
 impl FipsDataPlaneCapability {
     pub fn new(endpoint_npub: impl Into<String>, network_scope: impl Into<String>) -> Self {
         Self {
-            protocol: FIPS_PRIVATE_IP_PROTOCOL.to_string(),
             endpoint_npub: endpoint_npub.into(),
             network_scope: network_scope.into(),
             bridge_ok: false,
@@ -130,29 +126,30 @@ pub fn exit_data_plane_routes_to_wireguard(exit_data_plane: ExitDataPlane) -> bo
 #[cfg(test)]
 mod tests {
     use super::{
-        DataPlaneCapability, ExitDataPlane, FIPS_PRIVATE_IP_PROTOCOL, FipsDataPlaneCapability,
-        PrivateDataPlane, exit_data_plane_routes_to_wireguard, private_data_plane_routes_to_fips,
+        DataPlaneCapability, ExitDataPlane, FipsDataPlaneCapability, PrivateDataPlane,
+        exit_data_plane_routes_to_wireguard, private_data_plane_routes_to_fips,
     };
 
     #[test]
-    fn defaults_preserve_wireguard_behavior() {
-        assert_eq!(PrivateDataPlane::default(), PrivateDataPlane::WireGuard);
+    fn defaults_use_fips_private_mesh_with_wireguard_exit() {
+        assert_eq!(PrivateDataPlane::default(), PrivateDataPlane::Fips);
         assert_eq!(ExitDataPlane::default(), ExitDataPlane::WireGuard);
-        assert!(!private_data_plane_routes_to_fips(
+        assert!(private_data_plane_routes_to_fips(
             PrivateDataPlane::default()
         ));
         assert!(exit_data_plane_routes_to_wireguard(ExitDataPlane::default()));
     }
 
     #[test]
-    fn fips_capability_uses_nostr_vpn_ip_protocol() {
+    fn fips_capability_advertises_endpoint_without_app_protocol() {
         let capability = FipsDataPlaneCapability::new("npub1example", "network-a");
-        assert_eq!(capability.protocol, FIPS_PRIVATE_IP_PROTOCOL);
         assert!(!capability.bridge_ok);
 
         let encoded = serde_json::to_value(DataPlaneCapability::Fips { fips: capability })
             .expect("capability should serialize");
         assert_eq!(encoded["data_plane"], "fips");
+        assert_eq!(encoded["fips"]["endpoint_npub"], "npub1example");
         assert_eq!(encoded["fips"]["network_scope"], "network-a");
+        assert!(encoded["fips"].get("protocol").is_none());
     }
 }

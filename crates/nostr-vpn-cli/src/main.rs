@@ -1,6 +1,8 @@
 mod config_bootstrap;
 mod daemon_runtime;
 mod diagnostics;
+#[cfg(feature = "embedded-fips")]
+mod fips_private_mesh;
 #[cfg(any(target_os = "macos", test))]
 mod macos_network;
 #[cfg(any(target_os = "macos", test))]
@@ -5892,6 +5894,10 @@ fn maybe_run_nat_punch(
     public_signal_endpoint: &mut Option<DiscoveredPublicSignalEndpoint>,
     last_attempt: &mut Option<(String, Instant)>,
 ) -> Result<()> {
+    if app.private_mesh_uses_fips() {
+        *last_attempt = None;
+        return Ok(());
+    }
     if !app.nat.enabled {
         *public_signal_endpoint = None;
         return Ok(());
@@ -6003,6 +6009,9 @@ fn heartbeat_pending_tunnel_peers(
     peer_announcements: &HashMap<String, PeerAnnouncement>,
     tunnel_runtime: &CliTunnelRuntime,
 ) -> Result<usize> {
+    if app.private_mesh_uses_fips() {
+        return Ok(0);
+    }
     let runtime_peers = tunnel_runtime.peer_status().ok();
     let targets =
         pending_tunnel_heartbeat_ips(app, own_pubkey, peer_announcements, runtime_peers.as_ref());
@@ -6231,7 +6240,9 @@ fn apply_presence_runtime_update(
 ) -> Result<()> {
     let effective_announcements =
         effective_peer_announcements_for_runtime(presence.known(), relay_sessions, now);
-    tunnel_runtime.apply(app, own_pubkey, &effective_announcements, path_book, now)?;
+    if !app.private_mesh_uses_fips() {
+        tunnel_runtime.apply(app, own_pubkey, &effective_announcements, path_book, now)?;
+    }
     if let Some(runtime) = magic_dns_runtime {
         runtime.refresh_records(app, &effective_announcements);
     }

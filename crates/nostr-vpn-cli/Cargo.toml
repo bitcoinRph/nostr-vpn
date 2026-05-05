@@ -5,11 +5,16 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = ["embedded-fips"]
+embedded-fips = ["dep:fips-endpoint"]
+
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true
 dirs.workspace = true
+fips-endpoint = { workspace = true, optional = true }
 hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

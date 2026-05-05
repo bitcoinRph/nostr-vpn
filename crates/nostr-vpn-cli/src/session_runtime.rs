@@ -51,9 +51,10 @@ pub(crate) async fn connect_session(args: ConnectArgs) -> Result<()> {
             "at least one participant must be configured before running connect"
         ));
     }
+    #[cfg(not(feature = "embedded-fips"))]
     if app.private_mesh_uses_fips() {
         return Err(anyhow!(
-            "private_data_plane=fips is parsed but the FIPS private mesh backend is not wired into the connect runtime yet"
+            "private_data_plane=fips requires building nvpn with the embedded-fips feature"
         ));
     }
 
@@ -64,7 +65,27 @@ pub(crate) async fn connect_session(args: ConnectArgs) -> Result<()> {
     let mut path_book = PeerPathBook::default();
     let mut outbound_announces = OutboundAnnounceBook::default();
     let mut relay_sessions: HashMap<String, ActiveRelaySession> = HashMap::new();
-    let mut tunnel_runtime = CliTunnelRuntime::new(args.iface);
+    let iface = args.iface.clone();
+    let mut tunnel_runtime = CliTunnelRuntime::new(iface.clone());
+    #[cfg(feature = "embedded-fips")]
+    let fips_tunnel_runtime = if app.private_mesh_uses_fips() {
+        let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+            &app,
+            &network_id,
+            iface,
+            &relays,
+            own_pubkey.as_deref(),
+        )?;
+        let runtime = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
+        println!(
+            "connect: FIPS private mesh on {}; WireGuard exit capability remains {}",
+            runtime.iface(),
+            app.exit_data_plane
+        );
+        Some(runtime)
+    } else {
+        None
+    };
     let magic_dns_runtime = ConnectMagicDnsRuntime::start(&app);
     let mut network_snapshot = capture_network_snapshot();
     let timeout = network_probe_timeout(&app);
@@ -657,6 +678,12 @@ pub(crate) async fn connect_session(args: ConnectArgs) -> Result<()> {
     }
     client.disconnect().await;
     port_mapping_runtime.stop().await;
+    #[cfg(feature = "embedded-fips")]
+    if let Some(runtime) = fips_tunnel_runtime
+        && let Err(error) = runtime.stop().await
+    {
+        eprintln!("connect: failed to stop FIPS private mesh: {error}");
+    }
     tunnel_runtime.stop();
     println!("connect: disconnected");
 
@@ -699,6 +726,12 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
     let mut relays = resolve_relays(&args.relay, &app);
     let mut own_pubkey = app.own_nostr_pubkey_hex().ok();
     let mut expected_peers = expected_peer_count(&app);
+    #[cfg(not(feature = "embedded-fips"))]
+    if app.private_mesh_uses_fips() {
+        return Err(anyhow!(
+            "private_data_plane=fips requires building nvpn with the embedded-fips feature"
+        ));
+    }
     let state_file = daemon_state_file_path(&config_path);
     let peer_cache_file = daemon_peer_cache_file_path(&config_path);
     let _ = fs::remove_file(daemon_control_file_path(&config_path));
@@ -710,7 +743,28 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
     let mut relay_failures: RelayFailureCooldowns = HashMap::new();
     let mut relay_provider_verifications: RelayProviderVerificationBook = HashMap::new();
     let mut pending_relay_requests: HashMap<String, PendingRelayRequest> = HashMap::new();
-    let mut tunnel_runtime = CliTunnelRuntime::new(args.iface);
+    let iface = args.iface.clone();
+    let mut tunnel_runtime = CliTunnelRuntime::new(iface.clone());
+    #[cfg(feature = "embedded-fips")]
+    let fips_tunnel_runtime =
+        if app.private_mesh_uses_fips() && daemon_session_active(true, expected_peers) {
+            let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+                &app,
+                &network_id,
+                iface,
+                &relays,
+                own_pubkey.as_deref(),
+            )?;
+            let runtime = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
+            eprintln!(
+                "daemon: FIPS private mesh on {}; WireGuard exit capability remains {}",
+                runtime.iface(),
+                app.exit_data_plane
+            );
+            Some(runtime)
+        } else {
+            None
+        };
     let magic_dns_runtime = ConnectMagicDnsRuntime::start(&app);
     let mut network_snapshot = capture_network_snapshot();
     let mut network_changed_at = Some(unix_timestamp());
@@ -2210,6 +2264,12 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
         "NAT assist stopped",
     );
     port_mapping_runtime.stop().await;
+    #[cfg(feature = "embedded-fips")]
+    if let Some(runtime) = fips_tunnel_runtime
+        && let Err(error) = runtime.stop().await
+    {
+        eprintln!("daemon: failed to stop FIPS private mesh: {error}");
+    }
     tunnel_runtime.stop();
     if let Err(error) = persist_daemon_network_cleanup_state(&config_path, &tunnel_runtime) {
         eprintln!("daemon: failed to clear network cleanup state: {error}");
