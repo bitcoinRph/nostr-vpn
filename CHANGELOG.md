@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.21 - 2026-05-05
+
+Changes since `0.3.20` earlier on 2026-05-05.
+
+### Fixed
+
+- SystemPanel "Updates" section now keeps the muted "Last checked …" timestamp visible after a manual check instead of replacing it with the status message. The status line ("You're up to date.", "Installed …", "Available …") sits above it.
+- "You're up to date." and error messages auto-clear back to idle after ~4 s — they were lingering forever, even though they aren't actionable. Available / installing / installed states still stay (those need user follow-up).
+- Linux Docker release step now actually runs: forces `linux/amd64` platform (previously it inherited Apple Silicon's `linux/arm64` and would have produced mis-named aarch64 artifacts), passes `CI=true` so pnpm purges the host's macOS `node_modules` non-interactively, and snapshots the source into `/build` inside the container so the host's `node_modules` and `target/` aren't trashed cross-platform. Configurable via `NVPN_LINUX_DOCKER_PLATFORM` for hosts that prefer native arm64.
+
 ## 0.3.20 - 2026-05-05
 
 Changes since `0.3.19` on 2026-05-04.

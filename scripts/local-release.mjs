@@ -697,16 +697,18 @@ Copy-Item $installer.FullName ${psQuote(`${distPath}\\${installerName}`)} -Force
   }
 }
 
-function buildLinuxArtifacts({ tag, dryRun, builtLines }) {
+function buildLinuxArtifacts({ env, tag, dryRun, builtLines }) {
   if (!commandExists('docker')) {
     throw new SkipStepError('Skipping Linux artifacts because docker is not on PATH.')
   }
 
+  const platform = env.NVPN_LINUX_DOCKER_PLATFORM || 'linux/amd64'
   const imageName = 'nostr-vpn-linux-release'
-  run('docker', ['build', '-f', 'Dockerfile.linux-release', '-t', imageName, '.'], {
-    cwd: repoRoot,
-    dryRun,
-  })
+  run(
+    'docker',
+    ['build', '--platform', platform, '-f', 'Dockerfile.linux-release', '-t', imageName, '.'],
+    { cwd: repoRoot, dryRun },
+  )
 
   const linuxAppImageName = `nostr-vpn-${tag}-linux-x64.AppImage`
   const linuxDebName = `nostr-vpn-${tag}-linux-x64.deb`
@@ -718,25 +720,37 @@ function buildLinuxArtifacts({ tag, dryRun, builtLines }) {
     rmSync(join(distDir, linuxCliTarball), { force: true })
   }
 
-  // Single-shot build inside the container: pnpm install (only the GUI pkg
-  // it actually needs), tauri AppImage + deb bundle, musl CLI tarball, and
-  // copy the renamed artifacts straight into /work/dist.
+  // The repo's node_modules and target/ are populated for the host platform
+  // (macOS aarch64 in dev). Sharing those into the Linux container would
+  // make pnpm purge the wrong-arch modules and cargo invalidate the Mac
+  // build cache. Snapshot the source into /build inside the container,
+  // run the build there, and only copy the artifacts back into /work/dist
+  // (the bind-mounted host repo).
   const innerScript = [
     'set -euo pipefail',
+    'rsync -a --exclude node_modules --exclude target --exclude dist --exclude .git /work/ /build/',
+    'cd /build',
     'pnpm --dir crates/nostr-vpn-gui install --frozen-lockfile',
     'pnpm --dir crates/nostr-vpn-gui exec tauri build --bundles appimage,deb --ci',
-    'mkdir -p dist',
-    `cp "$(ls -1t target/release/bundle/appimage/*.AppImage | head -1)" "dist/${linuxAppImageName}"`,
-    `cp "$(ls -1t target/release/bundle/deb/*.deb | head -1)" "dist/${linuxDebName}"`,
+    `cp "$(ls -1t target/release/bundle/appimage/*.AppImage | head -1)" "/work/dist/${linuxAppImageName}"`,
+    `cp "$(ls -1t target/release/bundle/deb/*.deb | head -1)" "/work/dist/${linuxDebName}"`,
     'cargo build --release --target x86_64-unknown-linux-musl -p nostr-vpn-cli',
-    `tar -czf "dist/${linuxCliTarball}" -C target/x86_64-unknown-linux-musl/release nvpn`,
+    `tar -czf "/work/dist/${linuxCliTarball}" -C target/x86_64-unknown-linux-musl/release nvpn`,
   ].join(' && ')
+
+  if (!dryRun) {
+    mkdirSync(distDir, { recursive: true })
+  }
 
   run(
     'docker',
     [
       'run',
       '--rm',
+      '--platform',
+      platform,
+      '-e',
+      'CI=true',
       '-v',
       `${repoRoot}:/work`,
       '-w',
@@ -749,7 +763,7 @@ function buildLinuxArtifacts({ tag, dryRun, builtLines }) {
     { dryRun },
   )
 
-  builtLines.push('Built Linux x64 AppImage, deb, and musl CLI in Docker.')
+  builtLines.push(`Built Linux x64 AppImage, deb, and musl CLI in Docker (${platform}).`)
 }
 
 function ensureAndroidSdkEnv(env) {
@@ -1183,7 +1197,7 @@ function main() {
       allowUnsignedMacos,
     })],
     ['android', () => buildAndroidArtifacts({ env, pnpmInvocation, tag, dryRun: options.dryRun, builtLines })],
-    ['linux', () => buildLinuxArtifacts({ tag, dryRun: options.dryRun, builtLines })],
+    ['linux', () => buildLinuxArtifacts({ env, tag, dryRun: options.dryRun, builtLines })],
     ['windows', () => buildWindowsArtifacts({ env, tag, dryRun: options.dryRun, builtLines })],
   ]
 

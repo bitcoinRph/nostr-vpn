@@ -17,7 +17,10 @@ RUN apt-get update \
       npm \
       patchelf \
       pkg-config \
+      rsync \
     && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /build
 
 RUN npm install -g pnpm@10
 RUN rustup target add x86_64-unknown-linux-musl

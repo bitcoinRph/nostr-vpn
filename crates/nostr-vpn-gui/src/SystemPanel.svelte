@@ -47,6 +47,18 @@
     updaterPrefs = patchPrefs(patch)
   }
 
+  let transientClearTimer: ReturnType<typeof setTimeout> | null = null
+
+  function scheduleTransientClear() {
+    if (transientClearTimer) clearTimeout(transientClearTimer)
+    transientClearTimer = setTimeout(() => {
+      transientClearTimer = null
+      if (updateStatus.kind === 'upToDate' || updateStatus.kind === 'error') {
+        updateStatus = { kind: 'idle' }
+      }
+    }, 4000)
+  }
+
   async function manualCheck() {
     updateStatus = { kind: 'checking' }
     try {
@@ -56,12 +68,14 @@
         updateStatus = { kind: 'available', update }
       } else {
         updateStatus = { kind: 'upToDate' }
+        scheduleTransientClear()
       }
     } catch (err) {
       updateStatus = {
         kind: 'error',
         message: err instanceof Error ? err.message : String(err),
       }
+      scheduleTransientClear()
     }
   }
 
@@ -183,11 +197,10 @@
           <div class="update-status ok-text">Installed {updateStatus.version}. Restart Nostr VPN to apply.</div>
         {:else if updateStatus.kind === 'error'}
           <div class="update-status update-status-error">{updateStatus.message}</div>
-        {:else}
+        {/if}
+        {#if updaterPrefs.lastCheckMs > 0}
           <div class="config-path last-checked-line">
-            {updaterPrefs.lastCheckMs > 0
-              ? `Last checked ${new Date(updaterPrefs.lastCheckMs).toLocaleString()}`
-              : ''}
+            Last checked {new Date(updaterPrefs.lastCheckMs).toLocaleString()}
           </div>
         {/if}
       </div>
