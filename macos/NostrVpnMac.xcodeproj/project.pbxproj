@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4A5B4BA06B77EF141FC4111E /* StatusMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E9B97970F7B2C02CFF63D54 /* StatusMenuView.swift */; };
 		4D7D864A20FB82CA270FF92B /* NostrVpnAppCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD28FC1F1336837C61955C1 /* NostrVpnAppCore.swift */; };
 		5A0C2B850E75C11412CE8833 /* AppManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B8ACCA4B0D1E131227B6DB /* AppManager.swift */; };
 		A6FE74EA26F6B11DB0807665 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB5956B2DC39CF6AF9008CA2 /* RootView.swift */; };
@@ -18,6 +19,7 @@
 
 /* Begin PBXFileReference section */
 		15E39397BF43B7A318613026 /* NostrVpnAppCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = NostrVpnAppCore.xcframework; path = Frameworks/NostrVpnAppCore.xcframework; sourceTree = "<group>"; };
+		1E9B97970F7B2C02CFF63D54 /* StatusMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusMenuView.swift; sourceTree = "<group>"; };
 		3F1160699FA7E0B240102124 /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		93B8ACCA4B0D1E131227B6DB /* AppManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppManager.swift; sourceTree = "<group>"; };
 		A17940199A911308E9E99BAB /* nvpn */ = {isa = PBXFileReference; path = nvpn; sourceTree = "<group>"; };
@@ -62,6 +64,7 @@
 				93B8ACCA4B0D1E131227B6DB /* AppManager.swift */,
 				D52F97412C0CE07E04C2D8E1 /* NostrVpnMacApp.swift */,
 				CB5956B2DC39CF6AF9008CA2 /* RootView.swift */,
+				1E9B97970F7B2C02CFF63D54 /* StatusMenuView.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -177,6 +180,7 @@
 				4D7D864A20FB82CA270FF92B /* NostrVpnAppCore.swift in Sources */,
 				BB8824C1B11E41396D5245D7 /* NostrVpnMacApp.swift in Sources */,
 				A6FE74EA26F6B11DB0807665 /* RootView.swift in Sources */,
+				4A5B4BA06B77EF141FC4111E /* StatusMenuView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

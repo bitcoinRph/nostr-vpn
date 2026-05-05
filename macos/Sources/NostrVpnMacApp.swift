@@ -5,9 +5,10 @@ import SwiftUI
 struct NostrVpnMacApp: App {
     @StateObject private var manager = AppManager()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Nostr VPN", id: "main") {
             RootView(manager: manager)
                 .frame(minWidth: 880, minHeight: 620)
                 .onAppear {
@@ -24,5 +25,12 @@ struct NostrVpnMacApp: App {
         }
         .defaultSize(width: 1100, height: 760)
         .windowResizability(.automatic)
+
+        MenuBarExtra("Nostr VPN", systemImage: manager.state.sessionActive ? "network" : "network.slash") {
+            StatusMenuView(manager: manager) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
     }
 }

@@ -141,50 +141,50 @@ Status legend:
 
 | Feature group | Current Tauri source | macOS status | Native macOS coverage | Remaining parity work |
 | --- | --- | --- | --- | --- |
-| Typed Rust core boundary | `nostr-vpn-app-core`, Tauri commands | Ready | `FfiApp.state()`, `refresh()`, and typed `NativeAppAction` dispatch are used directly from Swift through UniFFI. | Keep action/state additions typed; avoid reintroducing JSON bridge helpers. |
-| Initial state load | `get_state`, `AppBootstrap.svelte` | Partial | `AppManager` constructs `FfiApp` and reads initial state synchronously. | Add boot-ready automation event equivalent and startup deep-link drain. |
+| Typed Rust core boundary | `nostr-vpn-app-core`, Tauri commands | Ready | `FfiApp.state()`, `refresh()`, and typed `NativeAppAction` dispatch are used directly from Swift through UniFFI. Native state now projects service, diagnostics, routing, relays, MagicDNS, join requests, and participant details. | Keep action/state additions typed; avoid reintroducing JSON bridge helpers. |
+| Initial state load | `get_state`, `AppBootstrap.svelte` | Ready | `AppManager` constructs `FfiApp`, reads initial state synchronously, and starts the refresh loop on window appearance. | Add boot-ready automation event only if native e2e harness needs it. |
 | Periodic refresh | `tick` interval | Ready | `AppManager.start()` refreshes every 1500ms. | Later replace polling with a core update stream if added. |
-| Action lock/error recovery | `runAction`, action flags | Partial | Errors from `FfiApp.dispatch` are projected into `state.error` and rendered. | Add shell-side action-in-flight locking/progress so connect/settings/import actions cannot overlap. |
-| Main status hero | `HeroStatusPanel.svelte` | Partial | Shows connected/disconnected, session status, mesh/peer/relay/tunnel metrics, and connect button. | Add active network title/admin badge, daemon/VPN/FIPS badges, privacy disclosure, and shared hero subtext/detail parity. |
-| VPN connect/disconnect | `connect_session`, `disconnect_session` | Ready | Connect/disconnect dispatches typed native actions; Rust runs elevated `nvpn` on macOS. | Add service setup guidance before first connect. |
-| Privacy disclosure | `shouldShowVpnDataDisclosure` | Missing | None. | Add native disclosure using shared policy text/state. |
-| Own npub display/copy | `HeroStatusPanel.svelte` | Missing | `NativeAppState` exposes `ownNpub`, but UI does not render it. | Add compact identity row and copy feedback. |
-| Active network summary | `ActiveNetworkPanel.svelte` | Partial | Shows name, mesh ID, local admin state, invite code, and mesh ID copy. | Add name edit, mesh ID edit/validation, admin summary, join request toggle/list, and non-admin disabled states. |
-| Mesh ID editing | `mesh-id.js`, `set_network_mesh_id` | Missing | Mesh ID is read-only in SwiftUI. | Move validation/canonicalization into Rust and add idle/blur/Enter commit behavior. |
-| Invite generation/copy | `InviteShareSection.svelte` | Partial | Invite string comes from Rust and can be copied. | Add copy feedback, share sheet, QR render, and QR/paste import panel. |
-| Invite deep-link import | `nvpn://invite/...` handler | Partial | `WindowGroup.onOpenURL` imports invite URLs while app is running. | Handle startup URLs, add parsed confirmation, cancel-to-fill behavior, and auto-connect after import. |
-| Invite paste/import | `InviteImportPanel.svelte` | Missing | None. | Add paste field, import target confirmation, error states, and session auto-start behavior. |
-| Invite QR generation | `qrcode` | Missing | None. | Add native or Rust-generated QR that exactly encodes `activeNetworkInvite`. |
-| Invite QR scan | `jsQR`, camera/image input | Missing | None. | Add AVFoundation live scan and image picker decode path. |
-| Participant list | `ActiveNetworkPanel.svelte` | Partial | Shows participants, reachability icon, status text, npub, and npub copy. | Add status badge parity, traffic/path details, admin toggles, alias editing, and remove action. |
-| Manual add participant | `add_participant` | Ready | Admin can type an npub and dispatch add-participant action. | Add optional alias field and admin gating in UI. |
-| Participant alias editing | `set_participant_alias` | Missing | Rust action exists; UI does not expose it. | Add debounced alias edit and MagicDNS name display. |
-| Participant admin/remove actions | `add_admin`, `remove_admin`, `remove_participant` | Missing | Rust actions exist; UI does not expose them. | Add admin toggle and remove icon with local-admin gating. |
-| Participant traffic/path details | Participant runtime fields | Missing | Native state currently exposes only a reduced participant projection. | Expand `NativeParticipantState` or share current `ParticipantView` equivalent. |
-| LAN pairing | `start_lan_pairing`, `stop_lan_pairing`, `lanPeers` | Missing | Rust actions are placeholders in `FfiApp`; UI does not expose pairing. | Move pairing runtime into app-core, add countdown and nearby peer join list. |
-| Saved networks list | `SavedNetworksPanel.svelte` | Partial | Sidebar lists networks and can add a network. | Add activate, rename, delete, edit mesh ID, invite/import status, join requests, and inactive participant management. |
-| Activate saved network | `set_network_enabled` | Missing | Network rows are not selectable/actionable. | Add selection/activation behavior and daemon reload handling. |
-| Delete saved network | `remove_network` | Missing | Rust action exists; UI does not expose it. | Add native delete confirmation and core rule for last network behavior. |
-| Routing summary | `RoutingPanel.svelte` | Missing | No routing panel. | Add direct mesh/remote exit/local exit summary. |
-| Advertise exit node | `advertiseExitNode` | Ready | `Offer exit` toggle dispatches settings patch. | Add route visibility and disabled/explanatory states from routing panel. |
-| Advertised routes editing | `advertisedRoutes` | Missing | Settings patch helper supports it; UI does not expose it. | Add CIDR editor and core validation errors. |
-| Exit node search/select | `exitNode` | Missing | Settings patch helper supports it; UI does not expose it. | Add searchable candidate list and no-exit selection. |
-| Diagnostics panel | `AdvancedPanels.svelte` | Missing | No native health/network/port-mapping panel. | Add health issue list, network summary, port mapping state, and auto-open behavior. |
-| Relay list/status | Relay panel | Ready | Shows relay URLs, status text, add, and remove. | Add explicit at-least-one-relay disabled/error state and status badge parity. |
-| Session options | `autoconnect` | Ready | `Autoconnect` toggle dispatches settings patch. | Add launch/startup and close-to-tray settings when platform effects exist. |
-| Device settings | `SystemPanel.svelte` | Partial | Name, endpoint, tunnel IP, and listen port are editable and saved. | Add validation feedback, MagicDNS status/suffix, app version, config path, CLI install, and updater controls. |
-| MagicDNS | `magicDnsStatus`, `magicDnsSuffix` | Missing | Settings patch helper supports suffix; UI does not expose status or suffix. | Add status and suffix editor. |
-| Background service panel | `ServiceActionPanel.svelte` | Missing | Rust actions exist for install/uninstall/enable/disable service; UI does not expose them. | Add service status projection, repair prompt, elevated action progress, and settlement polling. |
-| CLI install/uninstall | `install_cli`, `uninstall_cli` | Missing | Rust actions exist; UI does not expose them. | Add CLI install status and elevated install/uninstall buttons. |
-| Launch on startup | Autostart plugin | Missing | Settings patch helper supports it; no native LaunchAgent effect/UI. | Add launch agent registration and settings toggle. |
-| Close to tray/status item | Tray runtime | Missing | No status item/menu behavior. | Add menu bar item with VPN toggle, this-device copy, network devices, exit nodes, settings, quit. |
+| Action lock/error recovery | `runAction`, action flags | Ready | `AppManager` serializes typed actions, shows in-flight status, and projects core errors into the shell. | Add per-control progress text if native e2e tests require it. |
+| Main status hero | `HeroStatusPanel.svelte` | Ready | Shows active network title, admin badge, mesh state, daemon/VPN/FIPS badges, peer/tunnel/exit metrics, disclosure, identity, and VPN toggle. | Tune copy if product policy text changes. |
+| VPN connect/disconnect | `connect_session`, `disconnect_session` | Ready | Connect/disconnect dispatches typed native actions; Rust runs elevated `nvpn` on macOS. | Add service-repair retry heuristics from Tauri when daemon version mismatch is detected. |
+| Privacy disclosure | `shouldShowVpnDataDisclosure` | Ready | Native hero renders the VPN data disclosure when VPN control/mobile-like policy applies. | Move exact policy text into core if reused by more shells. |
+| Own npub display/copy | `HeroStatusPanel.svelte` | Ready | Native hero renders `ownNpub`, supports selection, and gives transient copy feedback. | None. |
+| Active network summary | `ActiveNetworkPanel.svelte` | Ready | Native active-network panel supports name edit, mesh ID edit/copy, admin summary, join-request toggle/list, invite, and admin-gated controls. | Add parsed invite confirmation parity. |
+| Mesh ID editing | `mesh-id.js`, `set_network_mesh_id` | Ready | Mesh ID edits dispatch typed Rust action; Rust normalizes/canonicalizes and reports errors. | Add blur/Enter auto-commit if preferred over explicit save icon. |
+| Invite generation/copy | `InviteShareSection.svelte` | Ready | Invite comes from Rust, can be copied/shared, and renders a native CoreImage QR. | None. |
+| Invite deep-link import | `nvpn://invite/...` handler | Partial | `WindowGroup.onOpenURL` imports invite URLs and debug tick links while app is running. | Add startup URL drain, parsed confirmation, cancel-to-fill behavior, and auto-connect after import. |
+| Invite paste/import | `InviteImportPanel.svelte` | Ready | Native invite field imports pasted/typed `nvpn://invite/...` values through typed core action. | Add parsed target confirmation before import. |
+| Invite QR generation | `qrcode` | Ready | Native CoreImage QR exactly encodes `activeNetworkInvite`. | None. |
+| Invite QR scan | `jsQR`, camera/image input | Partial | Native image picker decodes QR images and imports the invite. | Add live AVFoundation camera scan. |
+| Participant list | `ActiveNetworkPanel.svelte` | Ready | Shows participants, reachability, transport/presence badges, npub copy, alias, MagicDNS, traffic, routes, admin, exit-node, and remove controls. | None. |
+| Manual add participant | `add_participant` | Ready | Admin can add participant npub with optional alias. | None. |
+| Participant alias editing | `set_participant_alias` | Ready | Alias edits dispatch typed Rust action and show MagicDNS suffix/name. | Add debounce if explicit save feels too heavy. |
+| Participant admin/remove actions | `add_admin`, `remove_admin`, `remove_participant` | Ready | Admin toggle and remove icon dispatch typed core actions with local-admin gating. | Add destructive confirmation if needed. |
+| Participant traffic/path details | Participant runtime fields | Ready | `NativeParticipantState` now mirrors traffic, routes, exit-node capability, tunnel IP, transport, presence, and last-signal details. | None. |
+| LAN pairing | `start_lan_pairing`, `stop_lan_pairing`, `lanPeers` | Partial | Native UI exposes LAN pair start/stop and nearby-peer rows in the typed state. | Move LAN pairing runtime from Tauri into app-core; current Rust actions still return the not-wired error. |
+| Saved networks list | `SavedNetworksPanel.svelte` | Ready | Sidebar and saved-networks disclosure support add, activate, rename, delete, mesh edit, participant preview, and participant removal. | Add inactive invite/import and join-request detail expansion if needed. |
+| Activate saved network | `set_network_enabled` | Ready | Inactive network rows dispatch typed activation and daemon reload handling from Rust. | None. |
+| Delete saved network | `remove_network` | Ready | Native saved-network delete dispatches typed core removal and core preserves the last-network rule. | Add confirmation if needed. |
+| Routing summary | `RoutingPanel.svelte` | Ready | Native routing section shows direct/exit mode, advertised route editing, offer-exit toggle, and exit candidates. | Add richer route helper text from core if desired. |
+| Advertise exit node | `advertiseExitNode` | Ready | Toggle dispatches typed settings patch from routing and menu bar surfaces. | None. |
+| Advertised routes editing | `advertisedRoutes` | Ready | CIDR string editor dispatches typed settings patch; Rust normalizes and validates routes. | Inline validation helper text can be added later. |
+| Exit node search/select | `exitNode` | Ready | Searchable native candidate list supports no-exit selection and offered-exit peers. | None. |
+| Diagnostics panel | `AdvancedPanels.svelte` | Ready | Native diagnostics disclosure renders health issues, interface/IP/gateway, captive portal, and port-mapping state; opens when health count increases. | None. |
+| Relay list/status | Relay panel | Ready | Shows relay URLs, status text, summary badges, add, remove, and disables removal of the last relay. | None. |
+| Session options | `autoconnect` | Ready | Native system panel includes autoconnect, launch-on-startup, and menu-bar-on-close settings toggles. | Add native LaunchAgent effect for startup toggle. |
+| Device settings | `SystemPanel.svelte` | Ready | Native system panel includes name, endpoint, tunnel IP, listen port, MagicDNS suffix/status, app/config/version fields, CLI controls, and service controls. | Add updater controls. |
+| MagicDNS | `magicDnsStatus`, `magicDnsSuffix` | Ready | Native state projects MagicDNS status/name/suffix; UI exposes suffix editor and participant DNS labels. | None. |
+| Background service panel | `ServiceActionPanel.svelte` | Partial | Native state queries `nvpn service status --json`; UI supports install/reinstall/enable/disable/uninstall with elevated actions and status details. | Add Tauri's stale-service repair recommendation and settlement polling. |
+| CLI install/uninstall | `install_cli`, `uninstall_cli` | Ready | Native UI shows CLI status and runs elevated install/reinstall/uninstall actions. | None. |
+| Launch on startup | Autostart plugin | Partial | Native UI persists the setting through typed core state. | Implement real macOS LaunchAgent/SMAppService registration and hidden launch argument. |
+| Close to tray/status item | Tray runtime | Partial | Native `MenuBarExtra` supports open, VPN toggle, exit toggle, copy this device, network devices, exit-node selection, refresh, and quit. | Enforce close-to-menu-bar window behavior when the setting is enabled. |
 | Autostart hidden launch | `--autostart` | Missing | No launch-mode handling. | Add hidden launch path and single-instance conflict handling. |
 | Single-instance handling | Tauri plugin | Missing | No native singleton coordination. | Route new opens/deep links into existing app instance. |
-| Debug automation deep links | `nvpn://debug/...` | Missing | Only invite URLs are handled. | Add test-only parser/actions for tick, request join, and accept join. |
+| Debug automation deep links | `nvpn://debug/...` | Partial | Native handler supports `nvpn://debug/tick`. | Add request-join and accept-join debug links. |
 | Hashtree updater | `UpdateBanner.svelte`, updater panel | Missing | No updater UI/effects. | Port update check/download/install and desktop update prefs. |
-| Responsive/adaptive layout | Svelte CSS | Partial | Native split-view desktop layout works at default size. | Add compact window behavior, accessibility pass, empty states, and screenshot coverage. |
-| Copy feedback | `copiedValue` timeout | Missing | Clipboard writes happen silently. | Add transient copied indicator/toast/checkmark. |
-| Collapsible panels | `<details>` state | Missing | Native shell has a flat scroll layout. | Add disclosure groups where density needs it, especially diagnostics/system. |
+| Responsive/adaptive layout | Svelte CSS | Ready | Native split-view desktop layout builds and was checked with an app-window screenshot at 1100x760. | Add compact-window and accessibility passes. |
+| Copy feedback | `copiedValue` timeout | Ready | Clipboard writes show transient checkmark feedback for identity, mesh, invite, and peer npub copy buttons. | None. |
+| Collapsible panels | `<details>` state | Ready | Native saved networks, diagnostics, and system sections use disclosure groups; diagnostics opens when health issues increase. | Persist expanded state if users want it. |
 | Mock/demo fixtures | `mock-backend.ts` | Missing | No SwiftUI previews/fixtures. | Add fixture snapshots from Rust state for previews and screenshot tests. |
 | Public relay fallback UI | Removed relay fallback/public services code | Removed | Removed upstream in `origin/master`; native shell also omits those fields and controls. | No parity work unless product reintroduces a public-service feature. |
 
@@ -193,7 +193,7 @@ Status legend:
 | Phase | Deliverable | Exit criteria |
 | --- | --- | --- |
 | 0. Contract extraction | Move Tauri backend state, settings patches, action handlers, derived labels, invite parsing, mesh ID validation, and tray projections into a native-ready Rust app core | Current Tauri command tests pass against the extracted core API. `crates/nostr-vpn-app-core` now exposes typed UniFFI state/actions and the macOS shell consumes `FfiApp` directly; more Tauri-derived runtime behavior still needs to move out of the Tauri crate. |
-| 1. Desktop minimum | macOS, Windows, and Linux render the main status, active network, invite import/share, participant management, routing, diagnostics, relays, service panel, system settings, deep links, and tray/menu actions | Desktop smoke tests can import invites, request/accept join, toggle VPN, and exercise tray actions. macOS has the first native shell, but remains partial per the macOS status table above. |
+| 1. Desktop minimum | macOS, Windows, and Linux render the main status, active network, invite import/share, participant management, routing, diagnostics, relays, service panel, system settings, deep links, and tray/menu actions | Desktop smoke tests can import invites, request/accept join, toggle VPN, and exercise tray actions. macOS now covers the main shell surface; remaining partial rows are live QR scan, LAN pairing runtime, startup/single-instance behavior, service repair heuristics, and updater. |
 | 2. Mobile minimum | Android and iPhone render the same state/action surface with native VPN permission/session control, invite QR scan/share, LAN pairing, saved networks, routing, diagnostics, relays, and deep links | Android emulator/device and iPhone simulator/device smoke tests can import invites and start supported VPN flows |
 | 3. Desktop niceties | Hashtree updater, CLI install/uninstall, startup registration, close-to-tray, service repair prompts, single-instance conflict handling | Current Tauri desktop e2e scenarios have native replacements |
 | 4. Polish/parity hardening | Platform screenshots, accessibility pass, empty/error states, fixture preview coverage | All rows above are either implemented or explicitly marked removed/deferred in this file |

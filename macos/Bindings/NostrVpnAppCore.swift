@@ -673,15 +673,24 @@ public struct NativeAppState {
     public var appVersion: String
     public var configPath: String
     public var error: String
+    public var cliInstalled: Bool
+    public var serviceSupported: Bool
+    public var serviceEnablementSupported: Bool
+    public var serviceInstalled: Bool
+    public var serviceDisabled: Bool
+    public var serviceRunning: Bool
+    public var serviceStatusDetail: String
     public var daemonRunning: Bool
     public var sessionActive: Bool
     public var relayConnected: Bool
     public var sessionStatus: String
     public var daemonBinaryVersion: String
+    public var serviceBinaryVersion: String
     public var ownNpub: String
     public var ownPubkeyHex: String
     public var nodeId: String
     public var nodeName: String
+    public var selfMagicDnsName: String
     public var endpoint: String
     public var tunnelIp: String
     public var listenPort: UInt32
@@ -692,18 +701,26 @@ public struct NativeAppState {
     public var advertisedRoutes: [String]
     public var effectiveAdvertisedRoutes: [String]
     public var magicDnsSuffix: String
+    public var magicDnsStatus: String
     public var autoconnect: Bool
+    public var lanPairingActive: Bool
+    public var lanPairingRemainingSecs: UInt64
     public var launchOnStartup: Bool
     public var closeToTrayOnClose: Bool
     public var connectedPeerCount: UInt64
     public var expectedPeerCount: UInt64
     public var meshReady: Bool
+    public var health: [NativeHealthIssue]
+    public var network: NativeNetworkSummary
+    public var portMapping: NativePortMappingStatus
     public var networks: [NativeNetworkState]
     public var relays: [NativeRelayState]
+    public var relaySummary: NativeRelaySummary
+    public var lanPeers: [NativeLanPeerState]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(rev: UInt64, platform: String, mobile: Bool, vpnSessionControlSupported: Bool, cliInstallSupported: Bool, startupSettingsSupported: Bool, trayBehaviorSupported: Bool, runtimeStatusDetail: String, appVersion: String, configPath: String, error: String, daemonRunning: Bool, sessionActive: Bool, relayConnected: Bool, sessionStatus: String, daemonBinaryVersion: String, ownNpub: String, ownPubkeyHex: String, nodeId: String, nodeName: String, endpoint: String, tunnelIp: String, listenPort: UInt32, networkId: String, activeNetworkInvite: String, exitNode: String, advertiseExitNode: Bool, advertisedRoutes: [String], effectiveAdvertisedRoutes: [String], magicDnsSuffix: String, autoconnect: Bool, launchOnStartup: Bool, closeToTrayOnClose: Bool, connectedPeerCount: UInt64, expectedPeerCount: UInt64, meshReady: Bool, networks: [NativeNetworkState], relays: [NativeRelayState]) {
+    public init(rev: UInt64, platform: String, mobile: Bool, vpnSessionControlSupported: Bool, cliInstallSupported: Bool, startupSettingsSupported: Bool, trayBehaviorSupported: Bool, runtimeStatusDetail: String, appVersion: String, configPath: String, error: String, cliInstalled: Bool, serviceSupported: Bool, serviceEnablementSupported: Bool, serviceInstalled: Bool, serviceDisabled: Bool, serviceRunning: Bool, serviceStatusDetail: String, daemonRunning: Bool, sessionActive: Bool, relayConnected: Bool, sessionStatus: String, daemonBinaryVersion: String, serviceBinaryVersion: String, ownNpub: String, ownPubkeyHex: String, nodeId: String, nodeName: String, selfMagicDnsName: String, endpoint: String, tunnelIp: String, listenPort: UInt32, networkId: String, activeNetworkInvite: String, exitNode: String, advertiseExitNode: Bool, advertisedRoutes: [String], effectiveAdvertisedRoutes: [String], magicDnsSuffix: String, magicDnsStatus: String, autoconnect: Bool, lanPairingActive: Bool, lanPairingRemainingSecs: UInt64, launchOnStartup: Bool, closeToTrayOnClose: Bool, connectedPeerCount: UInt64, expectedPeerCount: UInt64, meshReady: Bool, health: [NativeHealthIssue], network: NativeNetworkSummary, portMapping: NativePortMappingStatus, networks: [NativeNetworkState], relays: [NativeRelayState], relaySummary: NativeRelaySummary, lanPeers: [NativeLanPeerState]) {
         self.rev = rev
         self.platform = platform
         self.mobile = mobile
@@ -715,15 +732,24 @@ public struct NativeAppState {
         self.appVersion = appVersion
         self.configPath = configPath
         self.error = error
+        self.cliInstalled = cliInstalled
+        self.serviceSupported = serviceSupported
+        self.serviceEnablementSupported = serviceEnablementSupported
+        self.serviceInstalled = serviceInstalled
+        self.serviceDisabled = serviceDisabled
+        self.serviceRunning = serviceRunning
+        self.serviceStatusDetail = serviceStatusDetail
         self.daemonRunning = daemonRunning
         self.sessionActive = sessionActive
         self.relayConnected = relayConnected
         self.sessionStatus = sessionStatus
         self.daemonBinaryVersion = daemonBinaryVersion
+        self.serviceBinaryVersion = serviceBinaryVersion
         self.ownNpub = ownNpub
         self.ownPubkeyHex = ownPubkeyHex
         self.nodeId = nodeId
         self.nodeName = nodeName
+        self.selfMagicDnsName = selfMagicDnsName
         self.endpoint = endpoint
         self.tunnelIp = tunnelIp
         self.listenPort = listenPort
@@ -734,14 +760,22 @@ public struct NativeAppState {
         self.advertisedRoutes = advertisedRoutes
         self.effectiveAdvertisedRoutes = effectiveAdvertisedRoutes
         self.magicDnsSuffix = magicDnsSuffix
+        self.magicDnsStatus = magicDnsStatus
         self.autoconnect = autoconnect
+        self.lanPairingActive = lanPairingActive
+        self.lanPairingRemainingSecs = lanPairingRemainingSecs
         self.launchOnStartup = launchOnStartup
         self.closeToTrayOnClose = closeToTrayOnClose
         self.connectedPeerCount = connectedPeerCount
         self.expectedPeerCount = expectedPeerCount
         self.meshReady = meshReady
+        self.health = health
+        self.network = network
+        self.portMapping = portMapping
         self.networks = networks
         self.relays = relays
+        self.relaySummary = relaySummary
+        self.lanPeers = lanPeers
     }
 }
 
@@ -785,6 +819,27 @@ extension NativeAppState: Equatable, Hashable {
         if lhs.error != rhs.error {
             return false
         }
+        if lhs.cliInstalled != rhs.cliInstalled {
+            return false
+        }
+        if lhs.serviceSupported != rhs.serviceSupported {
+            return false
+        }
+        if lhs.serviceEnablementSupported != rhs.serviceEnablementSupported {
+            return false
+        }
+        if lhs.serviceInstalled != rhs.serviceInstalled {
+            return false
+        }
+        if lhs.serviceDisabled != rhs.serviceDisabled {
+            return false
+        }
+        if lhs.serviceRunning != rhs.serviceRunning {
+            return false
+        }
+        if lhs.serviceStatusDetail != rhs.serviceStatusDetail {
+            return false
+        }
         if lhs.daemonRunning != rhs.daemonRunning {
             return false
         }
@@ -800,6 +855,9 @@ extension NativeAppState: Equatable, Hashable {
         if lhs.daemonBinaryVersion != rhs.daemonBinaryVersion {
             return false
         }
+        if lhs.serviceBinaryVersion != rhs.serviceBinaryVersion {
+            return false
+        }
         if lhs.ownNpub != rhs.ownNpub {
             return false
         }
@@ -810,6 +868,9 @@ extension NativeAppState: Equatable, Hashable {
             return false
         }
         if lhs.nodeName != rhs.nodeName {
+            return false
+        }
+        if lhs.selfMagicDnsName != rhs.selfMagicDnsName {
             return false
         }
         if lhs.endpoint != rhs.endpoint {
@@ -842,7 +903,16 @@ extension NativeAppState: Equatable, Hashable {
         if lhs.magicDnsSuffix != rhs.magicDnsSuffix {
             return false
         }
+        if lhs.magicDnsStatus != rhs.magicDnsStatus {
+            return false
+        }
         if lhs.autoconnect != rhs.autoconnect {
+            return false
+        }
+        if lhs.lanPairingActive != rhs.lanPairingActive {
+            return false
+        }
+        if lhs.lanPairingRemainingSecs != rhs.lanPairingRemainingSecs {
             return false
         }
         if lhs.launchOnStartup != rhs.launchOnStartup {
@@ -860,10 +930,25 @@ extension NativeAppState: Equatable, Hashable {
         if lhs.meshReady != rhs.meshReady {
             return false
         }
+        if lhs.health != rhs.health {
+            return false
+        }
+        if lhs.network != rhs.network {
+            return false
+        }
+        if lhs.portMapping != rhs.portMapping {
+            return false
+        }
         if lhs.networks != rhs.networks {
             return false
         }
         if lhs.relays != rhs.relays {
+            return false
+        }
+        if lhs.relaySummary != rhs.relaySummary {
+            return false
+        }
+        if lhs.lanPeers != rhs.lanPeers {
             return false
         }
         return true
@@ -881,15 +966,24 @@ extension NativeAppState: Equatable, Hashable {
         hasher.combine(appVersion)
         hasher.combine(configPath)
         hasher.combine(error)
+        hasher.combine(cliInstalled)
+        hasher.combine(serviceSupported)
+        hasher.combine(serviceEnablementSupported)
+        hasher.combine(serviceInstalled)
+        hasher.combine(serviceDisabled)
+        hasher.combine(serviceRunning)
+        hasher.combine(serviceStatusDetail)
         hasher.combine(daemonRunning)
         hasher.combine(sessionActive)
         hasher.combine(relayConnected)
         hasher.combine(sessionStatus)
         hasher.combine(daemonBinaryVersion)
+        hasher.combine(serviceBinaryVersion)
         hasher.combine(ownNpub)
         hasher.combine(ownPubkeyHex)
         hasher.combine(nodeId)
         hasher.combine(nodeName)
+        hasher.combine(selfMagicDnsName)
         hasher.combine(endpoint)
         hasher.combine(tunnelIp)
         hasher.combine(listenPort)
@@ -900,14 +994,22 @@ extension NativeAppState: Equatable, Hashable {
         hasher.combine(advertisedRoutes)
         hasher.combine(effectiveAdvertisedRoutes)
         hasher.combine(magicDnsSuffix)
+        hasher.combine(magicDnsStatus)
         hasher.combine(autoconnect)
+        hasher.combine(lanPairingActive)
+        hasher.combine(lanPairingRemainingSecs)
         hasher.combine(launchOnStartup)
         hasher.combine(closeToTrayOnClose)
         hasher.combine(connectedPeerCount)
         hasher.combine(expectedPeerCount)
         hasher.combine(meshReady)
+        hasher.combine(health)
+        hasher.combine(network)
+        hasher.combine(portMapping)
         hasher.combine(networks)
         hasher.combine(relays)
+        hasher.combine(relaySummary)
+        hasher.combine(lanPeers)
     }
 }
 
@@ -931,15 +1033,24 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
                 appVersion: FfiConverterString.read(from: &buf),
                 configPath: FfiConverterString.read(from: &buf),
                 error: FfiConverterString.read(from: &buf),
+                cliInstalled: FfiConverterBool.read(from: &buf),
+                serviceSupported: FfiConverterBool.read(from: &buf),
+                serviceEnablementSupported: FfiConverterBool.read(from: &buf),
+                serviceInstalled: FfiConverterBool.read(from: &buf),
+                serviceDisabled: FfiConverterBool.read(from: &buf),
+                serviceRunning: FfiConverterBool.read(from: &buf),
+                serviceStatusDetail: FfiConverterString.read(from: &buf),
                 daemonRunning: FfiConverterBool.read(from: &buf),
                 sessionActive: FfiConverterBool.read(from: &buf),
                 relayConnected: FfiConverterBool.read(from: &buf),
                 sessionStatus: FfiConverterString.read(from: &buf),
                 daemonBinaryVersion: FfiConverterString.read(from: &buf),
+                serviceBinaryVersion: FfiConverterString.read(from: &buf),
                 ownNpub: FfiConverterString.read(from: &buf),
                 ownPubkeyHex: FfiConverterString.read(from: &buf),
                 nodeId: FfiConverterString.read(from: &buf),
                 nodeName: FfiConverterString.read(from: &buf),
+                selfMagicDnsName: FfiConverterString.read(from: &buf),
                 endpoint: FfiConverterString.read(from: &buf),
                 tunnelIp: FfiConverterString.read(from: &buf),
                 listenPort: FfiConverterUInt32.read(from: &buf),
@@ -950,14 +1061,22 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
                 advertisedRoutes: FfiConverterSequenceString.read(from: &buf),
                 effectiveAdvertisedRoutes: FfiConverterSequenceString.read(from: &buf),
                 magicDnsSuffix: FfiConverterString.read(from: &buf),
+                magicDnsStatus: FfiConverterString.read(from: &buf),
                 autoconnect: FfiConverterBool.read(from: &buf),
+                lanPairingActive: FfiConverterBool.read(from: &buf),
+                lanPairingRemainingSecs: FfiConverterUInt64.read(from: &buf),
                 launchOnStartup: FfiConverterBool.read(from: &buf),
                 closeToTrayOnClose: FfiConverterBool.read(from: &buf),
                 connectedPeerCount: FfiConverterUInt64.read(from: &buf),
                 expectedPeerCount: FfiConverterUInt64.read(from: &buf),
                 meshReady: FfiConverterBool.read(from: &buf),
+                health: FfiConverterSequenceTypeNativeHealthIssue.read(from: &buf),
+                network: FfiConverterTypeNativeNetworkSummary.read(from: &buf),
+                portMapping: FfiConverterTypeNativePortMappingStatus.read(from: &buf),
                 networks: FfiConverterSequenceTypeNativeNetworkState.read(from: &buf),
-                relays: FfiConverterSequenceTypeNativeRelayState.read(from: &buf)
+                relays: FfiConverterSequenceTypeNativeRelayState.read(from: &buf),
+                relaySummary: FfiConverterTypeNativeRelaySummary.read(from: &buf),
+                lanPeers: FfiConverterSequenceTypeNativeLanPeerState.read(from: &buf)
         )
     }
 
@@ -973,15 +1092,24 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
         FfiConverterString.write(value.appVersion, into: &buf)
         FfiConverterString.write(value.configPath, into: &buf)
         FfiConverterString.write(value.error, into: &buf)
+        FfiConverterBool.write(value.cliInstalled, into: &buf)
+        FfiConverterBool.write(value.serviceSupported, into: &buf)
+        FfiConverterBool.write(value.serviceEnablementSupported, into: &buf)
+        FfiConverterBool.write(value.serviceInstalled, into: &buf)
+        FfiConverterBool.write(value.serviceDisabled, into: &buf)
+        FfiConverterBool.write(value.serviceRunning, into: &buf)
+        FfiConverterString.write(value.serviceStatusDetail, into: &buf)
         FfiConverterBool.write(value.daemonRunning, into: &buf)
         FfiConverterBool.write(value.sessionActive, into: &buf)
         FfiConverterBool.write(value.relayConnected, into: &buf)
         FfiConverterString.write(value.sessionStatus, into: &buf)
         FfiConverterString.write(value.daemonBinaryVersion, into: &buf)
+        FfiConverterString.write(value.serviceBinaryVersion, into: &buf)
         FfiConverterString.write(value.ownNpub, into: &buf)
         FfiConverterString.write(value.ownPubkeyHex, into: &buf)
         FfiConverterString.write(value.nodeId, into: &buf)
         FfiConverterString.write(value.nodeName, into: &buf)
+        FfiConverterString.write(value.selfMagicDnsName, into: &buf)
         FfiConverterString.write(value.endpoint, into: &buf)
         FfiConverterString.write(value.tunnelIp, into: &buf)
         FfiConverterUInt32.write(value.listenPort, into: &buf)
@@ -992,14 +1120,22 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
         FfiConverterSequenceString.write(value.advertisedRoutes, into: &buf)
         FfiConverterSequenceString.write(value.effectiveAdvertisedRoutes, into: &buf)
         FfiConverterString.write(value.magicDnsSuffix, into: &buf)
+        FfiConverterString.write(value.magicDnsStatus, into: &buf)
         FfiConverterBool.write(value.autoconnect, into: &buf)
+        FfiConverterBool.write(value.lanPairingActive, into: &buf)
+        FfiConverterUInt64.write(value.lanPairingRemainingSecs, into: &buf)
         FfiConverterBool.write(value.launchOnStartup, into: &buf)
         FfiConverterBool.write(value.closeToTrayOnClose, into: &buf)
         FfiConverterUInt64.write(value.connectedPeerCount, into: &buf)
         FfiConverterUInt64.write(value.expectedPeerCount, into: &buf)
         FfiConverterBool.write(value.meshReady, into: &buf)
+        FfiConverterSequenceTypeNativeHealthIssue.write(value.health, into: &buf)
+        FfiConverterTypeNativeNetworkSummary.write(value.network, into: &buf)
+        FfiConverterTypeNativePortMappingStatus.write(value.portMapping, into: &buf)
         FfiConverterSequenceTypeNativeNetworkState.write(value.networks, into: &buf)
         FfiConverterSequenceTypeNativeRelayState.write(value.relays, into: &buf)
+        FfiConverterTypeNativeRelaySummary.write(value.relaySummary, into: &buf)
+        FfiConverterSequenceTypeNativeLanPeerState.write(value.lanPeers, into: &buf)
     }
 }
 
@@ -1019,6 +1155,288 @@ public func FfiConverterTypeNativeAppState_lower(_ value: NativeAppState) -> Rus
 }
 
 
+public struct NativeHealthIssue {
+    public var code: String
+    public var severity: String
+    public var summary: String
+    public var detail: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(code: String, severity: String, summary: String, detail: String) {
+        self.code = code
+        self.severity = severity
+        self.summary = summary
+        self.detail = detail
+    }
+}
+
+#if compiler(>=6)
+extension NativeHealthIssue: Sendable {}
+#endif
+
+
+extension NativeHealthIssue: Equatable, Hashable {
+    public static func ==(lhs: NativeHealthIssue, rhs: NativeHealthIssue) -> Bool {
+        if lhs.code != rhs.code {
+            return false
+        }
+        if lhs.severity != rhs.severity {
+            return false
+        }
+        if lhs.summary != rhs.summary {
+            return false
+        }
+        if lhs.detail != rhs.detail {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(code)
+        hasher.combine(severity)
+        hasher.combine(summary)
+        hasher.combine(detail)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeHealthIssue: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeHealthIssue {
+        return
+            try NativeHealthIssue(
+                code: FfiConverterString.read(from: &buf),
+                severity: FfiConverterString.read(from: &buf),
+                summary: FfiConverterString.read(from: &buf),
+                detail: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeHealthIssue, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.code, into: &buf)
+        FfiConverterString.write(value.severity, into: &buf)
+        FfiConverterString.write(value.summary, into: &buf)
+        FfiConverterString.write(value.detail, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeHealthIssue_lift(_ buf: RustBuffer) throws -> NativeHealthIssue {
+    return try FfiConverterTypeNativeHealthIssue.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeHealthIssue_lower(_ value: NativeHealthIssue) -> RustBuffer {
+    return FfiConverterTypeNativeHealthIssue.lower(value)
+}
+
+
+public struct NativeInboundJoinRequestState {
+    public var requesterNpub: String
+    public var requesterPubkeyHex: String
+    public var requesterNodeName: String
+    public var requestedAtText: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(requesterNpub: String, requesterPubkeyHex: String, requesterNodeName: String, requestedAtText: String) {
+        self.requesterNpub = requesterNpub
+        self.requesterPubkeyHex = requesterPubkeyHex
+        self.requesterNodeName = requesterNodeName
+        self.requestedAtText = requestedAtText
+    }
+}
+
+#if compiler(>=6)
+extension NativeInboundJoinRequestState: Sendable {}
+#endif
+
+
+extension NativeInboundJoinRequestState: Equatable, Hashable {
+    public static func ==(lhs: NativeInboundJoinRequestState, rhs: NativeInboundJoinRequestState) -> Bool {
+        if lhs.requesterNpub != rhs.requesterNpub {
+            return false
+        }
+        if lhs.requesterPubkeyHex != rhs.requesterPubkeyHex {
+            return false
+        }
+        if lhs.requesterNodeName != rhs.requesterNodeName {
+            return false
+        }
+        if lhs.requestedAtText != rhs.requestedAtText {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(requesterNpub)
+        hasher.combine(requesterPubkeyHex)
+        hasher.combine(requesterNodeName)
+        hasher.combine(requestedAtText)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeInboundJoinRequestState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeInboundJoinRequestState {
+        return
+            try NativeInboundJoinRequestState(
+                requesterNpub: FfiConverterString.read(from: &buf),
+                requesterPubkeyHex: FfiConverterString.read(from: &buf),
+                requesterNodeName: FfiConverterString.read(from: &buf),
+                requestedAtText: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeInboundJoinRequestState, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.requesterNpub, into: &buf)
+        FfiConverterString.write(value.requesterPubkeyHex, into: &buf)
+        FfiConverterString.write(value.requesterNodeName, into: &buf)
+        FfiConverterString.write(value.requestedAtText, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeInboundJoinRequestState_lift(_ buf: RustBuffer) throws -> NativeInboundJoinRequestState {
+    return try FfiConverterTypeNativeInboundJoinRequestState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeInboundJoinRequestState_lower(_ value: NativeInboundJoinRequestState) -> RustBuffer {
+    return FfiConverterTypeNativeInboundJoinRequestState.lower(value)
+}
+
+
+public struct NativeLanPeerState {
+    public var npub: String
+    public var nodeName: String
+    public var endpoint: String
+    public var networkName: String
+    public var networkId: String
+    public var invite: String
+    public var lastSeenText: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(npub: String, nodeName: String, endpoint: String, networkName: String, networkId: String, invite: String, lastSeenText: String) {
+        self.npub = npub
+        self.nodeName = nodeName
+        self.endpoint = endpoint
+        self.networkName = networkName
+        self.networkId = networkId
+        self.invite = invite
+        self.lastSeenText = lastSeenText
+    }
+}
+
+#if compiler(>=6)
+extension NativeLanPeerState: Sendable {}
+#endif
+
+
+extension NativeLanPeerState: Equatable, Hashable {
+    public static func ==(lhs: NativeLanPeerState, rhs: NativeLanPeerState) -> Bool {
+        if lhs.npub != rhs.npub {
+            return false
+        }
+        if lhs.nodeName != rhs.nodeName {
+            return false
+        }
+        if lhs.endpoint != rhs.endpoint {
+            return false
+        }
+        if lhs.networkName != rhs.networkName {
+            return false
+        }
+        if lhs.networkId != rhs.networkId {
+            return false
+        }
+        if lhs.invite != rhs.invite {
+            return false
+        }
+        if lhs.lastSeenText != rhs.lastSeenText {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(npub)
+        hasher.combine(nodeName)
+        hasher.combine(endpoint)
+        hasher.combine(networkName)
+        hasher.combine(networkId)
+        hasher.combine(invite)
+        hasher.combine(lastSeenText)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeLanPeerState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeLanPeerState {
+        return
+            try NativeLanPeerState(
+                npub: FfiConverterString.read(from: &buf),
+                nodeName: FfiConverterString.read(from: &buf),
+                endpoint: FfiConverterString.read(from: &buf),
+                networkName: FfiConverterString.read(from: &buf),
+                networkId: FfiConverterString.read(from: &buf),
+                invite: FfiConverterString.read(from: &buf),
+                lastSeenText: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeLanPeerState, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.npub, into: &buf)
+        FfiConverterString.write(value.nodeName, into: &buf)
+        FfiConverterString.write(value.endpoint, into: &buf)
+        FfiConverterString.write(value.networkName, into: &buf)
+        FfiConverterString.write(value.networkId, into: &buf)
+        FfiConverterString.write(value.invite, into: &buf)
+        FfiConverterString.write(value.lastSeenText, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeLanPeerState_lift(_ buf: RustBuffer) throws -> NativeLanPeerState {
+    return try FfiConverterTypeNativeLanPeerState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeLanPeerState_lower(_ value: NativeLanPeerState) -> RustBuffer {
+    return FfiConverterTypeNativeLanPeerState.lower(value)
+}
+
+
 public struct NativeNetworkState {
     public var id: String
     public var name: String
@@ -1026,6 +1444,10 @@ public struct NativeNetworkState {
     public var networkId: String
     public var localIsAdmin: Bool
     public var joinRequestsEnabled: Bool
+    public var inviteInviterNpub: String
+    public var adminNpubs: [String]
+    public var outboundJoinRequest: NativeOutboundJoinRequestState?
+    public var inboundJoinRequests: [NativeInboundJoinRequestState]
     public var onlineCount: UInt64
     public var expectedCount: UInt64
     public var admins: [String]
@@ -1033,13 +1455,17 @@ public struct NativeNetworkState {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, name: String, enabled: Bool, networkId: String, localIsAdmin: Bool, joinRequestsEnabled: Bool, onlineCount: UInt64, expectedCount: UInt64, admins: [String], participants: [NativeParticipantState]) {
+    public init(id: String, name: String, enabled: Bool, networkId: String, localIsAdmin: Bool, joinRequestsEnabled: Bool, inviteInviterNpub: String, adminNpubs: [String], outboundJoinRequest: NativeOutboundJoinRequestState?, inboundJoinRequests: [NativeInboundJoinRequestState], onlineCount: UInt64, expectedCount: UInt64, admins: [String], participants: [NativeParticipantState]) {
         self.id = id
         self.name = name
         self.enabled = enabled
         self.networkId = networkId
         self.localIsAdmin = localIsAdmin
         self.joinRequestsEnabled = joinRequestsEnabled
+        self.inviteInviterNpub = inviteInviterNpub
+        self.adminNpubs = adminNpubs
+        self.outboundJoinRequest = outboundJoinRequest
+        self.inboundJoinRequests = inboundJoinRequests
         self.onlineCount = onlineCount
         self.expectedCount = expectedCount
         self.admins = admins
@@ -1072,6 +1498,18 @@ extension NativeNetworkState: Equatable, Hashable {
         if lhs.joinRequestsEnabled != rhs.joinRequestsEnabled {
             return false
         }
+        if lhs.inviteInviterNpub != rhs.inviteInviterNpub {
+            return false
+        }
+        if lhs.adminNpubs != rhs.adminNpubs {
+            return false
+        }
+        if lhs.outboundJoinRequest != rhs.outboundJoinRequest {
+            return false
+        }
+        if lhs.inboundJoinRequests != rhs.inboundJoinRequests {
+            return false
+        }
         if lhs.onlineCount != rhs.onlineCount {
             return false
         }
@@ -1094,6 +1532,10 @@ extension NativeNetworkState: Equatable, Hashable {
         hasher.combine(networkId)
         hasher.combine(localIsAdmin)
         hasher.combine(joinRequestsEnabled)
+        hasher.combine(inviteInviterNpub)
+        hasher.combine(adminNpubs)
+        hasher.combine(outboundJoinRequest)
+        hasher.combine(inboundJoinRequests)
         hasher.combine(onlineCount)
         hasher.combine(expectedCount)
         hasher.combine(admins)
@@ -1116,6 +1558,10 @@ public struct FfiConverterTypeNativeNetworkState: FfiConverterRustBuffer {
                 networkId: FfiConverterString.read(from: &buf),
                 localIsAdmin: FfiConverterBool.read(from: &buf),
                 joinRequestsEnabled: FfiConverterBool.read(from: &buf),
+                inviteInviterNpub: FfiConverterString.read(from: &buf),
+                adminNpubs: FfiConverterSequenceString.read(from: &buf),
+                outboundJoinRequest: FfiConverterOptionTypeNativeOutboundJoinRequestState.read(from: &buf),
+                inboundJoinRequests: FfiConverterSequenceTypeNativeInboundJoinRequestState.read(from: &buf),
                 onlineCount: FfiConverterUInt64.read(from: &buf),
                 expectedCount: FfiConverterUInt64.read(from: &buf),
                 admins: FfiConverterSequenceString.read(from: &buf),
@@ -1130,6 +1576,10 @@ public struct FfiConverterTypeNativeNetworkState: FfiConverterRustBuffer {
         FfiConverterString.write(value.networkId, into: &buf)
         FfiConverterBool.write(value.localIsAdmin, into: &buf)
         FfiConverterBool.write(value.joinRequestsEnabled, into: &buf)
+        FfiConverterString.write(value.inviteInviterNpub, into: &buf)
+        FfiConverterSequenceString.write(value.adminNpubs, into: &buf)
+        FfiConverterOptionTypeNativeOutboundJoinRequestState.write(value.outboundJoinRequest, into: &buf)
+        FfiConverterSequenceTypeNativeInboundJoinRequestState.write(value.inboundJoinRequests, into: &buf)
         FfiConverterUInt64.write(value.onlineCount, into: &buf)
         FfiConverterUInt64.write(value.expectedCount, into: &buf)
         FfiConverterSequenceString.write(value.admins, into: &buf)
@@ -1153,25 +1603,231 @@ public func FfiConverterTypeNativeNetworkState_lower(_ value: NativeNetworkState
 }
 
 
+public struct NativeNetworkSummary {
+    public var defaultInterface: String
+    public var primaryIpv4: String
+    public var primaryIpv6: String
+    public var gatewayIpv4: String
+    public var gatewayIpv6: String
+    public var changedAt: UInt64
+    public var captivePortal: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(defaultInterface: String, primaryIpv4: String, primaryIpv6: String, gatewayIpv4: String, gatewayIpv6: String, changedAt: UInt64, captivePortal: String) {
+        self.defaultInterface = defaultInterface
+        self.primaryIpv4 = primaryIpv4
+        self.primaryIpv6 = primaryIpv6
+        self.gatewayIpv4 = gatewayIpv4
+        self.gatewayIpv6 = gatewayIpv6
+        self.changedAt = changedAt
+        self.captivePortal = captivePortal
+    }
+}
+
+#if compiler(>=6)
+extension NativeNetworkSummary: Sendable {}
+#endif
+
+
+extension NativeNetworkSummary: Equatable, Hashable {
+    public static func ==(lhs: NativeNetworkSummary, rhs: NativeNetworkSummary) -> Bool {
+        if lhs.defaultInterface != rhs.defaultInterface {
+            return false
+        }
+        if lhs.primaryIpv4 != rhs.primaryIpv4 {
+            return false
+        }
+        if lhs.primaryIpv6 != rhs.primaryIpv6 {
+            return false
+        }
+        if lhs.gatewayIpv4 != rhs.gatewayIpv4 {
+            return false
+        }
+        if lhs.gatewayIpv6 != rhs.gatewayIpv6 {
+            return false
+        }
+        if lhs.changedAt != rhs.changedAt {
+            return false
+        }
+        if lhs.captivePortal != rhs.captivePortal {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(defaultInterface)
+        hasher.combine(primaryIpv4)
+        hasher.combine(primaryIpv6)
+        hasher.combine(gatewayIpv4)
+        hasher.combine(gatewayIpv6)
+        hasher.combine(changedAt)
+        hasher.combine(captivePortal)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeNetworkSummary: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeNetworkSummary {
+        return
+            try NativeNetworkSummary(
+                defaultInterface: FfiConverterString.read(from: &buf),
+                primaryIpv4: FfiConverterString.read(from: &buf),
+                primaryIpv6: FfiConverterString.read(from: &buf),
+                gatewayIpv4: FfiConverterString.read(from: &buf),
+                gatewayIpv6: FfiConverterString.read(from: &buf),
+                changedAt: FfiConverterUInt64.read(from: &buf),
+                captivePortal: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeNetworkSummary, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.defaultInterface, into: &buf)
+        FfiConverterString.write(value.primaryIpv4, into: &buf)
+        FfiConverterString.write(value.primaryIpv6, into: &buf)
+        FfiConverterString.write(value.gatewayIpv4, into: &buf)
+        FfiConverterString.write(value.gatewayIpv6, into: &buf)
+        FfiConverterUInt64.write(value.changedAt, into: &buf)
+        FfiConverterString.write(value.captivePortal, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeNetworkSummary_lift(_ buf: RustBuffer) throws -> NativeNetworkSummary {
+    return try FfiConverterTypeNativeNetworkSummary.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeNetworkSummary_lower(_ value: NativeNetworkSummary) -> RustBuffer {
+    return FfiConverterTypeNativeNetworkSummary.lower(value)
+}
+
+
+public struct NativeOutboundJoinRequestState {
+    public var recipientNpub: String
+    public var recipientPubkeyHex: String
+    public var requestedAtText: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(recipientNpub: String, recipientPubkeyHex: String, requestedAtText: String) {
+        self.recipientNpub = recipientNpub
+        self.recipientPubkeyHex = recipientPubkeyHex
+        self.requestedAtText = requestedAtText
+    }
+}
+
+#if compiler(>=6)
+extension NativeOutboundJoinRequestState: Sendable {}
+#endif
+
+
+extension NativeOutboundJoinRequestState: Equatable, Hashable {
+    public static func ==(lhs: NativeOutboundJoinRequestState, rhs: NativeOutboundJoinRequestState) -> Bool {
+        if lhs.recipientNpub != rhs.recipientNpub {
+            return false
+        }
+        if lhs.recipientPubkeyHex != rhs.recipientPubkeyHex {
+            return false
+        }
+        if lhs.requestedAtText != rhs.requestedAtText {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(recipientNpub)
+        hasher.combine(recipientPubkeyHex)
+        hasher.combine(requestedAtText)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeOutboundJoinRequestState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeOutboundJoinRequestState {
+        return
+            try NativeOutboundJoinRequestState(
+                recipientNpub: FfiConverterString.read(from: &buf),
+                recipientPubkeyHex: FfiConverterString.read(from: &buf),
+                requestedAtText: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeOutboundJoinRequestState, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.recipientNpub, into: &buf)
+        FfiConverterString.write(value.recipientPubkeyHex, into: &buf)
+        FfiConverterString.write(value.requestedAtText, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeOutboundJoinRequestState_lift(_ buf: RustBuffer) throws -> NativeOutboundJoinRequestState {
+    return try FfiConverterTypeNativeOutboundJoinRequestState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeOutboundJoinRequestState_lower(_ value: NativeOutboundJoinRequestState) -> RustBuffer {
+    return FfiConverterTypeNativeOutboundJoinRequestState.lower(value)
+}
+
+
 public struct NativeParticipantState {
     public var npub: String
     public var pubkeyHex: String
     public var alias: String
+    public var magicDnsAlias: String
+    public var magicDnsName: String
     public var tunnelIp: String
     public var isAdmin: Bool
     public var reachable: Bool
+    public var txBytes: UInt64
+    public var rxBytes: UInt64
+    public var advertisedRoutes: [String]
+    public var offersExitNode: Bool
+    public var state: String
+    public var presenceState: String
     public var statusText: String
+    public var lastSignalText: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(npub: String, pubkeyHex: String, alias: String, tunnelIp: String, isAdmin: Bool, reachable: Bool, statusText: String) {
+    public init(npub: String, pubkeyHex: String, alias: String, magicDnsAlias: String, magicDnsName: String, tunnelIp: String, isAdmin: Bool, reachable: Bool, txBytes: UInt64, rxBytes: UInt64, advertisedRoutes: [String], offersExitNode: Bool, state: String, presenceState: String, statusText: String, lastSignalText: String) {
         self.npub = npub
         self.pubkeyHex = pubkeyHex
         self.alias = alias
+        self.magicDnsAlias = magicDnsAlias
+        self.magicDnsName = magicDnsName
         self.tunnelIp = tunnelIp
         self.isAdmin = isAdmin
         self.reachable = reachable
+        self.txBytes = txBytes
+        self.rxBytes = rxBytes
+        self.advertisedRoutes = advertisedRoutes
+        self.offersExitNode = offersExitNode
+        self.state = state
+        self.presenceState = presenceState
         self.statusText = statusText
+        self.lastSignalText = lastSignalText
     }
 }
 
@@ -1191,6 +1847,12 @@ extension NativeParticipantState: Equatable, Hashable {
         if lhs.alias != rhs.alias {
             return false
         }
+        if lhs.magicDnsAlias != rhs.magicDnsAlias {
+            return false
+        }
+        if lhs.magicDnsName != rhs.magicDnsName {
+            return false
+        }
         if lhs.tunnelIp != rhs.tunnelIp {
             return false
         }
@@ -1200,7 +1862,28 @@ extension NativeParticipantState: Equatable, Hashable {
         if lhs.reachable != rhs.reachable {
             return false
         }
+        if lhs.txBytes != rhs.txBytes {
+            return false
+        }
+        if lhs.rxBytes != rhs.rxBytes {
+            return false
+        }
+        if lhs.advertisedRoutes != rhs.advertisedRoutes {
+            return false
+        }
+        if lhs.offersExitNode != rhs.offersExitNode {
+            return false
+        }
+        if lhs.state != rhs.state {
+            return false
+        }
+        if lhs.presenceState != rhs.presenceState {
+            return false
+        }
         if lhs.statusText != rhs.statusText {
+            return false
+        }
+        if lhs.lastSignalText != rhs.lastSignalText {
             return false
         }
         return true
@@ -1210,10 +1893,19 @@ extension NativeParticipantState: Equatable, Hashable {
         hasher.combine(npub)
         hasher.combine(pubkeyHex)
         hasher.combine(alias)
+        hasher.combine(magicDnsAlias)
+        hasher.combine(magicDnsName)
         hasher.combine(tunnelIp)
         hasher.combine(isAdmin)
         hasher.combine(reachable)
+        hasher.combine(txBytes)
+        hasher.combine(rxBytes)
+        hasher.combine(advertisedRoutes)
+        hasher.combine(offersExitNode)
+        hasher.combine(state)
+        hasher.combine(presenceState)
         hasher.combine(statusText)
+        hasher.combine(lastSignalText)
     }
 }
 
@@ -1229,10 +1921,19 @@ public struct FfiConverterTypeNativeParticipantState: FfiConverterRustBuffer {
                 npub: FfiConverterString.read(from: &buf),
                 pubkeyHex: FfiConverterString.read(from: &buf),
                 alias: FfiConverterString.read(from: &buf),
+                magicDnsAlias: FfiConverterString.read(from: &buf),
+                magicDnsName: FfiConverterString.read(from: &buf),
                 tunnelIp: FfiConverterString.read(from: &buf),
                 isAdmin: FfiConverterBool.read(from: &buf),
                 reachable: FfiConverterBool.read(from: &buf),
-                statusText: FfiConverterString.read(from: &buf)
+                txBytes: FfiConverterUInt64.read(from: &buf),
+                rxBytes: FfiConverterUInt64.read(from: &buf),
+                advertisedRoutes: FfiConverterSequenceString.read(from: &buf),
+                offersExitNode: FfiConverterBool.read(from: &buf),
+                state: FfiConverterString.read(from: &buf),
+                presenceState: FfiConverterString.read(from: &buf),
+                statusText: FfiConverterString.read(from: &buf),
+                lastSignalText: FfiConverterString.read(from: &buf)
         )
     }
 
@@ -1240,10 +1941,19 @@ public struct FfiConverterTypeNativeParticipantState: FfiConverterRustBuffer {
         FfiConverterString.write(value.npub, into: &buf)
         FfiConverterString.write(value.pubkeyHex, into: &buf)
         FfiConverterString.write(value.alias, into: &buf)
+        FfiConverterString.write(value.magicDnsAlias, into: &buf)
+        FfiConverterString.write(value.magicDnsName, into: &buf)
         FfiConverterString.write(value.tunnelIp, into: &buf)
         FfiConverterBool.write(value.isAdmin, into: &buf)
         FfiConverterBool.write(value.reachable, into: &buf)
+        FfiConverterUInt64.write(value.txBytes, into: &buf)
+        FfiConverterUInt64.write(value.rxBytes, into: &buf)
+        FfiConverterSequenceString.write(value.advertisedRoutes, into: &buf)
+        FfiConverterBool.write(value.offersExitNode, into: &buf)
+        FfiConverterString.write(value.state, into: &buf)
+        FfiConverterString.write(value.presenceState, into: &buf)
         FfiConverterString.write(value.statusText, into: &buf)
+        FfiConverterString.write(value.lastSignalText, into: &buf)
     }
 }
 
@@ -1260,6 +1970,186 @@ public func FfiConverterTypeNativeParticipantState_lift(_ buf: RustBuffer) throw
 #endif
 public func FfiConverterTypeNativeParticipantState_lower(_ value: NativeParticipantState) -> RustBuffer {
     return FfiConverterTypeNativeParticipantState.lower(value)
+}
+
+
+public struct NativePortMappingStatus {
+    public var upnp: NativeProbeStatus
+    public var natPmp: NativeProbeStatus
+    public var pcp: NativeProbeStatus
+    public var activeProtocol: String
+    public var externalEndpoint: String
+    public var gateway: String
+    public var goodUntil: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(upnp: NativeProbeStatus, natPmp: NativeProbeStatus, pcp: NativeProbeStatus, activeProtocol: String, externalEndpoint: String, gateway: String, goodUntil: UInt64) {
+        self.upnp = upnp
+        self.natPmp = natPmp
+        self.pcp = pcp
+        self.activeProtocol = activeProtocol
+        self.externalEndpoint = externalEndpoint
+        self.gateway = gateway
+        self.goodUntil = goodUntil
+    }
+}
+
+#if compiler(>=6)
+extension NativePortMappingStatus: Sendable {}
+#endif
+
+
+extension NativePortMappingStatus: Equatable, Hashable {
+    public static func ==(lhs: NativePortMappingStatus, rhs: NativePortMappingStatus) -> Bool {
+        if lhs.upnp != rhs.upnp {
+            return false
+        }
+        if lhs.natPmp != rhs.natPmp {
+            return false
+        }
+        if lhs.pcp != rhs.pcp {
+            return false
+        }
+        if lhs.activeProtocol != rhs.activeProtocol {
+            return false
+        }
+        if lhs.externalEndpoint != rhs.externalEndpoint {
+            return false
+        }
+        if lhs.gateway != rhs.gateway {
+            return false
+        }
+        if lhs.goodUntil != rhs.goodUntil {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(upnp)
+        hasher.combine(natPmp)
+        hasher.combine(pcp)
+        hasher.combine(activeProtocol)
+        hasher.combine(externalEndpoint)
+        hasher.combine(gateway)
+        hasher.combine(goodUntil)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativePortMappingStatus: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativePortMappingStatus {
+        return
+            try NativePortMappingStatus(
+                upnp: FfiConverterTypeNativeProbeStatus.read(from: &buf),
+                natPmp: FfiConverterTypeNativeProbeStatus.read(from: &buf),
+                pcp: FfiConverterTypeNativeProbeStatus.read(from: &buf),
+                activeProtocol: FfiConverterString.read(from: &buf),
+                externalEndpoint: FfiConverterString.read(from: &buf),
+                gateway: FfiConverterString.read(from: &buf),
+                goodUntil: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativePortMappingStatus, into buf: inout [UInt8]) {
+        FfiConverterTypeNativeProbeStatus.write(value.upnp, into: &buf)
+        FfiConverterTypeNativeProbeStatus.write(value.natPmp, into: &buf)
+        FfiConverterTypeNativeProbeStatus.write(value.pcp, into: &buf)
+        FfiConverterString.write(value.activeProtocol, into: &buf)
+        FfiConverterString.write(value.externalEndpoint, into: &buf)
+        FfiConverterString.write(value.gateway, into: &buf)
+        FfiConverterUInt64.write(value.goodUntil, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativePortMappingStatus_lift(_ buf: RustBuffer) throws -> NativePortMappingStatus {
+    return try FfiConverterTypeNativePortMappingStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativePortMappingStatus_lower(_ value: NativePortMappingStatus) -> RustBuffer {
+    return FfiConverterTypeNativePortMappingStatus.lower(value)
+}
+
+
+public struct NativeProbeStatus {
+    public var state: String
+    public var detail: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(state: String, detail: String) {
+        self.state = state
+        self.detail = detail
+    }
+}
+
+#if compiler(>=6)
+extension NativeProbeStatus: Sendable {}
+#endif
+
+
+extension NativeProbeStatus: Equatable, Hashable {
+    public static func ==(lhs: NativeProbeStatus, rhs: NativeProbeStatus) -> Bool {
+        if lhs.state != rhs.state {
+            return false
+        }
+        if lhs.detail != rhs.detail {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(state)
+        hasher.combine(detail)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeProbeStatus: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeProbeStatus {
+        return
+            try NativeProbeStatus(
+                state: FfiConverterString.read(from: &buf),
+                detail: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeProbeStatus, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.state, into: &buf)
+        FfiConverterString.write(value.detail, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeProbeStatus_lift(_ buf: RustBuffer) throws -> NativeProbeStatus {
+    return try FfiConverterTypeNativeProbeStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeProbeStatus_lower(_ value: NativeProbeStatus) -> RustBuffer {
+    return FfiConverterTypeNativeProbeStatus.lower(value)
 }
 
 
@@ -1338,6 +2228,92 @@ public func FfiConverterTypeNativeRelayState_lift(_ buf: RustBuffer) throws -> N
 #endif
 public func FfiConverterTypeNativeRelayState_lower(_ value: NativeRelayState) -> RustBuffer {
     return FfiConverterTypeNativeRelayState.lower(value)
+}
+
+
+public struct NativeRelaySummary {
+    public var up: UInt64
+    public var down: UInt64
+    public var checking: UInt64
+    public var unknown: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(up: UInt64, down: UInt64, checking: UInt64, unknown: UInt64) {
+        self.up = up
+        self.down = down
+        self.checking = checking
+        self.unknown = unknown
+    }
+}
+
+#if compiler(>=6)
+extension NativeRelaySummary: Sendable {}
+#endif
+
+
+extension NativeRelaySummary: Equatable, Hashable {
+    public static func ==(lhs: NativeRelaySummary, rhs: NativeRelaySummary) -> Bool {
+        if lhs.up != rhs.up {
+            return false
+        }
+        if lhs.down != rhs.down {
+            return false
+        }
+        if lhs.checking != rhs.checking {
+            return false
+        }
+        if lhs.unknown != rhs.unknown {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(up)
+        hasher.combine(down)
+        hasher.combine(checking)
+        hasher.combine(unknown)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNativeRelaySummary: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeRelaySummary {
+        return
+            try NativeRelaySummary(
+                up: FfiConverterUInt64.read(from: &buf),
+                down: FfiConverterUInt64.read(from: &buf),
+                checking: FfiConverterUInt64.read(from: &buf),
+                unknown: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NativeRelaySummary, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.up, into: &buf)
+        FfiConverterUInt64.write(value.down, into: &buf)
+        FfiConverterUInt64.write(value.checking, into: &buf)
+        FfiConverterUInt64.write(value.unknown, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeRelaySummary_lift(_ buf: RustBuffer) throws -> NativeRelaySummary {
+    return try FfiConverterTypeNativeRelaySummary.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNativeRelaySummary_lower(_ value: NativeRelaySummary) -> RustBuffer {
+    return FfiConverterTypeNativeRelaySummary.lower(value)
 }
 
 
@@ -2065,6 +3041,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeNativeOutboundJoinRequestState: FfiConverterRustBuffer {
+    typealias SwiftType = NativeOutboundJoinRequestState?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeNativeOutboundJoinRequestState.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeNativeOutboundJoinRequestState.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
@@ -2082,6 +3082,81 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeNativeHealthIssue: FfiConverterRustBuffer {
+    typealias SwiftType = [NativeHealthIssue]
+
+    public static func write(_ value: [NativeHealthIssue], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeNativeHealthIssue.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [NativeHealthIssue] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [NativeHealthIssue]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeNativeHealthIssue.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeNativeInboundJoinRequestState: FfiConverterRustBuffer {
+    typealias SwiftType = [NativeInboundJoinRequestState]
+
+    public static func write(_ value: [NativeInboundJoinRequestState], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeNativeInboundJoinRequestState.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [NativeInboundJoinRequestState] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [NativeInboundJoinRequestState]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeNativeInboundJoinRequestState.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeNativeLanPeerState: FfiConverterRustBuffer {
+    typealias SwiftType = [NativeLanPeerState]
+
+    public static func write(_ value: [NativeLanPeerState], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeNativeLanPeerState.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [NativeLanPeerState] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [NativeLanPeerState]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeNativeLanPeerState.read(from: &buf))
         }
         return seq
     }

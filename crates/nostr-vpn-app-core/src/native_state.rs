@@ -6,14 +6,46 @@ pub struct NativeRelayState {
 }
 
 #[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
+pub struct NativeRelaySummary {
+    pub up: u64,
+    pub down: u64,
+    pub checking: u64,
+    pub unknown: u64,
+}
+
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
 pub struct NativeParticipantState {
     pub npub: String,
     pub pubkey_hex: String,
     pub alias: String,
+    pub magic_dns_alias: String,
+    pub magic_dns_name: String,
     pub tunnel_ip: String,
     pub is_admin: bool,
     pub reachable: bool,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    pub advertised_routes: Vec<String>,
+    pub offers_exit_node: bool,
+    pub state: String,
+    pub presence_state: String,
     pub status_text: String,
+    pub last_signal_text: String,
+}
+
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
+pub struct NativeOutboundJoinRequestState {
+    pub recipient_npub: String,
+    pub recipient_pubkey_hex: String,
+    pub requested_at_text: String,
+}
+
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
+pub struct NativeInboundJoinRequestState {
+    pub requester_npub: String,
+    pub requester_pubkey_hex: String,
+    pub requester_node_name: String,
+    pub requested_at_text: String,
 }
 
 #[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
@@ -24,10 +56,61 @@ pub struct NativeNetworkState {
     pub network_id: String,
     pub local_is_admin: bool,
     pub join_requests_enabled: bool,
+    pub invite_inviter_npub: String,
+    pub admin_npubs: Vec<String>,
+    pub outbound_join_request: Option<NativeOutboundJoinRequestState>,
+    pub inbound_join_requests: Vec<NativeInboundJoinRequestState>,
     pub online_count: u64,
     pub expected_count: u64,
     pub admins: Vec<String>,
     pub participants: Vec<NativeParticipantState>,
+}
+
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
+pub struct NativeLanPeerState {
+    pub npub: String,
+    pub node_name: String,
+    pub endpoint: String,
+    pub network_name: String,
+    pub network_id: String,
+    pub invite: String,
+    pub last_seen_text: String,
+}
+
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
+pub struct NativeHealthIssue {
+    pub code: String,
+    pub severity: String,
+    pub summary: String,
+    pub detail: String,
+}
+
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
+pub struct NativeNetworkSummary {
+    pub default_interface: String,
+    pub primary_ipv4: String,
+    pub primary_ipv6: String,
+    pub gateway_ipv4: String,
+    pub gateway_ipv6: String,
+    pub changed_at: u64,
+    pub captive_portal: String,
+}
+
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
+pub struct NativeProbeStatus {
+    pub state: String,
+    pub detail: String,
+}
+
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default)]
+pub struct NativePortMappingStatus {
+    pub upnp: NativeProbeStatus,
+    pub nat_pmp: NativeProbeStatus,
+    pub pcp: NativeProbeStatus,
+    pub active_protocol: String,
+    pub external_endpoint: String,
+    pub gateway: String,
+    pub good_until: u64,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -44,15 +127,24 @@ pub struct NativeAppState {
     pub app_version: String,
     pub config_path: String,
     pub error: String,
+    pub cli_installed: bool,
+    pub service_supported: bool,
+    pub service_enablement_supported: bool,
+    pub service_installed: bool,
+    pub service_disabled: bool,
+    pub service_running: bool,
+    pub service_status_detail: String,
     pub daemon_running: bool,
     pub session_active: bool,
     pub relay_connected: bool,
     pub session_status: String,
     pub daemon_binary_version: String,
+    pub service_binary_version: String,
     pub own_npub: String,
     pub own_pubkey_hex: String,
     pub node_id: String,
     pub node_name: String,
+    pub self_magic_dns_name: String,
     pub endpoint: String,
     pub tunnel_ip: String,
     pub listen_port: u32,
@@ -63,12 +155,20 @@ pub struct NativeAppState {
     pub advertised_routes: Vec<String>,
     pub effective_advertised_routes: Vec<String>,
     pub magic_dns_suffix: String,
+    pub magic_dns_status: String,
     pub autoconnect: bool,
+    pub lan_pairing_active: bool,
+    pub lan_pairing_remaining_secs: u64,
     pub launch_on_startup: bool,
     pub close_to_tray_on_close: bool,
     pub connected_peer_count: u64,
     pub expected_peer_count: u64,
     pub mesh_ready: bool,
+    pub health: Vec<NativeHealthIssue>,
+    pub network: NativeNetworkSummary,
+    pub port_mapping: NativePortMappingStatus,
     pub networks: Vec<NativeNetworkState>,
     pub relays: Vec<NativeRelayState>,
+    pub relay_summary: NativeRelaySummary,
+    pub lan_peers: Vec<NativeLanPeerState>,
 }

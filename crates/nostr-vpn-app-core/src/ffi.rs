@@ -3,26 +3,36 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use nostr_sdk::prelude::{PublicKey, ToBech32};
 use nostr_vpn_core::config::{
-    AppConfig, NetworkConfig, maybe_autoconfigure_node, normalize_advertised_route,
-    normalize_nostr_pubkey,
+    AppConfig, NetworkConfig, PendingInboundJoinRequest, PendingOutboundJoinRequest,
+    derive_mesh_tunnel_ip, maybe_autoconfigure_node, normalize_advertised_route,
+    normalize_nostr_pubkey, normalize_runtime_network_id,
 };
+use nostr_vpn_core::diagnostics::ProbeStatus;
 use serde::Deserialize;
 
 use crate::actions::NativeAppAction;
 use crate::native_state::{
-    NativeAppState, NativeNetworkState, NativeParticipantState, NativeRelayState,
+    NativeAppState, NativeHealthIssue, NativeInboundJoinRequestState, NativeLanPeerState,
+    NativeNetworkState, NativeNetworkSummary, NativeOutboundJoinRequestState,
+    NativeParticipantState, NativePortMappingStatus, NativeProbeStatus, NativeRelayState,
+    NativeRelaySummary,
 };
 use crate::platform::current_runtime_capabilities;
-use crate::state::{DaemonRuntimeState, SettingsPatch};
+use crate::state::{
+    DaemonPeerState, DaemonRuntimeState, HealthIssue, NetworkSummary, PortMappingStatus,
+    SettingsPatch,
+};
 
 const NVPN_BIN_ENV: &str = "NVPN_CLI_PATH";
 const NETWORK_INVITE_PREFIX: &str = "nvpn://invite/";
 const NETWORK_INVITE_VERSION: u8 = 3;
+const SERVICE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(uniffi::Object, Debug)]
 pub struct FfiApp {
@@ -78,6 +88,7 @@ impl FfiApp {
 }
 
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)]
 struct NativeAppRuntime {
     rev: u64,
     app_version: String,
@@ -91,6 +102,14 @@ struct NativeAppRuntime {
     relay_connected: bool,
     session_status: String,
     daemon_state: Option<DaemonRuntimeState>,
+    service_supported: bool,
+    service_enablement_supported: bool,
+    service_installed: bool,
+    service_disabled: bool,
+    service_running: bool,
+    service_status_detail: String,
+    service_binary_version: String,
+    last_service_status_refresh_at: Option<Instant>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,6 +121,24 @@ struct CliStatusResponse {
 struct CliDaemonStatus {
     running: bool,
     state: Option<DaemonRuntimeState>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[allow(clippy::struct_excessive_bools)]
+struct CliServiceStatusResponse {
+    supported: bool,
+    installed: bool,
+    #[serde(default)]
+    disabled: bool,
+    loaded: bool,
+    running: bool,
+    pid: Option<u32>,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    plist_path: String,
+    #[serde(default)]
+    binary_version: String,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -150,6 +187,14 @@ impl NativeAppRuntime {
             relay_connected: false,
             session_status: "Disconnected".to_string(),
             daemon_state: None,
+            service_supported: desktop_service_supported(),
+            service_enablement_supported: desktop_service_supported(),
+            service_installed: false,
+            service_disabled: false,
+            service_running: false,
+            service_status_detail: String::new(),
+            service_binary_version: String::new(),
+            last_service_status_refresh_at: None,
         };
         let _ = runtime.refresh_status();
         Ok(runtime)
@@ -170,6 +215,14 @@ impl NativeAppRuntime {
             relay_connected: false,
             session_status: "Startup failed".to_string(),
             daemon_state: None,
+            service_supported: desktop_service_supported(),
+            service_enablement_supported: desktop_service_supported(),
+            service_installed: false,
+            service_disabled: false,
+            service_running: false,
+            service_status_detail: "Service status unavailable during startup failure".to_string(),
+            service_binary_version: String::new(),
+            last_service_status_refresh_at: None,
         }
     }
 
@@ -189,6 +242,15 @@ impl NativeAppRuntime {
         let listen_port = daemon_state
             .and_then(|state| (state.listen_port > 0).then_some(state.listen_port))
             .unwrap_or(self.config.node.listen_port);
+        let health = daemon_state
+            .map(|state| native_health_issues(&state.health))
+            .unwrap_or_default();
+        let network = daemon_state
+            .map(|state| native_network_summary(&state.network))
+            .unwrap_or_default();
+        let port_mapping = daemon_state
+            .map(|state| native_port_mapping_status(&state.port_mapping))
+            .unwrap_or_default();
 
         NativeAppState {
             rev: self.rev,
@@ -210,6 +272,13 @@ impl NativeAppRuntime {
                 .clone()
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| self.last_error.clone()),
+            cli_installed: capabilities.cli_install_supported && cli_binary_installed(),
+            service_supported: self.service_supported,
+            service_enablement_supported: self.service_enablement_supported,
+            service_installed: self.service_installed,
+            service_disabled: self.service_disabled,
+            service_running: self.service_running,
+            service_status_detail: self.service_status_detail.clone(),
             daemon_running: self.daemon_running,
             session_active: self.session_active,
             relay_connected: self.relay_connected,
@@ -217,21 +286,30 @@ impl NativeAppRuntime {
             daemon_binary_version: daemon_state
                 .map(|state| state.binary_version.clone())
                 .unwrap_or_default(),
+            service_binary_version: self.service_binary_version.clone(),
             own_npub: to_npub(&own_pubkey_hex),
             own_pubkey_hex: own_pubkey_hex.clone(),
             node_id: self.config.node.id.clone(),
             node_name: self.config.node_name.clone(),
+            self_magic_dns_name: self.config.self_magic_dns_name().unwrap_or_default(),
             endpoint,
             tunnel_ip: self.config.node.tunnel_ip.clone(),
             listen_port: u32::from(listen_port),
             network_id: self.config.effective_network_id(),
             active_network_invite: active_network_invite_code(&self.config).unwrap_or_default(),
-            exit_node: self.config.exit_node.clone(),
+            exit_node: if self.config.exit_node.trim().is_empty() {
+                String::new()
+            } else {
+                to_npub(&self.config.exit_node)
+            },
             advertise_exit_node: self.config.node.advertise_exit_node,
             advertised_routes: self.config.node.advertised_routes.clone(),
             effective_advertised_routes: self.config.effective_advertised_routes(),
             magic_dns_suffix: self.config.magic_dns_suffix.clone(),
+            magic_dns_status: self.magic_dns_status(),
             autoconnect: self.config.autoconnect,
+            lan_pairing_active: false,
+            lan_pairing_remaining_secs: 0,
             launch_on_startup: self.config.launch_on_startup,
             close_to_tray_on_close: self.config.close_to_tray_on_close,
             connected_peer_count: connected_peer_count as u64,
@@ -240,8 +318,13 @@ impl NativeAppRuntime {
                 || expected_peer_count > 0 && connected_peer_count >= expected_peer_count,
                 |state| state.mesh_ready,
             ),
+            health,
+            network,
+            port_mapping,
             networks: self.network_states(&own_pubkey_hex),
             relays: self.relay_states(),
+            relay_summary: self.relay_summary(),
+            lan_peers: Vec::<NativeLanPeerState>::new(),
         }
     }
 
@@ -260,8 +343,14 @@ impl NativeAppRuntime {
             NativeAppAction::GetState | NativeAppAction::Tick => self.refresh_status(),
             NativeAppAction::ConnectSession => self.connect_session(),
             NativeAppAction::DisconnectSession => self.disconnect_session(),
-            NativeAppAction::InstallCli => self.run_nvpn(["install-cli"]).map(|_| ()),
-            NativeAppAction::UninstallCli => self.run_nvpn(["uninstall-cli"]).map(|_| ()),
+            NativeAppAction::InstallCli => {
+                let output = self.run_nvpn_elevated(["install-cli", "--force"])?;
+                ensure_success("nvpn install-cli", &output)
+            }
+            NativeAppAction::UninstallCli => {
+                let output = self.run_nvpn_elevated(["uninstall-cli"])?;
+                ensure_success("nvpn uninstall-cli", &output)
+            }
             NativeAppAction::InstallSystemService => {
                 let output = self.run_nvpn_elevated([
                     "service",
@@ -270,7 +359,9 @@ impl NativeAppRuntime {
                     "--config",
                     self.config_path_str()?,
                 ])?;
-                ensure_success("nvpn service install", &output)
+                ensure_success("nvpn service install", &output)?;
+                self.invalidate_service_status();
+                self.refresh_service_status()
             }
             NativeAppAction::UninstallSystemService => {
                 let output = self.run_nvpn_elevated([
@@ -279,7 +370,9 @@ impl NativeAppRuntime {
                     "--config",
                     self.config_path_str()?,
                 ])?;
-                ensure_success("nvpn service uninstall", &output)
+                ensure_success("nvpn service uninstall", &output)?;
+                self.invalidate_service_status();
+                self.refresh_service_status()
             }
             NativeAppAction::EnableSystemService => {
                 let output = self.run_nvpn_elevated([
@@ -288,7 +381,9 @@ impl NativeAppRuntime {
                     "--config",
                     self.config_path_str()?,
                 ])?;
-                ensure_success("nvpn service enable", &output)
+                ensure_success("nvpn service enable", &output)?;
+                self.invalidate_service_status();
+                self.refresh_service_status()
             }
             NativeAppAction::DisableSystemService => {
                 let output = self.run_nvpn_elevated([
@@ -297,7 +392,9 @@ impl NativeAppRuntime {
                     "--config",
                     self.config_path_str()?,
                 ])?;
-                ensure_success("nvpn service disable", &output)
+                ensure_success("nvpn service disable", &output)?;
+                self.invalidate_service_status();
+                self.refresh_service_status()
             }
             NativeAppAction::AddNetwork { name } => {
                 self.config.add_network(&name);
@@ -474,6 +571,7 @@ impl NativeAppRuntime {
 
     fn refresh_status(&mut self) -> Result<()> {
         self.reload_config_from_disk()?;
+        self.refresh_service_status_if_due();
         let output = self.run_nvpn([
             "status",
             "--json",
@@ -563,11 +661,13 @@ impl NativeAppRuntime {
     }
 
     fn network_state(&self, network: &NetworkConfig, own_pubkey_hex: &str) -> NativeNetworkState {
-        let admins = network
+        let mut admins = network
             .admins
             .iter()
             .map(|admin| to_npub(admin))
             .collect::<Vec<_>>();
+        admins.sort();
+        admins.dedup();
         let mut participant_keys = network.participants.clone();
         participant_keys.extend(network.admins.iter().cloned());
         participant_keys.sort();
@@ -590,9 +690,24 @@ impl NativeAppRuntime {
             id: network.id.clone(),
             name: network.name.clone(),
             enabled: network.enabled,
-            network_id: network.network_id.clone(),
+            network_id: normalize_runtime_network_id(&network.network_id),
             local_is_admin: self.config.is_network_admin(&network.id, own_pubkey_hex),
             join_requests_enabled: network.listen_for_join_requests,
+            invite_inviter_npub: if network.invite_inviter.is_empty() {
+                String::new()
+            } else {
+                to_npub(&network.invite_inviter)
+            },
+            admin_npubs: admins.clone(),
+            outbound_join_request: network
+                .outbound_join_request
+                .as_ref()
+                .map(native_outbound_join_request),
+            inbound_join_requests: network
+                .inbound_join_requests
+                .iter()
+                .map(native_inbound_join_request)
+                .collect(),
             online_count,
             expected_count: participants.len() as u64,
             admins,
@@ -614,30 +729,58 @@ impl NativeAppRuntime {
         });
         let is_local = participant == own_pubkey_hex;
         let reachable = is_local || daemon_peer.is_some_and(|peer| peer.reachable);
-        let alias = self
-            .config
-            .peer_alias(participant)
+        let magic_dns_alias = if is_local {
+            self.config.self_magic_dns_label().unwrap_or_default()
+        } else {
+            self.config.peer_alias(participant).unwrap_or_default()
+        };
+        let magic_dns_name = if is_local {
+            self.config.self_magic_dns_name().unwrap_or_default()
+        } else {
+            self.config
+                .magic_dns_name_for_participant(participant)
+                .unwrap_or_default()
+        };
+        let alias = non_empty(&magic_dns_alias).unwrap_or_else(|| short_pubkey(participant));
+        let tunnel_ip = daemon_peer
+            .map(|peer| peer.tunnel_ip.clone())
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| short_pubkey(participant));
+            .unwrap_or_else(|| {
+                derive_mesh_tunnel_ip(&network.network_id, participant)
+                    .unwrap_or_else(|| "-".to_string())
+            });
+        let advertised_routes = if is_local {
+            self.config.effective_advertised_routes()
+        } else {
+            daemon_peer
+                .map(|peer| peer.advertised_routes.clone())
+                .unwrap_or_default()
+        };
+        let offers_exit_node = if is_local {
+            self.config.node.advertise_exit_node
+        } else {
+            peer_offers_exit_node(&advertised_routes)
+        };
+        let peer_state = self.peer_state_label(participant, daemon_peer, is_local);
+        let presence_state = Self::peer_presence_label(daemon_peer, is_local);
 
         NativeParticipantState {
             npub: to_npub(participant),
             pubkey_hex: participant.to_string(),
             alias,
-            tunnel_ip: daemon_peer
-                .map(|peer| peer.tunnel_ip.clone())
-                .unwrap_or_default(),
+            magic_dns_alias,
+            magic_dns_name,
+            tunnel_ip,
             is_admin: network.admins.iter().any(|admin| admin == participant),
             reachable,
-            status_text: if is_local {
-                "local".to_string()
-            } else if reachable {
-                "online".to_string()
-            } else if self.session_active {
-                "pending".to_string()
-            } else {
-                "offline".to_string()
-            },
+            tx_bytes: daemon_peer.map_or(0, |peer| peer.tx_bytes),
+            rx_bytes: daemon_peer.map_or(0, |peer| peer.rx_bytes),
+            advertised_routes,
+            offers_exit_node,
+            state: peer_state.clone(),
+            presence_state,
+            status_text: Self::peer_status_text(daemon_peer, is_local, &peer_state),
+            last_signal_text: Self::peer_last_signal_text(daemon_peer, is_local),
         }
     }
 
@@ -664,6 +807,178 @@ impl NativeAppRuntime {
                 },
             })
             .collect()
+    }
+
+    fn relay_summary(&self) -> NativeRelaySummary {
+        let mut summary = NativeRelaySummary::default();
+        for relay in self.relay_states() {
+            match relay.state.as_str() {
+                "up" => summary.up += 1,
+                "down" => summary.down += 1,
+                "checking" => summary.checking += 1,
+                _ => summary.unknown += 1,
+            }
+        }
+        summary
+    }
+
+    fn refresh_service_status_if_due(&mut self) {
+        if !desktop_service_supported() {
+            self.service_supported = false;
+            self.service_enablement_supported = false;
+            self.service_installed = false;
+            self.service_disabled = false;
+            self.service_running = false;
+            self.service_binary_version.clear();
+            self.service_status_detail =
+                "Background service unsupported on this platform".to_string();
+            return;
+        }
+
+        let now = Instant::now();
+        if self
+            .last_service_status_refresh_at
+            .is_some_and(|last| now.duration_since(last) < SERVICE_STATUS_REFRESH_INTERVAL)
+        {
+            return;
+        }
+
+        if let Err(error) = self.refresh_service_status() {
+            self.service_supported = true;
+            self.service_enablement_supported = true;
+            self.service_installed = false;
+            self.service_disabled = false;
+            self.service_running = false;
+            self.service_binary_version.clear();
+            self.service_status_detail = format!("Service status unavailable: {error}");
+        }
+    }
+
+    fn refresh_service_status(&mut self) -> Result<()> {
+        self.last_service_status_refresh_at = Some(Instant::now());
+        let output = self.run_nvpn([
+            "service",
+            "status",
+            "--json",
+            "--config",
+            self.config_path_str()?,
+        ])?;
+        if !output.status.success() {
+            return Err(command_failure("nvpn service status", &output));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let json_text = extract_json_document(&stdout)?;
+        let status = serde_json::from_str::<CliServiceStatusResponse>(json_text)
+            .context("failed to parse `nvpn service status --json` output")?;
+        self.service_supported = status.supported;
+        self.service_enablement_supported = status.supported;
+        self.service_installed = status.installed;
+        self.service_disabled = status.disabled;
+        self.service_running = status.running;
+        self.service_binary_version
+            .clone_from(&status.binary_version);
+        self.service_status_detail = service_status_detail(&status);
+        Ok(())
+    }
+
+    fn invalidate_service_status(&mut self) {
+        self.last_service_status_refresh_at = None;
+    }
+
+    fn magic_dns_status(&self) -> String {
+        if self.config.magic_dns_suffix.trim().is_empty() {
+            return "DNS disabled".to_string();
+        }
+        if self.session_active {
+            format!("Serving .{} names", self.config.magic_dns_suffix)
+        } else {
+            "DNS disabled (VPN off)".to_string()
+        }
+    }
+
+    fn peer_state_label(
+        &self,
+        participant: &str,
+        peer: Option<&DaemonPeerState>,
+        is_local: bool,
+    ) -> String {
+        if is_local {
+            return "local".to_string();
+        }
+        if peer.is_some_and(|peer| peer.reachable) {
+            return "online".to_string();
+        }
+        if peer
+            .and_then(peer_last_signal_secs)
+            .is_some_and(within_presence_grace)
+        {
+            return "pending".to_string();
+        }
+        if peer.is_some() {
+            return "offline".to_string();
+        }
+        if self
+            .config
+            .all_participant_pubkeys_hex()
+            .iter()
+            .any(|configured| configured == participant)
+        {
+            return "unknown".to_string();
+        }
+        "unknown".to_string()
+    }
+
+    fn peer_presence_label(peer: Option<&DaemonPeerState>, is_local: bool) -> String {
+        if is_local {
+            return "local".to_string();
+        }
+        if peer.is_some_and(|peer| peer.reachable)
+            || peer
+                .and_then(peer_last_signal_secs)
+                .is_some_and(within_presence_grace)
+        {
+            return "present".to_string();
+        }
+        if peer.is_some() {
+            return "absent".to_string();
+        }
+        "unknown".to_string()
+    }
+
+    fn peer_status_text(peer: Option<&DaemonPeerState>, is_local: bool, state: &str) -> String {
+        if is_local {
+            return "local".to_string();
+        }
+        match state {
+            "online" => peer.and_then(|peer| peer.last_handshake_at).map_or_else(
+                || "online".to_string(),
+                |seen| format!("online (seen {})", compact_age_text(age_secs_since(seen))),
+            ),
+            "pending" => peer
+                .and_then(|peer| {
+                    non_empty(peer.runtime_endpoint.as_deref().unwrap_or(&peer.endpoint))
+                })
+                .map_or_else(
+                    || "fips presence pending".to_string(),
+                    |endpoint| format!("fips pending via {}", shorten_middle(&endpoint, 18, 10)),
+                ),
+            "offline" => peer.and_then(peer_last_signal_secs).map_or_else(
+                || "offline".to_string(),
+                |seen| format!("offline ({})", compact_age_text(age_secs_since(seen))),
+            ),
+            _ => "unknown".to_string(),
+        }
+    }
+
+    fn peer_last_signal_text(peer: Option<&DaemonPeerState>, is_local: bool) -> String {
+        if is_local {
+            return "self".to_string();
+        }
+        peer.and_then(peer_last_signal_secs).map_or_else(
+            || "nostr unseen".to_string(),
+            |seen| format!("nostr seen {}", compact_age_text(age_secs_since(seen))),
+        )
     }
 
     fn config_path_str(&self) -> Result<&str> {
@@ -724,6 +1039,180 @@ impl NativeAppRuntime {
             self.session_status = error;
         }
     }
+}
+
+fn native_outbound_join_request(
+    request: &PendingOutboundJoinRequest,
+) -> NativeOutboundJoinRequestState {
+    NativeOutboundJoinRequestState {
+        recipient_npub: to_npub(&request.recipient),
+        recipient_pubkey_hex: request.recipient.clone(),
+        requested_at_text: join_request_age_text(request.requested_at),
+    }
+}
+
+fn native_inbound_join_request(
+    request: &PendingInboundJoinRequest,
+) -> NativeInboundJoinRequestState {
+    NativeInboundJoinRequestState {
+        requester_npub: to_npub(&request.requester),
+        requester_pubkey_hex: request.requester.clone(),
+        requester_node_name: request.requester_node_name.clone(),
+        requested_at_text: join_request_age_text(request.requested_at),
+    }
+}
+
+fn native_health_issues(issues: &[HealthIssue]) -> Vec<NativeHealthIssue> {
+    issues
+        .iter()
+        .map(|issue| NativeHealthIssue {
+            code: issue.code.clone(),
+            severity: format!("{:?}", issue.severity).to_ascii_lowercase(),
+            summary: issue.summary.clone(),
+            detail: issue.detail.clone(),
+        })
+        .collect()
+}
+
+fn native_network_summary(summary: &NetworkSummary) -> NativeNetworkSummary {
+    NativeNetworkSummary {
+        default_interface: summary.default_interface.clone().unwrap_or_default(),
+        primary_ipv4: summary.primary_ipv4.clone().unwrap_or_default(),
+        primary_ipv6: summary.primary_ipv6.clone().unwrap_or_default(),
+        gateway_ipv4: summary.gateway_ipv4.clone().unwrap_or_default(),
+        gateway_ipv6: summary.gateway_ipv6.clone().unwrap_or_default(),
+        changed_at: summary.changed_at.unwrap_or_default(),
+        captive_portal: summary
+            .captive_portal
+            .map_or_else(|| "unknown".to_string(), |value| value.to_string()),
+    }
+}
+
+fn native_probe_status(status: &ProbeStatus) -> NativeProbeStatus {
+    NativeProbeStatus {
+        state: format!("{:?}", status.state).to_ascii_lowercase(),
+        detail: status.detail.clone(),
+    }
+}
+
+fn native_port_mapping_status(status: &PortMappingStatus) -> NativePortMappingStatus {
+    NativePortMappingStatus {
+        upnp: native_probe_status(&status.upnp),
+        nat_pmp: native_probe_status(&status.nat_pmp),
+        pcp: native_probe_status(&status.pcp),
+        active_protocol: status.active_protocol.clone().unwrap_or_default(),
+        external_endpoint: status.external_endpoint.clone().unwrap_or_default(),
+        gateway: status.gateway.clone().unwrap_or_default(),
+        good_until: status.good_until.unwrap_or_default(),
+    }
+}
+
+fn service_status_detail(status: &CliServiceStatusResponse) -> String {
+    if !status.supported {
+        return "Background service unsupported on this platform".to_string();
+    }
+    if !status.installed {
+        return "Background service is not installed".to_string();
+    }
+    if status.disabled {
+        return "Background service is installed but disabled in launchd".to_string();
+    }
+    if status.running {
+        let label = status
+            .label
+            .trim()
+            .strip_prefix("to.iris.")
+            .unwrap_or_else(|| status.label.trim());
+        let label_suffix = if label.is_empty() {
+            String::new()
+        } else {
+            format!(" ({label})")
+        };
+        return status.pid.map_or_else(
+            || format!("Background service running{label_suffix}"),
+            |pid| format!("Background service running{label_suffix}, pid {pid}"),
+        );
+    }
+    if status.loaded {
+        return "Background service installed but not running".to_string();
+    }
+    if !status.plist_path.trim().is_empty() {
+        return format!(
+            "Background service installed but launch status is unavailable: {}",
+            status.plist_path
+        );
+    }
+    "Background service installed but launch status is unavailable".to_string()
+}
+
+fn desktop_service_supported() -> bool {
+    cfg!(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    ))
+}
+
+fn cli_binary_installed() -> bool {
+    resolve_nvpn_cli_path().is_ok()
+}
+
+fn peer_offers_exit_node(routes: &[String]) -> bool {
+    routes
+        .iter()
+        .any(|route| route == "0.0.0.0/0" || route == "::/0")
+}
+
+fn peer_last_signal_secs(peer: &DaemonPeerState) -> Option<u64> {
+    peer.last_signal_seen_at
+        .or_else(|| (peer.presence_timestamp > 0).then_some(peer.presence_timestamp))
+}
+
+fn within_presence_grace(seen_at: u64) -> bool {
+    age_secs_since(seen_at) <= 90
+}
+
+fn age_secs_since(epoch_secs: u64) -> u64 {
+    unix_timestamp().saturating_sub(epoch_secs)
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn join_request_age_text(requested_at: u64) -> String {
+    if requested_at == 0 {
+        return "just now".to_string();
+    }
+    compact_age_text(age_secs_since(requested_at))
+}
+
+fn compact_age_text(age_secs: u64) -> String {
+    match age_secs {
+        0..=59 => format!("{age_secs}s ago"),
+        60..=3_599 => format!("{}m ago", age_secs / 60),
+        3_600..=86_399 => format!("{}h ago", age_secs / 3_600),
+        86_400..=604_799 => format!("{}d ago", age_secs / 86_400),
+        604_800..=2_591_999 => format!("{}w ago", age_secs / 604_800),
+        2_592_000..=31_535_999 => format!("{}mo ago", age_secs / 2_592_000),
+        _ => format!("{}y ago", age_secs / 31_536_000),
+    }
+}
+
+fn shorten_middle(value: &str, prefix: usize, suffix: usize) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= prefix + suffix + 1 {
+        return value.to_string();
+    }
+    let start = chars.iter().take(prefix).collect::<String>();
+    let end = chars
+        .iter()
+        .skip(chars.len().saturating_sub(suffix))
+        .collect::<String>();
+    format!("{start}...{end}")
 }
 
 fn native_config_path(data_dir: &str) -> PathBuf {
