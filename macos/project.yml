@@ -1,0 +1,38 @@
+name: NostrVpnMac
+options:
+  bundleIdPrefix: to.iris.nvpn
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: to.iris.nvpn.macos
+    MARKETING_VERSION: 0.3.23
+    CURRENT_PROJECT_VERSION: 1
+    VERSIONING_SYSTEM: apple-generic
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: 5.0
+
+targets:
+  NostrVpnMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: Bindings
+        excludes:
+          - "*.h"
+          - "*.modulemap"
+      - path: Resources
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: Nostr VPN
+        PRODUCT_MODULE_NAME: NostrVpnMac
+        DEFINES_MODULE: YES
+        INFOPLIST_FILE: Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: Nostr VPN
+    dependencies:
+      - framework: Frameworks/NostrVpnAppCore.xcframework
+        embed: false

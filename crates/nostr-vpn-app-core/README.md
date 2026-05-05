@@ -6,9 +6,10 @@ being extracted from the current Tauri backend.
 It currently owns:
 
 - the UI snapshot structs that mirror the shipped Svelte/Tauri `UiState`
-- the complete action set corresponding to the current Tauri commands
+- the typed native state used by the macOS SwiftUI shell
+- the complete typed action set corresponding to current app behavior
 - platform capability projection for desktop, Android, and iPhone
-- a small UniFFI JSON bridge for Swift, Kotlin, C#, and other native shells
+- a UniFFI `FfiApp` object with `state`, `refresh`, and `dispatch`
 
-The JSON bridge is intentionally narrow. The long-term target is typed UniFFI
-records and enums once the backend actor has moved out of the Tauri crate.
+Tauri can keep consuming the shared data structs while native shells move to the
+typed UniFFI API.

@@ -1219,9 +1219,11 @@ impl NvpnBackend {
             endpoint,
             tunnel_ip: self.config.node.tunnel_ip.clone(),
             listen_port,
-            exit_node: (!self.config.exit_node.trim().is_empty())
-                .then(|| to_npub(&self.config.exit_node))
-                .unwrap_or_default(),
+            exit_node: if self.config.exit_node.trim().is_empty() {
+                String::new()
+            } else {
+                to_npub(&self.config.exit_node)
+            },
             advertise_exit_node: self.config.node.advertise_exit_node,
             advertised_routes: self.config.node.advertised_routes.clone(),
             effective_advertised_routes: self.config.effective_advertised_routes(),

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimePlatform {
     Desktop,
@@ -9,7 +9,7 @@ pub enum RuntimePlatform {
 }
 
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeRuntimeCapabilities {
     pub platform: String,
@@ -79,17 +79,6 @@ pub fn runtime_capabilities_for(
             .to_string(),
         },
     }
-}
-
-#[must_use]
-pub fn runtime_capabilities_json(platform: &str, ios_simulator: bool) -> String {
-    let platform = match platform {
-        "android" => RuntimePlatform::Android,
-        "ios" | "iphone" => RuntimePlatform::Ios,
-        _ => RuntimePlatform::Desktop,
-    };
-    serde_json::to_string(&runtime_capabilities_for(platform, ios_simulator))
-        .unwrap_or_else(|_| "{}".to_string())
 }
 
 #[cfg(test)]

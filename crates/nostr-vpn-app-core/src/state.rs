@@ -195,7 +195,7 @@ pub struct UiState {
     pub lan_peers: Vec<LanPeerView>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsPatch {
     pub node_name: Option<String>,
@@ -280,11 +280,6 @@ impl Default for TrayRuntimeState {
     }
 }
 
-#[must_use]
-pub fn empty_state_json() -> String {
-    serde_json::to_string(&UiState::default()).unwrap_or_else(|_| "{}".to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,13 +312,5 @@ mod tests {
         let value = serde_json::to_value(network).expect("serialize network");
         assert_eq!(value["joinRequestsEnabled"], true);
         assert!(value.get("listenForJoinRequests").is_none());
-    }
-
-    #[test]
-    fn empty_state_json_round_trips() {
-        let encoded = empty_state_json();
-        let decoded = serde_json::from_str::<UiState>(&encoded).expect("empty state");
-
-        assert_eq!(decoded, UiState::default());
     }
 }

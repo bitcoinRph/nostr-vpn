@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT="$ROOT/macos/NostrVpnMac.xcodeproj"
+SCHEME="NostrVpnMac"
+
+"$ROOT/scripts/macos-build" macos-build
+
+APP_PATH="$(
+  xcodebuild \
+    -project "$PROJECT" \
+    -scheme "$SCHEME" \
+    -destination 'platform=macOS' \
+    -showBuildSettings 2>/dev/null |
+    awk -F' = ' '
+      /^[[:space:]]*BUILT_PRODUCTS_DIR = / { dir=$2 }
+      /^[[:space:]]*FULL_PRODUCT_NAME = / { app=$2 }
+      END { if (dir != "" && app != "") print dir "/" app }
+    '
+)"
+
+if [[ -z "${APP_PATH:-}" || ! -d "$APP_PATH" ]]; then
+  echo "Built macOS app not found." >&2
+  exit 1
+fi
+
+open "$APP_PATH"
+echo "macOS app launched: $APP_PATH"

@@ -1,0 +1,11 @@
+[bindings.kotlin]
+package_name = "to.nostrvpn.appcore"
+cdylib_name = "nostr_vpn_app_core"
+
+[bindings.swift]
+module_name = "NostrVpnAppCore"
+
+[bindings.csharp]
+namespace = "NostrVpn.AppCore"
+access_modifier = "public"
+global_methods_class_name = "Native"
