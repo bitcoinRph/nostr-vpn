@@ -88,28 +88,28 @@ export const healthSummaryText = (state: UiState) => {
 export const participantTransportBadgeText = (participant: ParticipantView) => {
   switch (participant.state) {
     case 'local':
-      return 'WireGuard self'
+      return 'FIPS self'
     case 'online':
-      return 'WireGuard online'
+      return 'FIPS reachable'
     case 'pending':
-      return 'WireGuard waiting'
+      return 'FIPS pending'
     case 'offline':
-      return 'WireGuard offline'
+      return 'FIPS offline'
     default:
-      return 'WireGuard unknown'
+      return 'FIPS unknown'
   }
 }
 
 export const participantPresenceBadgeText = (participant: ParticipantView) => {
   switch (participant.presenceState) {
     case 'local':
-      return 'Nostr self'
+      return 'Mesh self'
     case 'present':
-      return 'Nostr present'
+      return 'Mesh seen'
     case 'absent':
-      return 'Nostr absent'
+      return 'Mesh unseen'
     default:
-      return 'Nostr unknown'
+      return 'Mesh unknown'
   }
 }
 
@@ -151,7 +151,7 @@ export const joinRequestStatusText = (network: NetworkView) => {
   if (!network.inviteInviterNpub) {
     return ''
   }
-  return `Imported from ${network.inviteInviterNpub}. Send a Nostr join request if they have not added this device yet.`
+  return `Imported from ${network.inviteInviterNpub}. Send a FIPS join request if they have not added this device yet.`
 }
 
 export const heroStateBadgeClass = (state: UiState) => {
@@ -390,7 +390,7 @@ export const selectedExitNodeStatusText = (state: UiState) => {
     case 'online':
       return `${label} is selected and ready to carry internet-bound traffic.`
     case 'pending':
-      return `${label} is selected, but WireGuard is still waiting for a handshake.`
+      return `${label} is selected, but FIPS reachability is still pending.`
     case 'offline':
       return `${label} is selected, but it is currently offline.`
     default:
@@ -432,10 +432,10 @@ export const selectedExitNodeBadgeText = (state: UiState) => {
 
 export const publicRelayFallbackStatusText = (state: UiState) => {
   if (state.usePublicRelayFallback) {
-    return 'If a peer cannot be reached directly, nostr-vpn will try discoverable public relays before giving up.'
+    return 'Legacy WireGuard fallback can still use public relays for non-FIPS paths.'
   }
 
-  return 'Only direct peer paths will be used. Devices on restrictive networks may stay offline until a direct path works.'
+  return 'FIPS private mesh paths stay in-app; legacy WireGuard relay fallback is disabled.'
 }
 
 export const formatTrafficBytes = (bytes: number) => {

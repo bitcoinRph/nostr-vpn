@@ -5,15 +5,23 @@ use fips_endpoint::{
     Config, ConnectPolicy, FipsEndpoint, FipsEndpointError, NostrDiscoveryPolicy,
     PeerConfig as FipsPeerConfig, TransportInstances, UdpConfig,
 };
-use nostr_vpn_core::config::{AppConfig, derive_mesh_tunnel_ip};
+use nostr_vpn_core::config::{AppConfig, derive_mesh_tunnel_ip, normalize_nostr_pubkey};
 use nostr_vpn_core::data_plane::{MeshPeerStatus, PrivatePacket};
+use nostr_vpn_core::fips_control::{
+    FipsControlFrame, decode_fips_control_frame, encode_fips_control_frame,
+};
 use nostr_vpn_core::fips_mesh::{FipsMeshPeerConfig, FipsMeshRuntime};
+use nostr_vpn_core::join_requests::MeshJoinRequest;
+use nostr_vpn_core::signaling::NetworkRoster;
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::mpsc;
+
+const FIPS_PEER_ONLINE_GRACE_SECS: u64 = 45;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use boringtun::device::{Error as TunError, tun::TunSocket};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use tokio::sync::mpsc;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use tokio::task::JoinHandle;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -22,6 +30,34 @@ use tokio::time::{Duration, sleep};
 pub(crate) struct FipsPrivateMeshRuntime {
     endpoint: FipsEndpoint,
     mesh: RwLock<FipsMeshRuntime>,
+    presence: RwLock<HashMap<String, FipsPeerPresence>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct FipsPeerPresence {
+    last_seen_at: Option<u64>,
+    tx_bytes: u64,
+    rx_bytes: u64,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum FipsPrivateMeshEvent {
+    Packet(PrivatePacket),
+    Presence {
+        participant_pubkey: String,
+        last_seen_at: u64,
+    },
+    JoinRequest {
+        sender_pubkey: String,
+        requested_at: u64,
+        request: MeshJoinRequest,
+    },
+    Roster {
+        sender_pubkey: String,
+        network_id: String,
+        roster: NetworkRoster,
+    },
 }
 
 impl FipsPrivateMeshRuntime {
@@ -63,6 +99,7 @@ impl FipsPrivateMeshRuntime {
         Ok(Self {
             endpoint,
             mesh: RwLock::new(FipsMeshRuntime::new(peers)),
+            presence: RwLock::new(HashMap::new()),
         })
     }
 
@@ -82,17 +119,71 @@ impl FipsPrivateMeshRuntime {
         };
 
         self.endpoint
-            .send(outgoing.endpoint_npub, outgoing.bytes)
+            .send(outgoing.endpoint_npub, outgoing.bytes.clone())
             .await
             .context("failed to send private packet over FIPS endpoint data")?;
+        self.note_tx(&outgoing.participant_pubkey, outgoing.bytes.len())?;
         Ok(true)
     }
 
-    pub(crate) async fn recv_tunnel_packet(&self) -> Result<Option<PrivatePacket>> {
+    pub(crate) async fn recv_mesh_event(&self) -> Result<Option<FipsPrivateMeshEvent>> {
         loop {
             let Some(message) = self.endpoint.recv().await else {
                 return Ok(None);
             };
+            let Some(source_pubkey) = self.source_pubkey(message.source_npub.as_deref()) else {
+                continue;
+            };
+
+            if let Some(frame) = decode_fips_control_frame(&message.data)? {
+                let now = unix_timestamp();
+                self.note_rx(&source_pubkey, message.data.len(), now)?;
+                match frame {
+                    FipsControlFrame::Ping {
+                        network_id,
+                        sent_at,
+                    } => {
+                        let reply = FipsControlFrame::Pong {
+                            network_id,
+                            sent_at,
+                            replied_at: now,
+                        };
+                        if let Some(source_npub) = message.source_npub {
+                            let encoded = encode_fips_control_frame(&reply)?;
+                            if let Err(error) = self.endpoint.send(source_npub, encoded).await {
+                                eprintln!("fips: failed to reply to peer ping: {error}");
+                            }
+                        }
+                        return Ok(Some(FipsPrivateMeshEvent::Presence {
+                            participant_pubkey: source_pubkey,
+                            last_seen_at: now,
+                        }));
+                    }
+                    FipsControlFrame::Pong { .. } => {
+                        return Ok(Some(FipsPrivateMeshEvent::Presence {
+                            participant_pubkey: source_pubkey,
+                            last_seen_at: now,
+                        }));
+                    }
+                    FipsControlFrame::JoinRequest {
+                        requested_at,
+                        request,
+                    } => {
+                        return Ok(Some(FipsPrivateMeshEvent::JoinRequest {
+                            sender_pubkey: source_pubkey,
+                            requested_at,
+                            request,
+                        }));
+                    }
+                    FipsControlFrame::Roster { network_id, roster } => {
+                        return Ok(Some(FipsPrivateMeshEvent::Roster {
+                            sender_pubkey: source_pubkey,
+                            network_id,
+                            roster,
+                        }));
+                    }
+                }
+            }
 
             if let Some(packet) = self
                 .mesh
@@ -100,16 +191,51 @@ impl FipsPrivateMeshRuntime {
                 .map_err(|_| anyhow!("FIPS mesh route table lock poisoned"))?
                 .receive_endpoint_data(message.source_npub.as_deref(), &message.data)
             {
-                return Ok(Some(packet));
+                let now = unix_timestamp();
+                self.note_rx(&packet.source_pubkey, message.data.len(), now)?;
+                return Ok(Some(FipsPrivateMeshEvent::Packet(packet)));
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn recv_tunnel_packet(&self) -> Result<Option<PrivatePacket>> {
+        loop {
+            match self.recv_mesh_event().await? {
+                Some(FipsPrivateMeshEvent::Packet(packet)) => return Ok(Some(packet)),
+                Some(_) => {}
+                None => return Ok(None),
             }
         }
     }
 
     pub(crate) fn peer_statuses(&self) -> Vec<MeshPeerStatus> {
-        self.mesh
+        let now = unix_timestamp();
+        let presence = self.presence.read().ok();
+        let mut statuses = self
+            .mesh
             .read()
             .map(|mesh| mesh.peer_statuses())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        for status in &mut statuses {
+            let peer_presence = presence
+                .as_ref()
+                .and_then(|presence| presence.get(&status.pubkey));
+            status.last_seen_at = peer_presence.and_then(|value| value.last_seen_at);
+            status.tx_bytes = peer_presence.map(|value| value.tx_bytes).unwrap_or(0);
+            status.rx_bytes = peer_presence.map(|value| value.rx_bytes).unwrap_or(0);
+            status.connected = status.last_seen_at.is_some_and(|last_seen_at| {
+                now.saturating_sub(last_seen_at) <= FIPS_PEER_ONLINE_GRACE_SECS
+            });
+            status.error = if status.connected {
+                None
+            } else {
+                peer_presence
+                    .and_then(|value| value.error.clone())
+                    .or_else(|| Some("fips presence pending".to_string()))
+            };
+        }
+        statuses
     }
 
     pub(crate) fn replace_peers(&self, peers: Vec<FipsMeshPeerConfig>) -> Result<()> {
@@ -118,6 +244,119 @@ impl FipsPrivateMeshRuntime {
             .write()
             .map_err(|_| anyhow!("FIPS mesh route table lock poisoned"))? =
             FipsMeshRuntime::new(peers);
+        let configured = self
+            .mesh
+            .read()
+            .map_err(|_| anyhow!("FIPS mesh route table lock poisoned"))?
+            .peer_pubkeys();
+        self.presence
+            .write()
+            .map_err(|_| anyhow!("FIPS mesh presence lock poisoned"))?
+            .retain(|participant, _| configured.iter().any(|value| value == participant));
+        Ok(())
+    }
+
+    pub(crate) async fn ping_peers(&self, network_id: &str, now: u64) -> Result<usize> {
+        let frame = FipsControlFrame::Ping {
+            network_id: network_id.to_string(),
+            sent_at: now,
+        };
+        self.broadcast_control_frame(&frame).await
+    }
+
+    pub(crate) async fn send_join_request(
+        &self,
+        participant: &str,
+        requested_at: u64,
+        request: MeshJoinRequest,
+    ) -> Result<()> {
+        self.send_control_frame(
+            participant,
+            &FipsControlFrame::JoinRequest {
+                requested_at,
+                request,
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn send_roster(
+        &self,
+        participant: &str,
+        network_id: &str,
+        roster: NetworkRoster,
+    ) -> Result<()> {
+        self.send_control_frame(
+            participant,
+            &FipsControlFrame::Roster {
+                network_id: network_id.to_string(),
+                roster,
+            },
+        )
+        .await
+    }
+
+    async fn broadcast_control_frame(&self, frame: &FipsControlFrame) -> Result<usize> {
+        let participants = self
+            .mesh
+            .read()
+            .map_err(|_| anyhow!("FIPS mesh route table lock poisoned"))?
+            .peer_pubkeys();
+        let mut sent = 0usize;
+        for participant in participants {
+            if self.send_control_frame(&participant, frame).await.is_ok() {
+                sent += 1;
+            }
+        }
+        Ok(sent)
+    }
+
+    async fn send_control_frame(&self, participant: &str, frame: &FipsControlFrame) -> Result<()> {
+        let endpoint_npub = self
+            .mesh
+            .read()
+            .map_err(|_| anyhow!("FIPS mesh route table lock poisoned"))?
+            .peer_endpoint_npub(participant)
+            .ok_or_else(|| anyhow!("no FIPS endpoint peer for {participant}"))?;
+        let encoded = encode_fips_control_frame(frame)?;
+        self.endpoint
+            .send(endpoint_npub, encoded.clone())
+            .await
+            .with_context(|| format!("failed to send FIPS control frame to {participant}"))?;
+        self.note_tx(participant, encoded.len())?;
+        Ok(())
+    }
+
+    fn source_pubkey(&self, source_npub: Option<&str>) -> Option<String> {
+        let source_npub = source_npub?;
+        self.mesh
+            .read()
+            .ok()
+            .and_then(|mesh| mesh.participant_for_endpoint_npub(source_npub))
+            .or_else(|| normalize_nostr_pubkey(source_npub).ok())
+    }
+
+    fn note_tx(&self, participant: &str, len: usize) -> Result<()> {
+        let participant = normalize_nostr_pubkey(participant)?;
+        let mut presence = self
+            .presence
+            .write()
+            .map_err(|_| anyhow!("FIPS mesh presence lock poisoned"))?;
+        let entry = presence.entry(participant).or_default();
+        entry.tx_bytes = entry.tx_bytes.saturating_add(len as u64);
+        Ok(())
+    }
+
+    fn note_rx(&self, participant: &str, len: usize, now: u64) -> Result<()> {
+        let participant = normalize_nostr_pubkey(participant)?;
+        let mut presence = self
+            .presence
+            .write()
+            .map_err(|_| anyhow!("FIPS mesh presence lock poisoned"))?;
+        let entry = presence.entry(participant).or_default();
+        entry.last_seen_at = Some(now);
+        entry.rx_bytes = entry.rx_bytes.saturating_add(len as u64);
+        entry.error = None;
         Ok(())
     }
 
@@ -181,21 +420,36 @@ impl FipsPrivateTunnelConfig {
     ) -> Result<Self> {
         let mut peers = Vec::new();
         let mut route_targets = Vec::new();
-        for participant in app
-            .participant_pubkeys_hex()
-            .into_iter()
-            .filter(|participant| Some(participant.as_str()) != own_pubkey)
-        {
+        let participants = app.participant_pubkeys_hex();
+        let mut route_by_participant = HashMap::<String, String>::new();
+        for participant in participants {
+            if Some(participant.as_str()) == own_pubkey {
+                continue;
+            }
             let Some(tunnel_ip) = derive_mesh_tunnel_ip(network_id, &participant) else {
                 continue;
             };
             let allowed_ip = format!("{}/32", strip_cidr(&tunnel_ip));
             route_targets.push(allowed_ip.clone());
+            route_by_participant.insert(participant, allowed_ip);
+        }
+
+        for participant in app
+            .active_network_signal_pubkeys_hex()
+            .into_iter()
+            .filter(|participant| Some(participant.as_str()) != own_pubkey)
+        {
+            let allowed_ips = route_by_participant
+                .remove(&participant)
+                .map(|allowed_ip| vec![allowed_ip])
+                .unwrap_or_default();
             peers.push(FipsMeshPeerConfig::from_participant_pubkey(
                 participant,
-                vec![allowed_ip],
+                allowed_ips,
             )?);
         }
+        peers.sort_by(|left, right| left.participant_pubkey.cmp(&right.participant_pubkey));
+        peers.dedup_by(|left, right| left.participant_pubkey == right.participant_pubkey);
         route_targets.sort();
         route_targets.dedup();
 
@@ -233,6 +487,7 @@ pub(crate) struct FipsPrivateTunnelRuntime {
     tun_read_task: JoinHandle<()>,
     mesh_send_task: JoinHandle<()>,
     mesh_recv_task: JoinHandle<()>,
+    event_rx: mpsc::Receiver<FipsPrivateMeshEvent>,
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -258,6 +513,7 @@ impl FipsPrivateTunnelRuntime {
             .with_context(|| format!("failed to configure FIPS tunnel interface {iface}"))?;
 
         let (packet_tx, mut packet_rx) = mpsc::channel::<Vec<u8>>(1024);
+        let (event_tx, event_rx) = mpsc::channel::<FipsPrivateMeshEvent>(1024);
         let tun_read_task = spawn_tun_read_task(Arc::clone(&tun), packet_tx);
         let mesh_send_task = {
             let mesh = Arc::clone(&mesh);
@@ -269,7 +525,7 @@ impl FipsPrivateTunnelRuntime {
                 }
             })
         };
-        let mesh_recv_task = spawn_mesh_recv_task(Arc::clone(&mesh), tun);
+        let mesh_recv_task = spawn_mesh_recv_task(Arc::clone(&mesh), tun, event_tx);
 
         Ok(Self {
             iface,
@@ -277,6 +533,7 @@ impl FipsPrivateTunnelRuntime {
             tun_read_task,
             mesh_send_task,
             mesh_recv_task,
+            event_rx,
         })
     }
 
@@ -286,6 +543,49 @@ impl FipsPrivateTunnelRuntime {
 
     pub(crate) fn peer_statuses(&self) -> Vec<MeshPeerStatus> {
         self.mesh.peer_statuses()
+    }
+
+    pub(crate) fn apply_config(&self, config: FipsPrivateTunnelConfig) -> Result<()> {
+        self.mesh.replace_peers(config.peers)?;
+        crate::apply_local_interface_network(
+            &self.iface,
+            &config.local_address,
+            &config.route_targets,
+        )
+        .with_context(|| format!("failed to refresh FIPS tunnel interface {}", self.iface))?;
+        Ok(())
+    }
+
+    pub(crate) async fn ping_peers(&self, network_id: &str, now: u64) -> Result<usize> {
+        self.mesh.ping_peers(network_id, now).await
+    }
+
+    pub(crate) async fn send_join_request(
+        &self,
+        participant: &str,
+        requested_at: u64,
+        request: MeshJoinRequest,
+    ) -> Result<()> {
+        self.mesh
+            .send_join_request(participant, requested_at, request)
+            .await
+    }
+
+    pub(crate) async fn send_roster(
+        &self,
+        participant: &str,
+        network_id: &str,
+        roster: NetworkRoster,
+    ) -> Result<()> {
+        self.mesh.send_roster(participant, network_id, roster).await
+    }
+
+    pub(crate) fn drain_events(&mut self) -> Vec<FipsPrivateMeshEvent> {
+        let mut events = Vec::new();
+        while let Ok(event) = self.event_rx.try_recv() {
+            events.push(event);
+        }
+        events
     }
 
     pub(crate) async fn stop(self) -> Result<()> {
@@ -331,11 +631,23 @@ fn spawn_tun_read_task(tun: Arc<TunSocket>, packet_tx: mpsc::Sender<Vec<u8>>) ->
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn spawn_mesh_recv_task(mesh: Arc<FipsPrivateMeshRuntime>, tun: Arc<TunSocket>) -> JoinHandle<()> {
+fn spawn_mesh_recv_task(
+    mesh: Arc<FipsPrivateMeshRuntime>,
+    tun: Arc<TunSocket>,
+    event_tx: mpsc::Sender<FipsPrivateMeshEvent>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            match mesh.recv_tunnel_packet().await {
-                Ok(Some(packet)) => write_packet_to_tun(&tun, &packet.bytes),
+            match mesh.recv_mesh_event().await {
+                Ok(Some(FipsPrivateMeshEvent::Packet(packet))) => {
+                    write_packet_to_tun(&tun, &packet.bytes);
+                    let _ = event_tx.send(FipsPrivateMeshEvent::Packet(packet)).await;
+                }
+                Ok(Some(event)) => {
+                    if event_tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
                 Ok(None) => break,
                 Err(error) => {
                     eprintln!("fips: failed to receive tunnel packet: {error}");
@@ -389,9 +701,46 @@ impl FipsPrivateTunnelRuntime {
         Vec::new()
     }
 
+    pub(crate) fn apply_config(&self, _config: FipsPrivateTunnelConfig) -> Result<()> {
+        Ok(())
+    }
+
+    pub(crate) async fn ping_peers(&self, _network_id: &str, _now: u64) -> Result<usize> {
+        Ok(0)
+    }
+
+    pub(crate) async fn send_join_request(
+        &self,
+        _participant: &str,
+        _requested_at: u64,
+        _request: MeshJoinRequest,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    pub(crate) async fn send_roster(
+        &self,
+        _participant: &str,
+        _network_id: &str,
+        _roster: NetworkRoster,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    pub(crate) fn drain_events(&mut self) -> Vec<FipsPrivateMeshEvent> {
+        Vec::new()
+    }
+
     pub(crate) async fn stop(self) -> Result<()> {
         Ok(())
     }
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

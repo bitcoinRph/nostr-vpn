@@ -291,20 +291,7 @@ impl NvpnBackend {
             return Ok(());
         }
 
-        let keys = self.config.nostr_keys()?;
-        let relays = self.config.nostr.relays.clone();
-        let request = MeshJoinRequest {
-            network_id: normalize_runtime_network_id(&network.network_id),
-            requester_node_name: self.config.node_name.trim().to_string(),
-        };
         let should_connect_session = !self.session_active;
-        self.runtime.block_on(async {
-            for recipient in &recipients {
-                publish_join_request(keys.clone(), &relays, recipient.clone(), request.clone())
-                    .await?;
-            }
-            Result::<(), anyhow::Error>::Ok(())
-        })?;
 
         if let Some(network) = self.config.network_by_id_mut(network_id) {
             network.outbound_join_request = Some(PendingOutboundJoinRequest {
@@ -323,12 +310,12 @@ impl NvpnBackend {
         let recipient_npub = shorten_middle(&to_npub(&primary_recipient), 18, 12);
         self.session_status = match connect_error {
             Some(error) => {
-                format!("Join request sent to {recipient_npub}, but VPN start failed: {error}")
+                format!("Join request queued for {recipient_npub}, but VPN start failed: {error}")
             }
             None if should_connect_session => {
-                format!("Join request sent to {recipient_npub} and VPN started.")
+                format!("Join request queued for {recipient_npub} and FIPS mesh started.")
             }
-            None => format!("Join request sent to {recipient_npub}."),
+            None => format!("Join request queued for {recipient_npub}."),
         };
         Ok(())
     }

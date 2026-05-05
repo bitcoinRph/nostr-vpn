@@ -114,7 +114,7 @@ fn peer_snapshots(
                         Some(
                             peer.error
                                 .clone()
-                                .unwrap_or_else(|| "awaiting handshake".to_string()),
+                                .unwrap_or_else(|| "fips presence pending".to_string()),
                         )
                     },
                     last_signal_seen_at,
@@ -371,15 +371,14 @@ fn peer_status_line(snapshot: Option<&PeerSnapshot>, status: TransportStatus) ->
             .and_then(|handshake_at| handshake_at.elapsed().ok())
             .map(|elapsed| elapsed.as_secs())
         {
-            Some(age_secs) => format!("online (handshake {})", compact_age_text(age_secs)),
+            Some(age_secs) => format!("online (seen {})", compact_age_text(age_secs)),
             None => "online".to_string(),
         },
         TransportStatus::Present => match snapshot.and_then(|value| value.endpoint.as_deref()) {
-            Some(endpoint) if !endpoint.trim().is_empty() => format!(
-                "awaiting WireGuard handshake via {}",
-                shorten_middle(endpoint, 18, 10)
-            ),
-            _ => "awaiting WireGuard handshake".to_string(),
+            Some(endpoint) if !endpoint.trim().is_empty() => {
+                format!("fips pending via {}", shorten_middle(endpoint, 18, 10))
+            }
+            _ => "fips presence pending".to_string(),
         },
         TransportStatus::Offline => match snapshot {
             Some(value) => {

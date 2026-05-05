@@ -82,7 +82,7 @@
             <div class="item-title">No exit node</div>
             <span class="badge muted">Direct mesh</span>
           </div>
-          <div class="item-sub">Keep default-route traffic off peer relays and use mesh routing only.</div>
+          <div class="item-sub">Keep default-route traffic local and use private mesh routes only.</div>
         </button>
 
         {#each exitNodeCandidates as participant}

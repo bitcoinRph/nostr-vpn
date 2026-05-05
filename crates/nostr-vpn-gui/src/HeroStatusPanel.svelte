@@ -76,9 +76,9 @@
     {#if shouldShowVpnDataDisclosure(state)}
       <div class="vpn-data-disclosure" data-testid="vpn-data-disclosure">
         <strong>VPN data:</strong> Nostr VPN uses your public key, network membership, peer
-        endpoints, relay choices, and traffic counters only to run the VPN you configure. Packet
+        endpoints, FIPS discovery relays, and traffic counters only to run the VPN you configure. Packet
         traffic is encrypted. The developer does not sell VPN data or use or disclose it to third
-        parties; the app only transmits connection data to peers, relays, and services you select.
+        parties; the app only transmits connection data to peers and services you select.
       </div>
     {/if}
 
@@ -130,7 +130,7 @@
           VPN {state.sessionActive ? 'On' : 'Off'}
         </span>
         <span class={`badge ${state.relayConnected ? 'ok' : 'muted'}`}>
-          Relays {state.relayConnected ? 'Connected' : 'Disconnected'}
+          FIPS {state.relayConnected ? 'Ready' : 'Idle'}
         </span>
         {#if state.exitNode}
           <span

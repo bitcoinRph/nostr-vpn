@@ -183,6 +183,7 @@ fn persist_daemon_runtime_state_marks_resuming_as_active() {
     let state_path = dir.join("daemon.state.json");
 
     let mut config = AppConfig::generated();
+    config.private_data_plane = nostr_vpn_core::data_plane::PrivateDataPlane::WireGuard;
     config.networks[0].participants = vec!["11".repeat(32)];
     let presence = PeerPresenceBook::default();
     let tunnel_runtime = crate::CliTunnelRuntime::new("utun100");
@@ -194,6 +195,7 @@ fn persist_daemon_runtime_state_marks_resuming_as_active() {
         1,
         &presence,
         &tunnel_runtime,
+        &[],
         None,
         "Resuming",
         false,
@@ -489,6 +491,7 @@ fn daemon_runtime_state_tracks_live_endpoint_and_listen_port() {
         0,
         &presence,
         &tunnel_runtime,
+        &[],
         Some(&public_endpoint),
         "Connected",
         true,

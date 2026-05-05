@@ -117,9 +117,36 @@ impl FipsMeshRuntime {
             .iter()
             .map(|peer| MeshPeerStatus {
                 pubkey: peer.participant_pubkey.clone(),
-                connected: true,
+                connected: false,
                 data_plane: PrivateDataPlane::Fips,
+                last_seen_at: None,
+                tx_bytes: 0,
+                rx_bytes: 0,
+                error: Some("fips presence pending".to_string()),
             })
+            .collect()
+    }
+
+    pub fn participant_for_endpoint_npub(&self, endpoint_npub: &str) -> Option<String> {
+        let source_pubkey = normalize_nostr_pubkey(endpoint_npub).ok()?;
+        self.peers
+            .iter()
+            .find(|peer| peer.endpoint_pubkey.as_deref() == Some(source_pubkey.as_str()))
+            .map(|peer| peer.participant_pubkey.clone())
+    }
+
+    pub fn peer_endpoint_npub(&self, participant_pubkey: &str) -> Option<String> {
+        let participant_pubkey = normalize_participant_pubkey(participant_pubkey);
+        self.peers
+            .iter()
+            .find(|peer| peer.participant_pubkey == participant_pubkey)
+            .map(|peer| peer.endpoint_npub.clone())
+    }
+
+    pub fn peer_pubkeys(&self) -> Vec<String> {
+        self.peers
+            .iter()
+            .map(|peer| peer.participant_pubkey.clone())
             .collect()
     }
 

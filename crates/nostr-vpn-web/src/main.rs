@@ -41,10 +41,7 @@ use crate::ui_types::{
     NetworkIdRequest, NetworkMeshRequest, NetworkNameRequest, NetworkPeerRequest,
     ParticipantRequest, RelayRequest, SettingsPatch, UiState,
 };
-use nostr_vpn_core::config::{
-    AppConfig, PendingOutboundJoinRequest, normalize_nostr_pubkey, normalize_runtime_network_id,
-};
-use nostr_vpn_core::join_requests::{MeshJoinRequest, publish_join_request};
+use nostr_vpn_core::config::{AppConfig, PendingOutboundJoinRequest, normalize_nostr_pubkey};
 
 const NVPN_BIN_ENV: &str = "NVPN_CLI_PATH";
 const NETWORK_INVITE_PREFIX: &str = "nvpn://invite/";
@@ -320,24 +317,6 @@ async fn request_network_join(
         return Ok(Json(build_ui_state(&state).map_err(internal_error)?));
     }
 
-    let keys = config.nostr_keys().map_err(bad_request)?;
-    let relays = config.nostr.relays.clone();
-    let join_request = MeshJoinRequest {
-        network_id: normalize_runtime_network_id(&network.network_id),
-        requester_node_name: config.node_name.trim().to_string(),
-    };
-
-    for recipient in &recipients {
-        publish_join_request(
-            keys.clone(),
-            &relays,
-            recipient.clone(),
-            join_request.clone(),
-        )
-        .await
-        .map_err(bad_request)?;
-    }
-
     if let Some(target) = config.network_by_id_mut(&request.network_id) {
         target.outbound_join_request = Some(PendingOutboundJoinRequest {
             recipient: primary_recipient.clone(),
@@ -349,9 +328,9 @@ async fn request_network_join(
     let status = fetch_cli_status(&state).ok();
     if status.as_ref().is_none_or(|value| !value.daemon.running) {
         connect_session_inner(&state).map_err(bad_request)?;
-        set_action_status(&state, "Join request sent and VPN started.");
+        set_action_status(&state, "Join request queued and FIPS mesh started.");
     } else {
-        set_action_status(&state, "Join request sent.");
+        set_action_status(&state, "Join request queued for FIPS delivery.");
     }
     Ok(Json(build_ui_state(&state).map_err(internal_error)?))
 }

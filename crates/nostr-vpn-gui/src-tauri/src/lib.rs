@@ -118,7 +118,6 @@ use nostr_vpn_core::config::{
     maybe_autoconfigure_node, normalize_nostr_pubkey, normalize_runtime_network_id,
 };
 use nostr_vpn_core::diagnostics::{HealthIssue, NetworkSummary, PortMappingStatus};
-use nostr_vpn_core::join_requests::{MeshJoinRequest, publish_join_request};
 #[cfg(target_os = "windows")]
 use nostr_vpn_core::platform_paths::legacy_config_path_from_dirs_config_dir;
 #[cfg(any(target_os = "windows", test))]
@@ -164,8 +163,8 @@ const LAN_PAIRING_STALE_AFTER_SECS: u64 = 16;
 const LAN_PAIRING_DURATION_SECS: u64 = 15 * 60;
 const LAN_PAIRING_ANNOUNCEMENT_VERSION: u8 = 2;
 const LAN_PAIRING_BUFFER_BYTES: usize = 8192;
-// Keep the GUI's online/offline grace aligned with the daemon's WireGuard
-// session window so idle peers do not flap back to "awaiting handshake".
+// Keep the GUI's online/offline grace aligned with the daemon's mesh
+// reachability window so idle peers do not flap while traffic is quiet.
 const PEER_ONLINE_GRACE_SECS: u64 = 180;
 const PEER_PRESENCE_GRACE_SECS: u64 = 45;
 const SERVICE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
@@ -740,7 +739,7 @@ impl NvpnBackend {
                     peer.error
                         .clone()
                         .filter(|value| !value.trim().is_empty())
-                        .unwrap_or_else(|| "awaiting handshake".to_string()),
+                        .unwrap_or_else(|| "fips presence pending".to_string()),
                 )
             };
         }
@@ -1039,10 +1038,7 @@ impl NvpnBackend {
 
                 if peer_link_uses_relay_path(link) {
                     let runtime_endpoint = link.runtime_endpoint.as_deref().unwrap_or_default();
-                    return format!(
-                        "online via relay {}",
-                        shorten_middle(runtime_endpoint, 18, 10)
-                    );
+                    return format!("online via {}", shorten_middle(runtime_endpoint, 18, 10));
                 }
 
                 let handshake_age = link
@@ -1051,13 +1047,13 @@ impl NvpnBackend {
                     .map(|elapsed| elapsed.as_secs());
 
                 match handshake_age {
-                    Some(age_secs) => format!("online (handshake {})", compact_age_text(age_secs)),
+                    Some(age_secs) => format!("online (seen {})", compact_age_text(age_secs)),
                     None => "online".to_string(),
                 }
             }
             ConfiguredPeerStatus::Present => {
                 let Some(link) = self.peer_status.get(participant) else {
-                    return "awaiting WireGuard handshake".to_string();
+                    return "fips presence pending".to_string();
                 };
 
                 match link
@@ -1066,12 +1062,9 @@ impl NvpnBackend {
                     .filter(|value| !value.trim().is_empty())
                 {
                     Some(endpoint) => {
-                        format!(
-                            "awaiting WireGuard handshake via {}",
-                            shorten_middle(endpoint, 18, 10)
-                        )
+                        format!("fips pending via {}", shorten_middle(endpoint, 18, 10))
                     }
-                    None => "awaiting WireGuard handshake".to_string(),
+                    None => "fips presence pending".to_string(),
                 }
             }
             ConfiguredPeerStatus::Offline => {
@@ -2088,7 +2081,7 @@ mod tests {
                 &participant,
                 false,
                 Some(5),
-                Some("awaiting handshake"),
+                Some("fips presence pending"),
                 "203.0.113.20:51820",
             )),
             true,
@@ -2107,7 +2100,7 @@ mod tests {
         assert!(
             backend
                 .peer_status_line(&participant, ConfiguredPeerStatus::Present)
-                .contains("awaiting WireGuard handshake via")
+                .contains("fips pending via")
         );
     }
 
@@ -3524,7 +3517,7 @@ mod tests {
         backend.refresh_peer_runtime_status();
 
         let view = backend.participant_view(&participant, "mesh-test", None, false);
-        assert!(view.status_text.contains("relay"));
+        assert!(view.status_text.contains("via"));
         assert!(view.status_text.contains("198.51.100.9:45000"));
         assert!(view.relay_path_active);
         assert_eq!(view.runtime_endpoint, "198.51.100.9:45000");

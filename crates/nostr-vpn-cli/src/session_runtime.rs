@@ -1,5 +1,22 @@
 use super::*;
 
+#[cfg(feature = "embedded-fips")]
+macro_rules! current_fips_peer_statuses {
+    ($runtime:expr) => {
+        $runtime
+            .as_ref()
+            .map(|runtime| runtime.peer_statuses())
+            .unwrap_or_default()
+    };
+}
+
+#[cfg(not(feature = "embedded-fips"))]
+macro_rules! current_fips_peer_statuses {
+    ($runtime:expr) => {
+        Vec::<MeshPeerStatus>::new()
+    };
+}
+
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn reset_tunnel_runtime_after_macos_underlay_repair(
     tunnel_runtime: &mut CliTunnelRuntime,
@@ -72,7 +89,7 @@ pub(crate) async fn connect_session(args: ConnectArgs) -> Result<()> {
         let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
             &app,
             &network_id,
-            iface,
+            iface.clone(),
             &relays,
             own_pubkey.as_deref(),
         )?;
@@ -738,6 +755,8 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
     let mut presence = PeerPresenceBook::default();
     let mut path_book = PeerPathBook::default();
     let mut outbound_announces = OutboundAnnounceBook::default();
+    #[cfg(feature = "embedded-fips")]
+    let mut fips_join_request_sends: HashMap<String, u64> = HashMap::new();
     let mut relay_sessions: HashMap<String, ActiveRelaySession> = HashMap::new();
     let mut standby_relay_sessions: HashMap<String, Vec<ActiveRelaySession>> = HashMap::new();
     let mut relay_failures: RelayFailureCooldowns = HashMap::new();
@@ -746,25 +765,24 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
     let iface = args.iface.clone();
     let mut tunnel_runtime = CliTunnelRuntime::new(iface.clone());
     #[cfg(feature = "embedded-fips")]
-    let fips_tunnel_runtime =
-        if app.private_mesh_uses_fips() && daemon_session_active(true, expected_peers) {
-            let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
-                &app,
-                &network_id,
-                iface,
-                &relays,
-                own_pubkey.as_deref(),
-            )?;
-            let runtime = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
-            eprintln!(
-                "daemon: FIPS private mesh on {}; WireGuard exit capability remains {}",
-                runtime.iface(),
-                app.exit_data_plane
-            );
-            Some(runtime)
-        } else {
-            None
-        };
+    let mut fips_tunnel_runtime = if fips_private_runtime_active(&app, true, expected_peers) {
+        let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+            &app,
+            &network_id,
+            iface.clone(),
+            &relays,
+            own_pubkey.as_deref(),
+        )?;
+        let runtime = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
+        eprintln!(
+            "daemon: FIPS private mesh on {}; WireGuard exit capability remains {}",
+            runtime.iface(),
+            app.exit_data_plane
+        );
+        Some(runtime)
+    } else {
+        None
+    };
     let magic_dns_runtime = ConnectMagicDnsRuntime::start(&app);
     let mut network_snapshot = capture_network_snapshot();
     let mut network_changed_at = Some(unix_timestamp());
@@ -901,7 +919,11 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
         daemon_session_idle_status(session_enabled, expected_peers, app.join_requests_enabled())
             .to_string()
     } else {
-        "Connecting to relays".to_string()
+        if app.private_mesh_uses_fips() {
+            "Starting FIPS mesh".to_string()
+        } else {
+            "Connecting to relays".to_string()
+        }
     };
     let mut relay_connected = false;
     let mut reconnect_attempt = 0u32;
@@ -910,6 +932,13 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
     let mut last_nat_punch_attempt: Option<(String, Instant)> = None;
     let mut last_network_check_at = WallTimeJumpObserver::new(unix_timestamp());
     let mut last_log_compact_check = Instant::now();
+    #[cfg(feature = "embedded-fips")]
+    let fips_peer_statuses = fips_tunnel_runtime
+        .as_ref()
+        .map(|runtime| runtime.peer_statuses())
+        .unwrap_or_default();
+    #[cfg(not(feature = "embedded-fips"))]
+    let fips_peer_statuses = Vec::new();
     write_daemon_state(
         &state_file,
         &build_daemon_runtime_state(
@@ -918,6 +947,7 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
             expected_peers,
             &presence,
             &tunnel_runtime,
+            &fips_peer_statuses,
             public_signal_endpoint.as_ref(),
             &session_status,
             relay_connected,
@@ -945,6 +975,9 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                 break;
             }
             _ = reconnect_interval.tick() => {
+                if app.private_mesh_uses_fips() {
+                    continue;
+                }
                 let join_requests_active = app.join_requests_enabled();
                 let session_active = daemon_session_active(session_enabled, expected_peers);
                 if !relay_session_active(session_enabled, expected_peers, join_requests_active)
@@ -1036,6 +1069,15 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                 }
             }
             _ = announce_interval.tick() => {
+                if app.private_mesh_uses_fips() {
+                    #[cfg(feature = "embedded-fips")]
+                    if let Some(runtime) = fips_tunnel_runtime.as_ref()
+                        && let Err(error) = publish_fips_active_network_roster(runtime, &app).await
+                    {
+                        eprintln!("fips: roster publish failed: {error}");
+                    }
+                    continue;
+                }
                 if !daemon_session_active(session_enabled, expected_peers) || !relay_connected {
                     continue;
                 }
@@ -1127,6 +1169,46 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
             }
             _ = tunnel_heartbeat_interval.tick() => {
                 if !daemon_session_active(session_enabled, expected_peers) {
+                    #[cfg(feature = "embedded-fips")]
+                    if fips_private_runtime_active(&app, session_enabled, expected_peers)
+                        && let Some(runtime) = fips_tunnel_runtime.as_ref()
+                    {
+                        let now = unix_timestamp();
+                        if let Err(error) = runtime.ping_peers(&network_id, now).await {
+                            eprintln!("fips: peer ping failed: {error}");
+                        }
+                        if let Err(error) = send_pending_fips_join_requests(
+                            runtime,
+                            &app,
+                            &mut fips_join_request_sends,
+                            now,
+                        )
+                        .await
+                        {
+                            eprintln!("fips: join request send failed: {error}");
+                        }
+                    }
+                    continue;
+                }
+
+                if app.private_mesh_uses_fips() {
+                    #[cfg(feature = "embedded-fips")]
+                    if let Some(runtime) = fips_tunnel_runtime.as_ref() {
+                        let now = unix_timestamp();
+                        if let Err(error) = runtime.ping_peers(&network_id, now).await {
+                            eprintln!("fips: peer ping failed: {error}");
+                        }
+                        if let Err(error) = send_pending_fips_join_requests(
+                            runtime,
+                            &app,
+                            &mut fips_join_request_sends,
+                            now,
+                        )
+                        .await
+                        {
+                            eprintln!("fips: join request send failed: {error}");
+                        }
+                    }
                     continue;
                 }
 
@@ -1416,6 +1498,54 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                     && let Err(error) = compact_daemon_log_if_needed(&config_path)
                 {
                     eprintln!("daemon: failed to compact service log: {error}");
+                }
+                #[cfg(feature = "embedded-fips")]
+                if let Some(runtime) = fips_tunnel_runtime.as_mut() {
+                    match drain_fips_mesh_events(
+                        runtime,
+                        &mut app,
+                        &config_path,
+                        &mut session_status,
+                    ) {
+                        Ok(true) => {
+                            let reload = build_daemon_reload_config(
+                                app.clone(),
+                                app.effective_network_id(),
+                                &args.relay,
+                            );
+                            let configured_set = reload
+                                .configured_participants
+                                .iter()
+                                .cloned()
+                                .collect::<HashSet<_>>();
+                            app = reload.app;
+                            network_id = reload.network_id;
+                            expected_peers = reload.expected_peers;
+                            own_pubkey = reload.own_pubkey;
+                            relays = reload.relays;
+
+                            presence.retain_participants(&configured_set);
+                            path_book.retain_participants(&configured_set);
+                            outbound_announces.retain_participants(&configured_set);
+                            outbound_announces.clear();
+                            fips_join_request_sends.clear();
+                            last_nat_punch_attempt = None;
+                            if let Err(error) = refresh_fips_tunnel_config(
+                                runtime,
+                                &app,
+                                &network_id,
+                                &relays,
+                                own_pubkey.as_deref(),
+                            ) {
+                                session_status =
+                                    format!("Roster applied, but FIPS reload failed ({error})");
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(error) => {
+                            session_status = format!("FIPS event handling failed ({error})");
+                        }
+                    }
                 }
                 let changed_relay_participants = reconcile_active_relay_sessions(
                     &presence,
@@ -1763,6 +1893,21 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                         }
                     };
                     let _ = write_daemon_control_result(&config_path, request, control_result);
+                    #[cfg(feature = "embedded-fips")]
+                    if let Err(error) = sync_fips_private_runtime(
+                        &mut fips_tunnel_runtime,
+                        &app,
+                        &network_id,
+                        &iface,
+                        &relays,
+                        own_pubkey.as_deref(),
+                        session_enabled,
+                        expected_peers,
+                    )
+                    .await
+                    {
+                        session_status = format!("FIPS private mesh update failed ({error})");
+                    }
                     if let Err(error) = sync_local_relay_operator(
                         &config_path,
                         &app,
@@ -1780,6 +1925,7 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                         expected_peers,
                         &presence,
                         &tunnel_runtime,
+                        &current_fips_peer_statuses!(fips_tunnel_runtime),
                         public_signal_endpoint.as_ref(),
                         &session_status,
                         relay_connected,
@@ -1883,6 +2029,7 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                     expected_peers,
                     &presence,
                     &tunnel_runtime,
+                    &current_fips_peer_statuses!(fips_tunnel_runtime),
                     public_signal_endpoint.as_ref(),
                     &session_status,
                     relay_connected,
@@ -2425,6 +2572,7 @@ pub(crate) fn build_daemon_runtime_state(
     expected_peers: usize,
     presence: &PeerPresenceBook,
     tunnel_runtime: &CliTunnelRuntime,
+    fips_peer_statuses: &[MeshPeerStatus],
     public_signal_endpoint: Option<&DiscoveredPublicSignalEndpoint>,
     session_status: &str,
     relay_connected: bool,
@@ -2441,69 +2589,127 @@ pub(crate) fn build_daemon_runtime_state(
         .unwrap_or_else(|| local_endpoint.clone());
     let mut peers = Vec::new();
 
-    for participant in &app.participant_pubkeys_hex() {
-        if Some(participant.as_str()) == own_pubkey.as_deref() {
-            continue;
-        }
-
-        let Some(announcement) = presence.announcement_for(participant) else {
-            let transport = daemon_peer_transport_state(None, false, None, now);
+    if app.private_mesh_uses_fips() {
+        let fips_status_by_pubkey = fips_peer_statuses
+            .iter()
+            .map(|status| (status.pubkey.as_str(), status))
+            .collect::<HashMap<_, _>>();
+        let network_id = app.effective_network_id();
+        for participant in &app.participant_pubkeys_hex() {
+            if Some(participant.as_str()) == own_pubkey.as_deref() {
+                continue;
+            }
+            let status = fips_status_by_pubkey.get(participant.as_str()).copied();
+            let last_seen_at = status.and_then(|status| status.last_seen_at);
+            let reachable = status.is_some_and(|status| status.connected);
+            let tunnel_ip = derive_mesh_tunnel_ip(&network_id, participant).unwrap_or_default();
             peers.push(DaemonPeerState {
                 participant_pubkey: participant.clone(),
                 node_id: String::new(),
-                tunnel_ip: String::new(),
-                endpoint: String::new(),
+                tunnel_ip,
+                endpoint: "fips".to_string(),
                 relay_endpoint: None,
-                runtime_endpoint: None,
-                tx_bytes: 0,
-                rx_bytes: 0,
+                runtime_endpoint: reachable.then(|| "fips".to_string()),
+                tx_bytes: status.map(|status| status.tx_bytes).unwrap_or(0),
+                rx_bytes: status.map(|status| status.rx_bytes).unwrap_or(0),
                 public_key: String::new(),
                 advertised_routes: Vec::new(),
-                presence_timestamp: 0,
-                last_signal_seen_at: None,
+                presence_timestamp: last_seen_at.unwrap_or(0),
+                last_signal_seen_at: last_seen_at,
+                reachable,
+                last_handshake_at: last_seen_at,
+                error: if reachable {
+                    None
+                } else {
+                    status
+                        .and_then(|status| status.error.clone())
+                        .or_else(|| Some("fips presence pending".to_string()))
+                },
+            });
+        }
+    } else {
+        for participant in &app.participant_pubkeys_hex() {
+            if Some(participant.as_str()) == own_pubkey.as_deref() {
+                continue;
+            }
+
+            let Some(announcement) = presence.announcement_for(participant) else {
+                let transport = daemon_peer_transport_state(None, false, None, now);
+                peers.push(DaemonPeerState {
+                    participant_pubkey: participant.clone(),
+                    node_id: String::new(),
+                    tunnel_ip: String::new(),
+                    endpoint: String::new(),
+                    relay_endpoint: None,
+                    runtime_endpoint: None,
+                    tx_bytes: 0,
+                    rx_bytes: 0,
+                    public_key: String::new(),
+                    advertised_routes: Vec::new(),
+                    presence_timestamp: 0,
+                    last_signal_seen_at: None,
+                    reachable: transport.reachable,
+                    last_handshake_at: transport.last_handshake_at,
+                    error: transport.error,
+                });
+                continue;
+            };
+
+            let signal_active = presence.active().contains_key(participant);
+            let runtime_peer = peer_runtime_lookup(announcement, runtime_peers.as_ref());
+            let transport =
+                daemon_peer_transport_state(Some(announcement), signal_active, runtime_peer, now);
+
+            peers.push(DaemonPeerState {
+                participant_pubkey: participant.clone(),
+                node_id: announcement.node_id.clone(),
+                tunnel_ip: announcement.tunnel_ip.clone(),
+                endpoint: announcement.endpoint.clone(),
+                relay_endpoint: announcement.relay_endpoint.clone(),
+                runtime_endpoint: runtime_peer.and_then(|peer| peer.endpoint.clone()),
+                tx_bytes: runtime_peer.map(|peer| peer.tx_bytes).unwrap_or(0),
+                rx_bytes: runtime_peer.map(|peer| peer.rx_bytes).unwrap_or(0),
+                public_key: announcement.public_key.clone(),
+                advertised_routes: announcement.advertised_routes.clone(),
+                presence_timestamp: announcement.timestamp,
+                last_signal_seen_at: presence.last_seen_at(participant),
                 reachable: transport.reachable,
                 last_handshake_at: transport.last_handshake_at,
                 error: transport.error,
             });
-            continue;
-        };
-
-        let signal_active = presence.active().contains_key(participant);
-        let runtime_peer = peer_runtime_lookup(announcement, runtime_peers.as_ref());
-        let transport =
-            daemon_peer_transport_state(Some(announcement), signal_active, runtime_peer, now);
-
-        peers.push(DaemonPeerState {
-            participant_pubkey: participant.clone(),
-            node_id: announcement.node_id.clone(),
-            tunnel_ip: announcement.tunnel_ip.clone(),
-            endpoint: announcement.endpoint.clone(),
-            relay_endpoint: announcement.relay_endpoint.clone(),
-            runtime_endpoint: runtime_peer.and_then(|peer| peer.endpoint.clone()),
-            tx_bytes: runtime_peer.map(|peer| peer.tx_bytes).unwrap_or(0),
-            rx_bytes: runtime_peer.map(|peer| peer.rx_bytes).unwrap_or(0),
-            public_key: announcement.public_key.clone(),
-            advertised_routes: announcement.advertised_routes.clone(),
-            presence_timestamp: announcement.timestamp,
-            last_signal_seen_at: presence.last_seen_at(participant),
-            reachable: transport.reachable,
-            last_handshake_at: transport.last_handshake_at,
-            error: transport.error,
-        });
+        }
     }
 
-    let connected_peer_count = connected_peer_count_for_runtime(
-        app,
-        own_pubkey.as_deref(),
-        presence,
-        runtime_peers.as_ref(),
-        now,
-    );
+    let connected_peer_count = if app.private_mesh_uses_fips() {
+        let participant_pubkeys = app
+            .participant_pubkeys_hex()
+            .into_iter()
+            .collect::<HashSet<_>>();
+        fips_peer_statuses
+            .iter()
+            .filter(|status| Some(status.pubkey.as_str()) != own_pubkey.as_deref())
+            .filter(|status| participant_pubkeys.contains(&status.pubkey))
+            .filter(|status| status.connected)
+            .count()
+    } else {
+        connected_peer_count_for_runtime(
+            app,
+            own_pubkey.as_deref(),
+            presence,
+            runtime_peers.as_ref(),
+            now,
+        )
+    };
     let mesh_ready = expected_peers > 0 && connected_peer_count >= expected_peers;
+    let signal_connected = if app.private_mesh_uses_fips() {
+        session_active
+    } else {
+        relay_connected
+    };
     let health = build_health_issues(
         app,
         session_active,
-        relay_connected,
+        signal_connected,
         mesh_ready,
         network,
         port_mapping,
@@ -2516,7 +2722,7 @@ pub(crate) fn build_daemon_runtime_state(
         advertised_endpoint,
         listen_port,
         session_active,
-        relay_connected,
+        relay_connected: signal_connected,
         session_status: session_status.to_string(),
         expected_peer_count: expected_peers,
         connected_peer_count,
@@ -2541,6 +2747,7 @@ pub(crate) fn persist_daemon_runtime_state(
     expected_peers: usize,
     presence: &PeerPresenceBook,
     tunnel_runtime: &CliTunnelRuntime,
+    fips_peer_statuses: &[MeshPeerStatus],
     public_signal_endpoint: Option<&DiscoveredPublicSignalEndpoint>,
     session_status: &str,
     relay_connected: bool,
@@ -2556,6 +2763,7 @@ pub(crate) fn persist_daemon_runtime_state(
             expected_peers,
             presence,
             tunnel_runtime,
+            fips_peer_statuses,
             public_signal_endpoint,
             session_status,
             relay_connected,

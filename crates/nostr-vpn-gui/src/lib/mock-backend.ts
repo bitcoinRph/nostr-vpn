@@ -54,7 +54,7 @@ export const connectSessionMock = () => {
       ...participant,
       state: participant.state === 'local' ? 'local' : 'online',
       presenceState: participant.state === 'local' ? 'local' : 'present',
-      statusText: participant.state === 'local' ? 'local' : 'online (handshake 0s ago)',
+      statusText: participant.state === 'local' ? 'local' : 'online (seen 0s ago)',
       lastSignalText: participant.state === 'local' ? 'self' : 'nostr seen 0s ago',
     })),
   }))

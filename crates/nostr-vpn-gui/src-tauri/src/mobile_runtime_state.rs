@@ -51,7 +51,7 @@ pub(crate) fn build_mobile_runtime_state(
                 error: if reachable {
                     None
                 } else if runtime_status.is_some() {
-                    Some("awaiting handshake".to_string())
+                    Some("mesh presence pending".to_string())
                 } else {
                     Some("no signal yet".to_string())
                 },

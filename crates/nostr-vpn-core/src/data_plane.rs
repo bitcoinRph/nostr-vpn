@@ -102,6 +102,10 @@ pub struct MeshPeerStatus {
     pub pubkey: String,
     pub connected: bool,
     pub data_plane: PrivateDataPlane,
+    pub last_seen_at: Option<u64>,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    pub error: Option<String>,
 }
 
 #[async_trait]

@@ -58,11 +58,12 @@ use netdev::interface::interface::Interface as NetworkInterface;
 #[cfg(test)]
 use nostr_sdk::prelude::ToBech32;
 use nostr_vpn_core::config::{
-    AppConfig, DEFAULT_RELAYS, maybe_autoconfigure_node, normalize_advertised_route,
-    normalize_nostr_pubkey, normalize_runtime_network_id,
+    AppConfig, DEFAULT_RELAYS, derive_mesh_tunnel_ip, maybe_autoconfigure_node,
+    normalize_advertised_route, normalize_nostr_pubkey, normalize_runtime_network_id,
 };
 use nostr_vpn_core::control::{PeerAnnouncement, select_peer_endpoint_from_local_endpoints};
 use nostr_vpn_core::crypto::generate_keypair;
+use nostr_vpn_core::data_plane::MeshPeerStatus;
 use nostr_vpn_core::diagnostics::{
     HealthIssue, HealthSeverity, NetworkSummary, PortMappingStatus, ProbeState,
 };
@@ -2305,6 +2306,9 @@ fn participants_needing_relay(
     pending_requests: &HashMap<String, PendingRelayRequest>,
     now: u64,
 ) -> Vec<String> {
+    if app.private_mesh_uses_fips() {
+        return Vec::new();
+    }
     let runtime_peers = tunnel_runtime.peer_status().ok();
     app.participant_pubkeys_hex()
         .into_iter()
@@ -5050,6 +5054,21 @@ fn relay_session_active(
     daemon_session_active(session_enabled, expected_peers) || join_requests_active
 }
 
+fn fips_private_runtime_active(
+    app: &AppConfig,
+    session_enabled: bool,
+    expected_peers: usize,
+) -> bool {
+    app.private_mesh_uses_fips()
+        && (daemon_session_active(session_enabled, expected_peers)
+            || app.join_requests_enabled()
+            || app
+                .active_network()
+                .outbound_join_request
+                .as_ref()
+                .is_some())
+}
+
 fn daemon_session_idle_status(
     session_enabled: bool,
     expected_peers: usize,
@@ -5182,6 +5201,207 @@ fn persist_shared_network_roster(
         .unwrap_or_else(|| network_id.to_string());
     *session_status = format!("Roster updated for {network_name}.");
     Ok(Some(network_name))
+}
+
+#[cfg(feature = "embedded-fips")]
+fn drain_fips_mesh_events(
+    runtime: &mut crate::fips_private_mesh::FipsPrivateTunnelRuntime,
+    app: &mut AppConfig,
+    config_path: &Path,
+    session_status: &mut String,
+) -> Result<bool> {
+    let mut roster_changed = false;
+    for event in runtime.drain_events() {
+        match event {
+            crate::fips_private_mesh::FipsPrivateMeshEvent::Packet(packet) => {
+                let _ = packet.source_pubkey;
+            }
+            crate::fips_private_mesh::FipsPrivateMeshEvent::Presence {
+                participant_pubkey,
+                last_seen_at,
+            } => {
+                let _ = (participant_pubkey, last_seen_at);
+            }
+            crate::fips_private_mesh::FipsPrivateMeshEvent::JoinRequest {
+                sender_pubkey,
+                requested_at,
+                request,
+            } => {
+                persist_inbound_join_request(
+                    app,
+                    config_path,
+                    &sender_pubkey,
+                    requested_at,
+                    &request.network_id,
+                    &request.requester_node_name,
+                    session_status,
+                );
+            }
+            crate::fips_private_mesh::FipsPrivateMeshEvent::Roster {
+                sender_pubkey,
+                network_id,
+                roster,
+            } => match persist_shared_network_roster(
+                app,
+                config_path,
+                &sender_pubkey,
+                &network_id,
+                &roster,
+                session_status,
+            ) {
+                Ok(Some(_)) => roster_changed = true,
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("daemon: ignoring invalid FIPS roster from {sender_pubkey}: {error}");
+                }
+            },
+        }
+    }
+    Ok(roster_changed)
+}
+
+#[cfg(feature = "embedded-fips")]
+fn refresh_fips_tunnel_config(
+    runtime: &crate::fips_private_mesh::FipsPrivateTunnelRuntime,
+    app: &AppConfig,
+    network_id: &str,
+    relays: &[String],
+    own_pubkey: Option<&str>,
+) -> Result<()> {
+    let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+        app,
+        network_id,
+        runtime.iface().to_string(),
+        relays,
+        own_pubkey,
+    )?;
+    runtime.apply_config(config)
+}
+
+#[cfg(feature = "embedded-fips")]
+#[allow(clippy::too_many_arguments)]
+async fn sync_fips_private_runtime(
+    runtime: &mut Option<crate::fips_private_mesh::FipsPrivateTunnelRuntime>,
+    app: &AppConfig,
+    network_id: &str,
+    iface: &str,
+    relays: &[String],
+    own_pubkey: Option<&str>,
+    session_enabled: bool,
+    expected_peers: usize,
+) -> Result<()> {
+    if !fips_private_runtime_active(app, session_enabled, expected_peers) {
+        if let Some(runtime) = runtime.take() {
+            runtime.stop().await?;
+        }
+        return Ok(());
+    }
+
+    let config_iface = runtime
+        .as_ref()
+        .map(|runtime| runtime.iface().to_string())
+        .unwrap_or_else(|| iface.to_string());
+    let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+        app,
+        network_id,
+        config_iface,
+        relays,
+        own_pubkey,
+    )?;
+
+    if let Some(existing) = runtime.as_ref() {
+        existing.apply_config(config)?;
+    } else {
+        let started = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
+        eprintln!(
+            "daemon: FIPS private mesh on {}; WireGuard exit capability remains {}",
+            started.iface(),
+            app.exit_data_plane
+        );
+        *runtime = Some(started);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "embedded-fips")]
+async fn send_pending_fips_join_requests(
+    runtime: &crate::fips_private_mesh::FipsPrivateTunnelRuntime,
+    app: &AppConfig,
+    sent_cache: &mut HashMap<String, u64>,
+    now: u64,
+) -> Result<usize> {
+    let network = app.active_network();
+    let Some(pending) = network.outbound_join_request.as_ref() else {
+        return Ok(0);
+    };
+    let request = nostr_vpn_core::join_requests::MeshJoinRequest {
+        network_id: normalize_runtime_network_id(&network.network_id),
+        requester_node_name: app.node_name.trim().to_string(),
+    };
+    let mut recipients = network.admins.clone();
+    recipients.sort();
+    recipients.dedup();
+
+    let mut sent = 0usize;
+    for recipient in recipients {
+        let fingerprint = format!(
+            "{}:{recipient}:{}",
+            request.network_id, pending.requested_at
+        );
+        if sent_cache
+            .get(&fingerprint)
+            .is_some_and(|last_sent| now.saturating_sub(*last_sent) < 10)
+        {
+            continue;
+        }
+        runtime
+            .send_join_request(&recipient, pending.requested_at, request.clone())
+            .await?;
+        sent_cache.insert(fingerprint, now);
+        sent += 1;
+    }
+    Ok(sent)
+}
+
+#[cfg(feature = "embedded-fips")]
+async fn publish_fips_active_network_roster(
+    runtime: &crate::fips_private_mesh::FipsPrivateTunnelRuntime,
+    app: &AppConfig,
+) -> Result<usize> {
+    let network = app.active_network();
+    let own_pubkey = match app.own_nostr_pubkey_hex() {
+        Ok(pubkey) => pubkey,
+        Err(_) => return Ok(0),
+    };
+    if !app.is_network_admin(&network.id, &own_pubkey) {
+        return Ok(0);
+    }
+
+    let shared = app.shared_network_roster(&network.id)?;
+    let roster = NetworkRoster {
+        network_name: shared.name,
+        participants: shared.participants,
+        admins: shared.admins,
+        aliases: shared.aliases,
+        signed_at: if shared.updated_at > 0 {
+            shared.updated_at
+        } else {
+            unix_timestamp()
+        },
+    };
+    let mut recipients = app.active_network_signal_pubkeys_hex();
+    recipients.retain(|recipient| recipient != &own_pubkey);
+    recipients.sort();
+    recipients.dedup();
+
+    let mut sent = 0usize;
+    for recipient in recipients {
+        runtime
+            .send_roster(&recipient, &shared.network_id, roster.clone())
+            .await?;
+        sent += 1;
+    }
+    Ok(sent)
 }
 
 fn build_daemon_peer_cache_state(
@@ -5322,6 +5542,9 @@ async fn publish_private_announce_to_participants(
     peer_announcements: Option<&HashMap<String, PeerAnnouncement>>,
     retry_after_secs: Option<u64>,
 ) -> Result<usize> {
+    if app.private_mesh_uses_fips() {
+        return Ok(0);
+    }
     if participants.is_empty() {
         return Ok(0);
     }

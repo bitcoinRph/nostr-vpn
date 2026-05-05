@@ -122,7 +122,7 @@
       <div class="panel-kicker">Join & share</div>
       <div class="spotlight-meta-value">Copy, scan, or pair</div>
       <div class="config-path">
-        Includes the Mesh ID, your npub, and the relay list for {activeNetworkView.name}.
+        Includes the Mesh ID, your npub, admins, and FIPS discovery relays for {activeNetworkView.name}.
       </div>
       <div class="config-path" data-testid="network-admin-summary">
         {networkAdminSummary(activeNetworkView)}
@@ -141,7 +141,7 @@
         <div>Listen for join requests</div>
       </label>
       <div class="config-path">
-        Join requests from invite holders will appear here.
+        Join requests from invite holders arrive over FIPS.
       </div>
       {#if activeNetworkView.inboundJoinRequests.length > 0}
         <div class="lan-title">Pending join requests</div>
@@ -261,7 +261,7 @@
               {participant.magicDnsName || participant.magicDnsAlias || 'No alias'} | {participant.statusText} | {participant.lastSignalText} | {participant.tunnelIp}
               | {participantTrafficText(participant)}
               {#if participant.relayPathActive && participant.runtimeEndpoint}
-                | relay {participant.runtimeEndpoint}
+                | fallback {participant.runtimeEndpoint}
               {/if}
               {#if participant.advertisedRoutes.length > 0}
                 | routes {participant.advertisedRoutes.join(', ')}

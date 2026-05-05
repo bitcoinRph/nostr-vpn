@@ -112,10 +112,10 @@
     <summary class="collapsible-summary">
       <div>
         <div class="panel-kicker">Advanced</div>
-        <h2>Relays</h2>
+        <h2>FIPS Discovery</h2>
       </div>
       <div class="section-meta relay-health">
-        <span class="ok-text">{state.relaySummary.up}/{state.relays.length} connected</span>
+        <span class="ok-text">{state.relays.length} configured</span>
       </div>
     </summary>
 
@@ -123,7 +123,7 @@
       <div class="row form-row">
         <input
           class="text-input"
-          placeholder="Add relay URL"
+          placeholder="Add discovery relay URL"
           data-testid="relay-input"
           bind:value={relayInput}
           on:keydown={(event) => event.key === 'Enter' && onAddRelay()}
@@ -164,9 +164,9 @@
     <summary class="collapsible-summary">
       <div>
         <div class="panel-kicker">Connection</div>
-        <h2>Session & Relays</h2>
+        <h2>Session & Paths</h2>
       </div>
-      <div class="section-meta">Startup & relay behavior</div>
+      <div class="section-meta">Startup & fallback</div>
     </summary>
 
     <div class="collapsible-body">
@@ -179,7 +179,7 @@
               usePublicRelayFallback: (event.target as HTMLInputElement).checked,
             })}
         />
-        <span>Use public relay fallback when direct connection fails</span>
+        <span>Use legacy WireGuard relay fallback</span>
       </label>
       <div class="config-path settings-note">{publicRelayFallbackStatusText(state)}</div>
 
@@ -207,12 +207,12 @@
                 </div>
                 <div class="item-sub">
                   {participant.runtimeEndpoint
-                    ? `relay ${participant.runtimeEndpoint}`
-                    : 'relay fallback active'} | {participantTrafficText(participant)}
+                    ? `fallback ${participant.runtimeEndpoint}`
+                    : 'fallback active'} | {participantTrafficText(participant)}
                 </div>
               </div>
               <div class="participant-badges">
-                <span class="badge participant-badge warn">Relay fallback</span>
+                <span class="badge participant-badge warn">Fallback</span>
               </div>
             </div>
           {/each}
