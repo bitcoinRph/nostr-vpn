@@ -221,7 +221,7 @@ function assetReference(name, assetBaseUrl = '') {
   if (assetBaseUrl) {
     return `[${name}](${assetBaseUrl}/${encodeURIComponent(name)})`
   }
-  return `\`${name}\``
+  return `[${name}](assets/${encodeURIComponent(name)})`
 }
 
 function pushAssetLine(lines, usedAssets, assetNames, label, patterns, assetBaseUrl = '') {
