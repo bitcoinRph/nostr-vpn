@@ -1,11 +1,11 @@
 [workspace]
 members = [
   "crates/nostr-vpn-app-core",
+  "crates/nostr-vpn-app-core/uniffi-bindgen",
   "crates/nostr-vpn-core",
   "crates/nostr-vpn-cli",
   "crates/nostr-vpn-web",
   "crates/nostr-vpn-wintun",
-  "crates/nostr-vpn-gui/src-tauri",
   "crates/nostr-vpn-relay",
 ]
 resolver = "2"

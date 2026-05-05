@@ -1,13 +1,24 @@
 # macOS Native Shell
 
-Target shell: SwiftUI with AppKit integrations.
+This is the first native front end for the Rust-owned app architecture.
 
-Responsibilities:
+The app is SwiftUI/AppKit over `nostr-vpn-app-core` through UniFFI:
 
-- bind to `nostr-vpn-app-core` through UniFFI
-- render `UiState` with native SwiftUI views
-- dispatch `NativeAppAction` values into the shared Rust core
-- own Keychain access, LaunchAgent startup registration, status item/menu, and native update/install prompts
-- preserve current desktop service, tray, deep-link, QR, invite, LAN pairing, and exit-node behavior
+- `FfiApp.state()` returns typed native state.
+- `FfiApp.dispatch(_:)` accepts typed `NativeAppAction`.
+- Swift owns rendering, clipboard, URL handling, and macOS app lifecycle.
+- Rust owns config mutation, daemon/session commands, state projection, and action outcomes.
+
+Build locally:
+
+```bash
+./scripts/macos-build macos-build
+```
+
+Run locally:
+
+```bash
+./tools/run-macos
+```
 
 The parity checklist is in `docs/native-ui-parity-matrix.md`.
