@@ -1,0 +1,247 @@
+import Foundation
+
+struct AppState: Decodable {
+    var rev: UInt64 = 0
+    var error = ""
+    var appVersion = ""
+    var platform = ""
+    var mobile = true
+    var vpnSessionControlSupported = false
+    var runtimeStatusDetail = ""
+    var sessionActive = false
+    var sessionStatus = "Disconnected"
+    var daemonRunning = false
+    var relayConnected = false
+    var ownNpub = ""
+    var nodeName = ""
+    var tunnelIp = ""
+    var endpoint = ""
+    var listenPort: Int = 0
+    var activeNetworkInvite = ""
+    var connectedPeerCount: UInt64 = 0
+    var expectedPeerCount: UInt64 = 0
+    var meshReady = false
+    var exitNode = ""
+    var advertiseExitNode = false
+    var advertisedRoutes: [String] = []
+    var magicDnsSuffix = ""
+    var magicDnsStatus = ""
+    var autoconnect = false
+    var lanPairingActive = false
+    var lanPairingRemainingSecs: UInt64 = 0
+    var configPath = ""
+    var networks: [NetworkState] = []
+    var relays: [RelayState] = []
+    var lanPeers: [LanPeerState] = []
+    var health: [HealthIssue] = []
+
+    var activeNetwork: NetworkState? {
+        networks.first(where: { $0.enabled }) ?? networks.first
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case rev, error, appVersion, platform, mobile, vpnSessionControlSupported
+        case runtimeStatusDetail, sessionActive, sessionStatus, daemonRunning, relayConnected
+        case ownNpub, nodeName, tunnelIp, endpoint, listenPort, activeNetworkInvite
+        case connectedPeerCount, expectedPeerCount, meshReady, exitNode, advertiseExitNode
+        case advertisedRoutes, magicDnsSuffix, magicDnsStatus, autoconnect
+        case lanPairingActive, lanPairingRemainingSecs, configPath
+        case networks, relays, lanPeers, health
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rev = container.uint64(.rev)
+        error = container.string(.error)
+        appVersion = container.string(.appVersion)
+        platform = container.string(.platform)
+        mobile = container.bool(.mobile, default: true)
+        vpnSessionControlSupported = container.bool(.vpnSessionControlSupported)
+        runtimeStatusDetail = container.string(.runtimeStatusDetail)
+        sessionActive = container.bool(.sessionActive)
+        sessionStatus = container.string(.sessionStatus, default: "Disconnected")
+        daemonRunning = container.bool(.daemonRunning)
+        relayConnected = container.bool(.relayConnected)
+        ownNpub = container.string(.ownNpub)
+        nodeName = container.string(.nodeName)
+        tunnelIp = container.string(.tunnelIp)
+        endpoint = container.string(.endpoint)
+        listenPort = container.int(.listenPort)
+        activeNetworkInvite = container.string(.activeNetworkInvite)
+        connectedPeerCount = container.uint64(.connectedPeerCount)
+        expectedPeerCount = container.uint64(.expectedPeerCount)
+        meshReady = container.bool(.meshReady)
+        exitNode = container.string(.exitNode)
+        advertiseExitNode = container.bool(.advertiseExitNode)
+        advertisedRoutes = container.array(.advertisedRoutes)
+        magicDnsSuffix = container.string(.magicDnsSuffix)
+        magicDnsStatus = container.string(.magicDnsStatus)
+        autoconnect = container.bool(.autoconnect)
+        lanPairingActive = container.bool(.lanPairingActive)
+        lanPairingRemainingSecs = container.uint64(.lanPairingRemainingSecs)
+        configPath = container.string(.configPath)
+        networks = container.array(.networks)
+        relays = container.array(.relays)
+        lanPeers = container.array(.lanPeers)
+        health = container.array(.health)
+    }
+}
+
+struct NetworkState: Decodable, Identifiable {
+    var id = ""
+    var name = ""
+    var enabled = false
+    var networkId = ""
+    var localIsAdmin = false
+    var joinRequestsEnabled = false
+    var inviteInviterNpub = ""
+    var outboundJoinRequest: OutboundJoinRequest?
+    var inboundJoinRequests: [InboundJoinRequest] = []
+    var onlineCount: UInt64 = 0
+    var expectedCount: UInt64 = 0
+    var participants: [ParticipantState] = []
+
+    var displayName: String {
+        name.isEmpty ? "Private network" : name
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, enabled, networkId, localIsAdmin, joinRequestsEnabled
+        case inviteInviterNpub, outboundJoinRequest, inboundJoinRequests
+        case onlineCount, expectedCount, participants
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.string(.id)
+        name = container.string(.name)
+        enabled = container.bool(.enabled)
+        networkId = container.string(.networkId)
+        localIsAdmin = container.bool(.localIsAdmin)
+        joinRequestsEnabled = container.bool(.joinRequestsEnabled)
+        inviteInviterNpub = container.string(.inviteInviterNpub)
+        outboundJoinRequest = try? container.decodeIfPresent(OutboundJoinRequest.self, forKey: .outboundJoinRequest)
+        inboundJoinRequests = container.array(.inboundJoinRequests)
+        onlineCount = container.uint64(.onlineCount)
+        expectedCount = container.uint64(.expectedCount)
+        participants = container.array(.participants)
+    }
+}
+
+struct ParticipantState: Decodable, Identifiable {
+    var id: String { pubkeyHex.isEmpty ? npub : pubkeyHex }
+    var npub = ""
+    var pubkeyHex = ""
+    var alias = ""
+    var magicDnsAlias = ""
+    var magicDnsName = ""
+    var tunnelIp = ""
+    var isAdmin = false
+    var reachable = false
+    var offersExitNode = false
+    var state = ""
+    var statusText = ""
+    var lastSignalText = ""
+
+    var displayName: String {
+        if !magicDnsName.isEmpty { return magicDnsName }
+        if !alias.isEmpty { return alias }
+        return "Device"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case npub, pubkeyHex, alias, magicDnsAlias, magicDnsName, tunnelIp
+        case isAdmin, reachable, offersExitNode, state, statusText, lastSignalText
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        npub = container.string(.npub)
+        pubkeyHex = container.string(.pubkeyHex)
+        alias = container.string(.alias)
+        magicDnsAlias = container.string(.magicDnsAlias)
+        magicDnsName = container.string(.magicDnsName)
+        tunnelIp = container.string(.tunnelIp)
+        isAdmin = container.bool(.isAdmin)
+        reachable = container.bool(.reachable)
+        offersExitNode = container.bool(.offersExitNode)
+        state = container.string(.state)
+        statusText = container.string(.statusText)
+        lastSignalText = container.string(.lastSignalText)
+    }
+}
+
+struct OutboundJoinRequest: Decodable {
+    var recipientNpub = ""
+    var requestedAtText = ""
+}
+
+struct InboundJoinRequest: Decodable, Identifiable {
+    var id: String { requesterNpub }
+    var requesterNpub = ""
+    var requesterNodeName = ""
+    var requestedAtText = ""
+}
+
+struct RelayState: Decodable, Identifiable {
+    var id: String { url }
+    var url = ""
+    var state = ""
+    var statusText = ""
+}
+
+struct LanPeerState: Decodable, Identifiable {
+    var id: String { invite.isEmpty ? npub : invite }
+    var npub = ""
+    var nodeName = ""
+    var networkName = ""
+    var invite = ""
+    var lastSeenText = ""
+}
+
+struct HealthIssue: Decodable, Identifiable {
+    var id: String { code + summary }
+    var code = ""
+    var severity = ""
+    var summary = ""
+    var detail = ""
+}
+
+struct QrMatrix: Decodable {
+    var width = 0
+    var cells: [Bool] = []
+    var error = ""
+}
+
+struct QrDecodeResult: Decodable {
+    var value = ""
+    var error = ""
+}
+
+private extension KeyedDecodingContainer {
+    func string(_ key: Key, default defaultValue: String = "") -> String {
+        (try? decodeIfPresent(String.self, forKey: key)) ?? defaultValue
+    }
+
+    func bool(_ key: Key, default defaultValue: Bool = false) -> Bool {
+        (try? decodeIfPresent(Bool.self, forKey: key)) ?? defaultValue
+    }
+
+    func int(_ key: Key, default defaultValue: Int = 0) -> Int {
+        (try? decodeIfPresent(Int.self, forKey: key)) ?? defaultValue
+    }
+
+    func uint64(_ key: Key, default defaultValue: UInt64 = 0) -> UInt64 {
+        (try? decodeIfPresent(UInt64.self, forKey: key)) ?? defaultValue
+    }
+
+    func array<T: Decodable>(_ key: Key) -> [T] {
+        (try? decodeIfPresent([T].self, forKey: key)) ?? []
+    }
+}

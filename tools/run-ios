@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IOS_DIR="$ROOT/ios"
+BUILD_DIR="$IOS_DIR/.build"
+FRAMEWORKS_DIR="$IOS_DIR/Frameworks"
+BINDINGS_DIR="$IOS_DIR/Bindings"
+PROFILE="${NVPN_IOS_RUST_PROFILE:-debug}"
+MIN_VERSION="${NVPN_IOS_MIN_VERSION:-17.0}"
+PROJECT="$IOS_DIR/NostrVpnIos.xcodeproj"
+SCHEME="NostrVpnIos"
+DESTINATION="${NVPN_IOS_DESTINATION:-platform=iOS Simulator,name=iPhone 17 Pro}"
+
+target_root() {
+  local dir="${CARGO_TARGET_DIR:-$ROOT/target}"
+  if [[ "$dir" = /* ]]; then
+    printf '%s\n' "$dir"
+  else
+    printf '%s/%s\n' "$ROOT" "$dir"
+  fi
+}
+
+rust_lib() {
+  local target="$1"
+  printf '%s/%s/%s/libnostr_vpn_app_core.a\n' "$(target_root)" "$target" "$PROFILE"
+}
+
+build_rust_target() {
+  local target="$1"
+  local sdk="$2"
+  local clang_target="$3"
+  local min_flag="$4"
+  local dev_dir toolchain_bin sdkroot
+  dev_dir="$(xcode-select -p)"
+  toolchain_bin="$dev_dir/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+  sdkroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
+
+  local cargo_args=(build -p nostr-vpn-app-core --target "$target")
+  if [[ "$PROFILE" == "release" ]]; then
+    cargo_args+=(--release)
+  fi
+
+  env \
+    SDKROOT="$sdkroot" \
+    IPHONEOS_DEPLOYMENT_TARGET="$MIN_VERSION" \
+    CC="$toolchain_bin/clang" \
+    CXX="$toolchain_bin/clang++" \
+    AR="$toolchain_bin/ar" \
+    RANLIB="$toolchain_bin/ranlib" \
+    CARGO_TARGET_AARCH64_APPLE_IOS_LINKER="$toolchain_bin/clang" \
+    CARGO_TARGET_AARCH64_APPLE_IOS_SIM_LINKER="$toolchain_bin/clang" \
+    RUSTFLAGS="-C linker=$toolchain_bin/clang -C link-arg=-target -C link-arg=$clang_target -C link-arg=$min_flag=$MIN_VERSION" \
+    cargo "${cargo_args[@]}"
+}
+
+build_rust() {
+  build_rust_target "aarch64-apple-ios-sim" "iphonesimulator" "arm64-apple-ios${MIN_VERSION}-simulator" "-mios-simulator-version-min"
+  build_rust_target "aarch64-apple-ios" "iphoneos" "arm64-apple-ios${MIN_VERSION}" "-miphoneos-version-min"
+}
+
+build_xcframework() {
+  local framework="$FRAMEWORKS_DIR/NostrVpnAppCore.xcframework"
+  rm -rf "$framework"
+  mkdir -p "$FRAMEWORKS_DIR"
+  xcodebuild -create-xcframework \
+    -library "$(rust_lib aarch64-apple-ios-sim)" \
+    -headers "$BINDINGS_DIR" \
+    -library "$(rust_lib aarch64-apple-ios)" \
+    -headers "$BINDINGS_DIR" \
+    -output "$framework"
+}
+
+generate_project() {
+  if ! command -v xcodegen >/dev/null 2>&1; then
+    echo "xcodegen is required for iOS project generation" >&2
+    exit 1
+  fi
+  (cd "$IOS_DIR" && xcodegen generate --spec project.yml)
+}
+
+build_app() {
+  build_rust
+  build_xcframework
+  generate_project
+  xcodebuild \
+    -project "$PROJECT" \
+    -scheme "$SCHEME" \
+    -configuration Debug \
+    -derivedDataPath "$BUILD_DIR/DerivedData" \
+    -destination "$DESTINATION" \
+    CODE_SIGNING_ALLOWED=NO \
+    build
+}
+
+sim_device_id() {
+  local name="${NVPN_IOS_SIMULATOR_NAME:-iPhone 17 Pro}"
+  xcrun simctl list devices available \
+    | sed -n "s/.*$name (\([0-9A-F-]\{36\}\)).*/\1/p" \
+    | head -n 1
+}
+
+run_app() {
+  build_app
+  local device app_path
+  device="${NVPN_IOS_SIMULATOR_ID:-$(sim_device_id)}"
+  if [[ -z "$device" ]]; then
+    echo "No available iOS simulator found" >&2
+    exit 1
+  fi
+  xcrun simctl boot "$device" >/dev/null 2>&1 || true
+  xcrun simctl bootstatus "$device" -b
+  app_path="$(find "$BUILD_DIR/DerivedData/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name '*.app' -type d | head -n 1)"
+  if [[ -z "$app_path" ]]; then
+    echo "Built iOS app not found" >&2
+    exit 1
+  fi
+  xcrun simctl install "$device" "$app_path"
+  xcrun simctl launch "$device" to.iris.nvpn.ios
+  sleep 3
+  mkdir -p "$ROOT/artifacts"
+  xcrun simctl io "$device" screenshot "$ROOT/artifacts/nostr-vpn-ios.png"
+}
+
+case "${1:-build}" in
+  rust) build_rust ;;
+  xcframework) build_rust; build_xcframework ;;
+  project) generate_project ;;
+  build) build_app ;;
+  run) run_app ;;
+  *)
+    echo "usage: ./tools/run-ios [rust|xcframework|project|build|run]" >&2
+    exit 2
+    ;;
+esac

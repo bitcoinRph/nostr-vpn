@@ -1,0 +1,519 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		050CC6FAA230A6EDA894CCF8 /* PacketTunnelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8ECBFB09C508ED9BE10C907 /* PacketTunnelController.swift */; };
+		134D0AE1F2653934E68D66F4 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620E8362A0A3215BB8EFF1F5 /* RootView.swift */; };
+		2CDAA4060234E6D83A9E2876 /* NostrVpnAppCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1432941BCEFBEB848E748486 /* NostrVpnAppCore.xcframework */; };
+		2EEA35334ED681D30F23D58F /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8BAA0EBA6F30832FC35B6E6 /* NetworkExtension.framework */; };
+		5B0E1575EB4F5058F05B1913 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E8D34EBC51BAFC05BF873C3 /* AppModel.swift */; };
+		6A2222FDE7AC3BD2946DE2D9 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E68FA9898E0C487261BE03 /* Models.swift */; };
+		6CD25EAFAEB49BF8DD9DBCC2 /* NativeCoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C4E67D5D36550552B70435 /* NativeCoreClient.swift */; };
+		71E581C6F6310F9115EE989A /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C026B0860BA3DC6889593E3F /* AppIntents.framework */; };
+		9655E8C2070C163CD6BB08D2 /* PacketTunnel.appex in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = 21F75A016D5B4CB3DFBE0621 /* PacketTunnel.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		9E4E18AFBA1E70116199E68D /* NostrVpnIosApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8C2C375478E216EE34D7E2A /* NostrVpnIosApp.swift */; };
+		B9BD3A30C0A8D50809A96E69 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F7274F66C76E9FC38CB0DEDB /* Assets.xcassets */; };
+		DC1FC354C9FEA443CBCE3ABF /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10601F7E977CA9A2CA70782B /* PacketTunnelProvider.swift */; };
+		F5B16700D01D8F8004402AF9 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C8BAA0EBA6F30832FC35B6E6 /* NetworkExtension.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		4068CF9C22E22E3C9EA6B345 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B8EEE5A5A357A9BE2F27A2CA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AB61873F2829C99F6B9C990E;
+			remoteInfo = PacketTunnel;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		572B0BDA7182B993F6EEC853 /* Embed Dependencies */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				9655E8C2070C163CD6BB08D2 /* PacketTunnel.appex in Embed Dependencies */,
+			);
+			name = "Embed Dependencies";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		10601F7E977CA9A2CA70782B /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		1432941BCEFBEB848E748486 /* NostrVpnAppCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = NostrVpnAppCore.xcframework; path = Frameworks/NostrVpnAppCore.xcframework; sourceTree = "<group>"; };
+		21F75A016D5B4CB3DFBE0621 /* PacketTunnel.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		29E68FA9898E0C487261BE03 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		3DDFB58648107DDDBCC8DBE5 /* PacketTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PacketTunnel.entitlements; sourceTree = "<group>"; };
+		4E8D34EBC51BAFC05BF873C3 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		5EE69AF3C3AAAA49D523C344 /* NostrVpnIos.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = NostrVpnIos.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		620E8362A0A3215BB8EFF1F5 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		C026B0860BA3DC6889593E3F /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
+		C8BAA0EBA6F30832FC35B6E6 /* NetworkExtension.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NetworkExtension.framework; path = System/Library/Frameworks/NetworkExtension.framework; sourceTree = SDKROOT; };
+		E3C4E67D5D36550552B70435 /* NativeCoreClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCoreClient.swift; sourceTree = "<group>"; };
+		E8C2C375478E216EE34D7E2A /* NostrVpnIosApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrVpnIosApp.swift; sourceTree = "<group>"; };
+		E8ECBFB09C508ED9BE10C907 /* PacketTunnelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelController.swift; sourceTree = "<group>"; };
+		F581F9BC69EA220D465E29EC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		F7274F66C76E9FC38CB0DEDB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7BA0C09F1C3CF7C6EE90EAC0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2EEA35334ED681D30F23D58F /* NetworkExtension.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CF6683045809E3E7FF25B641 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2CDAA4060234E6D83A9E2876 /* NostrVpnAppCore.xcframework in Frameworks */,
+				F5B16700D01D8F8004402AF9 /* NetworkExtension.framework in Frameworks */,
+				71E581C6F6310F9115EE989A /* AppIntents.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		277A36BBB757931F3D25086F = {
+			isa = PBXGroup;
+			children = (
+				6EF67A9C6F0CFFD4E4F15136 /* PacketTunnel */,
+				FFB7F5B7C863D721E69404DD /* Resources */,
+				28B11EB5F22D50B40E07A4AF /* Sources */,
+				9BCB071BA1A1F1809C62BE43 /* Frameworks */,
+				D39D5A56D64190205BCC5B1A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		28B11EB5F22D50B40E07A4AF /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				4E8D34EBC51BAFC05BF873C3 /* AppModel.swift */,
+				29E68FA9898E0C487261BE03 /* Models.swift */,
+				E3C4E67D5D36550552B70435 /* NativeCoreClient.swift */,
+				E8C2C375478E216EE34D7E2A /* NostrVpnIosApp.swift */,
+				E8ECBFB09C508ED9BE10C907 /* PacketTunnelController.swift */,
+				620E8362A0A3215BB8EFF1F5 /* RootView.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		6EF67A9C6F0CFFD4E4F15136 /* PacketTunnel */ = {
+			isa = PBXGroup;
+			children = (
+				F581F9BC69EA220D465E29EC /* Info.plist */,
+				3DDFB58648107DDDBCC8DBE5 /* PacketTunnel.entitlements */,
+				10601F7E977CA9A2CA70782B /* PacketTunnelProvider.swift */,
+			);
+			path = PacketTunnel;
+			sourceTree = "<group>";
+		};
+		9BCB071BA1A1F1809C62BE43 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				C026B0860BA3DC6889593E3F /* AppIntents.framework */,
+				C8BAA0EBA6F30832FC35B6E6 /* NetworkExtension.framework */,
+				1432941BCEFBEB848E748486 /* NostrVpnAppCore.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		D39D5A56D64190205BCC5B1A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5EE69AF3C3AAAA49D523C344 /* NostrVpnIos.app */,
+				21F75A016D5B4CB3DFBE0621 /* PacketTunnel.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		FFB7F5B7C863D721E69404DD /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				F7274F66C76E9FC38CB0DEDB /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2DDBC3A91D35DF14C8FB244F /* NostrVpnIos */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A5AA51A117A94E2C758CA5B3 /* Build configuration list for PBXNativeTarget "NostrVpnIos" */;
+			buildPhases = (
+				247F02439E466EA792536B57 /* Sources */,
+				40391AD80CE73575084CD3B7 /* Resources */,
+				CF6683045809E3E7FF25B641 /* Frameworks */,
+				572B0BDA7182B993F6EEC853 /* Embed Dependencies */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0AA253FC1384CD2FB5AEB2AE /* PBXTargetDependency */,
+			);
+			name = NostrVpnIos;
+			packageProductDependencies = (
+			);
+			productName = NostrVpnIos;
+			productReference = 5EE69AF3C3AAAA49D523C344 /* NostrVpnIos.app */;
+			productType = "com.apple.product-type.application";
+		};
+		AB61873F2829C99F6B9C990E /* PacketTunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9ADBF270BEA9F3EC433EBECE /* Build configuration list for PBXNativeTarget "PacketTunnel" */;
+			buildPhases = (
+				37866C9D922DCBD9D7D198C6 /* Sources */,
+				7BA0C09F1C3CF7C6EE90EAC0 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PacketTunnel;
+			packageProductDependencies = (
+			);
+			productName = PacketTunnel;
+			productReference = 21F75A016D5B4CB3DFBE0621 /* PacketTunnel.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B8EEE5A5A357A9BE2F27A2CA /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					2DDBC3A91D35DF14C8FB244F = {
+						ProvisioningStyle = Automatic;
+					};
+					AB61873F2829C99F6B9C990E = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 74AC5F0BB81527A1F708C8A6 /* Build configuration list for PBXProject "NostrVpnIos" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 277A36BBB757931F3D25086F;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2DDBC3A91D35DF14C8FB244F /* NostrVpnIos */,
+				AB61873F2829C99F6B9C990E /* PacketTunnel */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		40391AD80CE73575084CD3B7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B9BD3A30C0A8D50809A96E69 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		247F02439E466EA792536B57 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5B0E1575EB4F5058F05B1913 /* AppModel.swift in Sources */,
+				6A2222FDE7AC3BD2946DE2D9 /* Models.swift in Sources */,
+				6CD25EAFAEB49BF8DD9DBCC2 /* NativeCoreClient.swift in Sources */,
+				9E4E18AFBA1E70116199E68D /* NostrVpnIosApp.swift in Sources */,
+				050CC6FAA230A6EDA894CCF8 /* PacketTunnelController.swift in Sources */,
+				134D0AE1F2653934E68D66F4 /* RootView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37866C9D922DCBD9D7D198C6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DC1FC354C9FEA443CBCE3ABF /* PacketTunnelProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0AA253FC1384CD2FB5AEB2AE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AB61873F2829C99F6B9C990E /* PacketTunnel */;
+			targetProxy = 4068CF9C22E22E3C9EA6B345 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		038361B625D516699B521E00 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = NostrVpnIos.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Frameworks\"",
+				);
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Bindings";
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = to.iris.nvpn.ios;
+				PRODUCT_MODULE_NAME = NostrVpnIos;
+				PRODUCT_NAME = "Nostr VPN";
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = Bindings/NostrVpnAppCoreC.h;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		0717E9066B6546D26111C894 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = NostrVpnIos.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"Frameworks\"",
+				);
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Bindings";
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = to.iris.nvpn.ios;
+				PRODUCT_MODULE_NAME = NostrVpnIos;
+				PRODUCT_NAME = "Nostr VPN";
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = Bindings/NostrVpnAppCoreC.h;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		3E4BB13711D3CE2247957D79 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.3.23;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		4558554D43E0EDA7E6BD772A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
+				INFOPLIST_FILE = PacketTunnel/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = to.iris.nvpn.ios.PacketTunnel;
+				PRODUCT_MODULE_NAME = PacketTunnel;
+				PRODUCT_NAME = "Nostr VPN Tunnel";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AE2871D23DA57B84EE7500FC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
+				INFOPLIST_FILE = PacketTunnel/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = to.iris.nvpn.ios.PacketTunnel;
+				PRODUCT_MODULE_NAME = PacketTunnel;
+				PRODUCT_NAME = "Nostr VPN Tunnel";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C366830E425EDBB6FAE79148 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.3.23;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		74AC5F0BB81527A1F708C8A6 /* Build configuration list for PBXProject "NostrVpnIos" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3E4BB13711D3CE2247957D79 /* Debug */,
+				C366830E425EDBB6FAE79148 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9ADBF270BEA9F3EC433EBECE /* Build configuration list for PBXNativeTarget "PacketTunnel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4558554D43E0EDA7E6BD772A /* Debug */,
+				AE2871D23DA57B84EE7500FC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A5AA51A117A94E2C758CA5B3 /* Build configuration list for PBXNativeTarget "NostrVpnIos" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				038361B625D516699B521E00 /* Debug */,
+				0717E9066B6546D26111C894 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B8EEE5A5A357A9BE2F27A2CA /* Project object */;
+}

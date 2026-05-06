@@ -12,6 +12,7 @@ info:
     @echo "  just run-linux"
     @echo "  just run-windows"
     @echo "  just run-android"
+    @echo "  just run-ios"
     @echo
     @echo "Build"
     @echo "  just build"
@@ -34,6 +35,10 @@ info:
     @echo "Android"
     @echo "  just android-build"
     @echo "  just android-install"
+    @echo
+    @echo "iOS"
+    @echo "  just ios-build"
+    @echo "  just ios-run"
     @echo
     @echo "Checks"
     @echo "  just test"
@@ -64,6 +69,9 @@ run-windows:
 run-android:
     ./tools/run-android install
 
+run-ios:
+    ./tools/run-ios run
+
 build:
     @case "$(uname -s)" in \
         Darwin) just macos-build ;; \
@@ -83,6 +91,12 @@ android-build:
 
 android-install:
     ./tools/run-android install
+
+ios-build:
+    ./tools/run-ios build
+
+ios-run:
+    ./tools/run-ios run
 
 macos-gen-swift:
     ./scripts/macos-build macos-gen-swift

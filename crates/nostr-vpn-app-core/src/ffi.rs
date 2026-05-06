@@ -764,7 +764,7 @@ impl NativeAppRuntime {
             self.session_active = true;
             self.daemon_running = true;
             self.relay_connected = false;
-            self.session_status = "Android tunnel pending".to_string();
+            self.session_status = "Mobile tunnel pending".to_string();
             return self.refresh_mobile_status();
         }
         let output = self.run_nvpn_elevated([
@@ -809,7 +809,7 @@ impl NativeAppRuntime {
                 || self.session_status == "CLI unavailable"
                 || self.session_status.starts_with("nvpn CLI binary not found")
             {
-                self.session_status = "Android tunnel pending".to_string();
+                self.session_status = "Mobile tunnel pending".to_string();
             }
         } else {
             self.daemon_running = false;

@@ -11,7 +11,7 @@ native shells while keeping product truth in Rust.
 
 | Layer | macOS | Windows | Linux | Android | iPhone |
 | --- | --- | --- | --- | --- | --- |
-| Shared core | Rust app core exposed through UniFFI | Rust app core exposed through explicit C ABI JSON bridge | Rust app core used directly or through UniFFI | Rust app core exposed through explicit C ABI JSON bridge over JNI | Rust app core exposed through UniFFI |
+| Shared core | Rust app core exposed through UniFFI | Rust app core exposed through explicit C ABI JSON bridge | Rust app core used directly or through UniFFI | Rust app core exposed through explicit C ABI JSON bridge over JNI | Rust app core exposed through explicit C ABI JSON bridge |
 | Native shell | SwiftUI/AppKit | WPF/.NET | GTK4/libadwaita Rust | Kotlin/Jetpack Compose | SwiftUI/UIKit |
 | App state owner | Rust | Rust | Rust | Rust | Rust |
 | Rendering owner | Native | Native | Native | Native | Native |
@@ -222,6 +222,23 @@ current native shell contract.
 | Routing | Partial | Direct/exit-node selection, advertised routes, and offer-exit toggle dispatch core actions. | Add search/filter polish and mobile-specific route constraints. |
 | Settings/diagnostics/relays | Partial | Device settings, saved network activation, join-request toggle, relays, runtime detail, MagicDNS, app version, and health rows are visible. | Add destructive actions, richer diagnostics, and mobile storage/keystore policy. |
 | VPN runtime | Partial | Android `VpnService` permission surface and service declaration are present; app-core reports mobile session state without desktop CLI dependency. | Wire the packet tunnel data-plane loop to FIPS endpoint delivery before calling the mobile VPN path complete. |
+
+## iOS App Parity Status
+
+This table tracks the SwiftUI/UIKit shell under `ios/` against the current
+native shell contract.
+
+| Feature group | iOS status | Native iOS coverage | Remaining parity work |
+| --- | --- | --- | --- |
+| Rust core boundary | Ready | The iOS app builds `nostr-vpn-app-core` for simulator and device targets, packages it as `NostrVpnAppCore.xcframework`, and calls the shared JSON C ABI for state, refresh, action dispatch, invite QR generation, and QR image decode. | Add generated UniFFI Swift only if it becomes cleaner than the explicit C bridge. |
+| Build/run harness | Ready | `just ios-build` builds Rust, generates the Xcode project, and builds the simulator app; `just ios-run` installs and launches it in the iPhone simulator. Verified with an iPhone simulator screenshot. | Add signed device/TestFlight packaging and release archive flow. |
+| Main shell hierarchy | Partial | SwiftUI renders Devices, Share, Routing, and Settings with the same simple top-level flow as Android and the desktop native shells. | Add iPad/landscape layouts and compact accessibility passes. |
+| Mobile app-core startup | Ready | iOS uses the mobile app-core status path and no longer shells out to the desktop `nvpn` binary during startup or config-only refreshes. | Replace polling with a core/mobile runtime update stream later. |
+| Device roster | Partial | Shows local/peer identity, tunnel IP, reachability, admin/exit badges, npub copy, join requests, and manual add-device. | Add alias/admin/remove controls and richer traffic/path detail parity. |
+| Invite share/import | Partial | Renders invite QR through Rust, supports invite copy/share, imports pasted/deep-linked invites, includes the shared QR image decode bridge, and exposes LAN pairing rows. | Add image picker, live camera QR scanning, and smoother import confirmation. |
+| Routing | Partial | Direct/exit-node selection, advertised routes, and offer-exit toggle dispatch core actions. | Add search/filter polish and mobile-specific route constraints. |
+| Settings/diagnostics/relays | Partial | Device settings, saved network activation, join-request toggle, relays, runtime detail, MagicDNS, app version, and health rows are visible. | Add destructive actions, richer diagnostics, and iOS storage/keychain policy. |
+| VPN runtime | Partial | A NetworkExtension Packet Tunnel target and manager wrapper are present; app-core reports mobile session state without desktop CLI dependency. | Wire the packet tunnel packet loop to FIPS endpoint delivery before calling the iOS VPN path complete. |
 
 ## Linux App Parity Status
 
