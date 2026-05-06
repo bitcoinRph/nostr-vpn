@@ -12,13 +12,13 @@ The app is SwiftUI/AppKit over `nostr-vpn-app-core` through UniFFI:
 Build locally:
 
 ```bash
-./scripts/macos-build macos-build
+just macos-build
 ```
 
 Run locally:
 
 ```bash
-./tools/run-macos
+just run
 ```
 
 The parity checklist is in `docs/native-ui-parity-matrix.md`.

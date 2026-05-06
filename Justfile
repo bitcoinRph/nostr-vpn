@@ -7,6 +7,7 @@ info:
     @echo "Nostr VPN commands"
     @echo
     @echo "Run"
+    @echo "  just run"
     @echo "  just run-macos"
     @echo
     @echo "macOS"
@@ -24,6 +25,12 @@ info:
     @echo "  just e2e-exit-node"
     @echo "  just e2e-nat"
     @echo "  just e2e-roster-admin"
+
+run:
+    @case "$(uname -s)" in \
+        Darwin) just run-macos ;; \
+        *) echo "No local run target for $(uname -s). Use just --list for available commands." >&2; exit 1 ;; \
+    esac
 
 run-macos:
     ./tools/run-macos
