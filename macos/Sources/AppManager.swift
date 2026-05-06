@@ -33,6 +33,7 @@ final class AppManager: ObservableObject {
     private let app: FfiApp
     private var refreshTask: Task<Void, Never>?
     private var copyClearTask: Task<Void, Never>?
+    private var actionStatusClearTask: Task<Void, Never>?
     private var serviceSettlementTask: Task<Void, Never>?
     private var updateTask: Task<Void, Never>?
     private var startupUrlsDrained = false
@@ -45,7 +46,7 @@ final class AppManager: ObservableObject {
         let dataDir = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first?
-            .appendingPathComponent("Nostr VPN", isDirectory: true)
+            .appendingPathComponent("nvpn", isDirectory: true)
             .path ?? ""
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
         let app = FfiApp(dataDir: dataDir, appVersion: version)
@@ -97,10 +98,16 @@ final class AppManager: ObservableObject {
         }
     }
 
-    func dispatch(_ action: NativeAppAction, status: String = "", settleService: Bool = false) {
+    func dispatch(
+        _ action: NativeAppAction,
+        status: String = "",
+        successStatus: String = "",
+        settleService: Bool = false
+    ) {
         guard !actionInFlight else {
             return
         }
+        actionStatusClearTask?.cancel()
         actionInFlight = true
         actionStatus = status
         let app = app
@@ -111,8 +118,11 @@ final class AppManager: ObservableObject {
             await MainActor.run {
                 self.state = nextState
                 self.actionInFlight = false
-                self.actionStatus = nextState.error.isEmpty ? "" : nextState.error
+                self.actionStatus = nextState.error.isEmpty ? successStatus : nextState.error
                 self.maybePromptServiceRepair(nextState)
+                if nextState.error.isEmpty, !successStatus.isEmpty {
+                    self.clearActionStatus(after: 3)
+                }
                 if settleService {
                     self.startServiceSettlementPolling()
                 }
@@ -357,19 +367,21 @@ final class AppManager: ObservableObject {
     }
 
     func installService() {
-        dispatch(.installSystemService, status: "Installing service", settleService: true)
+        let installing = serviceRepairRecommended ? "Repairing service" : state.serviceInstalled ? "Reinstalling service" : "Installing service"
+        let installed = serviceRepairRecommended ? "Service repaired" : state.serviceInstalled ? "Service reinstalled" : "Service installed"
+        dispatch(.installSystemService, status: installing, successStatus: installed, settleService: true)
     }
 
     func enableService() {
-        dispatch(.enableSystemService, status: "Enabling service", settleService: true)
+        dispatch(.enableSystemService, status: "Enabling service", successStatus: "Service enabled", settleService: true)
     }
 
     func disableService() {
-        dispatch(.disableSystemService, status: "Disabling service", settleService: true)
+        dispatch(.disableSystemService, status: "Disabling service", successStatus: "Service disabled", settleService: true)
     }
 
     func uninstallService() {
-        dispatch(.uninstallSystemService, status: "Uninstalling service", settleService: true)
+        dispatch(.uninstallSystemService, status: "Uninstalling service", successStatus: "Service uninstalled", settleService: true)
     }
 
     func startLanPairing() {
@@ -555,6 +567,20 @@ final class AppManager: ObservableObject {
             }
             await MainActor.run {
                 self?.serviceSettling = false
+            }
+        }
+    }
+
+    private func clearActionStatus(after seconds: UInt64) {
+        let statusToClear = actionStatus
+        actionStatusClearTask?.cancel()
+        actionStatusClearTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            await MainActor.run {
+                guard self?.actionStatus == statusToClear else {
+                    return
+                }
+                self?.actionStatus = ""
             }
         }
     }

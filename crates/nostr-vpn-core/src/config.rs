@@ -17,10 +17,10 @@ pub use crate::network_routes::{
 
 use crate::config_defaults::{
     current_unix_timestamp, default_autoconnect, default_close_to_tray_on_close, default_endpoint,
-    default_lan_discovery_enabled, default_launch_on_startup, default_listen_for_join_requests,
-    default_listen_port, default_nat_discovery_timeout_secs, default_nat_enabled,
-    default_nat_stun_servers, default_network_enabled, default_network_id, default_node_id,
-    default_relays, default_tunnel_ip, generate_nostr_identity, is_true, is_zero,
+    default_fips_advertise_endpoint, default_lan_discovery_enabled, default_launch_on_startup,
+    default_listen_for_join_requests, default_listen_port, default_nat_discovery_timeout_secs,
+    default_nat_enabled, default_nat_stun_servers, default_network_enabled, default_network_id,
+    default_node_id, default_relays, default_tunnel_ip, generate_nostr_identity, is_true, is_zero,
     npub_for_pubkey_hex, uses_default_network_id,
 };
 pub use crate::config_defaults::{
@@ -93,6 +93,11 @@ pub struct AppConfig {
     pub private_data_plane: PrivateDataPlane,
     #[serde(default)]
     pub exit_data_plane: ExitDataPlane,
+    #[serde(
+        default = "default_fips_advertise_endpoint",
+        skip_serializing_if = "is_true"
+    )]
+    pub fips_advertise_endpoint: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub exit_node: String,
     #[serde(default = "default_close_to_tray_on_close")]
@@ -214,6 +219,7 @@ impl Default for AppConfig {
             autoconnect: default_autoconnect(),
             private_data_plane: PrivateDataPlane::default(),
             exit_data_plane: ExitDataPlane::default(),
+            fips_advertise_endpoint: default_fips_advertise_endpoint(),
             exit_node: String::new(),
             close_to_tray_on_close: default_close_to_tray_on_close(),
             magic_dns_suffix: default_magic_dns_suffix(),

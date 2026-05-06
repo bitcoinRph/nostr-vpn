@@ -654,6 +654,8 @@ struct SetArgs {
     advertise_exit_node: Option<bool>,
     #[arg(long)]
     autoconnect: Option<bool>,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    fips_advertise_endpoint: Option<bool>,
     #[arg(long)]
     json: bool,
 }
@@ -1172,6 +1174,9 @@ async fn run_command(command: Command) -> Result<()> {
             }
             if let Some(value) = args.autoconnect {
                 app.autoconnect = value;
+            }
+            if let Some(value) = args.fips_advertise_endpoint {
+                app.fips_advertise_endpoint = value;
             }
             if !args.relays.is_empty() {
                 app.nostr.relays = args.relays;
@@ -4430,15 +4435,48 @@ async fn refresh_fips_tunnel_config(
     network_id: &str,
     relays: &[String],
     own_pubkey: Option<&str>,
+    public_signal_endpoint: Option<&DiscoveredPublicSignalEndpoint>,
 ) -> Result<()> {
-    let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+    let config = fips_tunnel_config_from_app(
         app,
         network_id,
         runtime.iface().to_string(),
         relays,
         own_pubkey,
+        public_signal_endpoint,
     )?;
     runtime.apply_config(config).await
+}
+
+#[cfg(feature = "embedded-fips")]
+fn fips_tunnel_config_from_app(
+    app: &AppConfig,
+    network_id: &str,
+    iface: impl Into<String>,
+    relays: &[String],
+    own_pubkey: Option<&str>,
+    public_signal_endpoint: Option<&DiscoveredPublicSignalEndpoint>,
+) -> Result<crate::fips_private_mesh::FipsPrivateTunnelConfig> {
+    let mut config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+        app, network_id, iface, relays, own_pubkey,
+    )?;
+    config.advertised_endpoint =
+        fips_advertised_endpoint(app, public_signal_endpoint, config.listen_port);
+    Ok(config)
+}
+
+#[cfg(feature = "embedded-fips")]
+fn fips_advertised_endpoint(
+    app: &AppConfig,
+    public_signal_endpoint: Option<&DiscoveredPublicSignalEndpoint>,
+    listen_port: u16,
+) -> String {
+    public_endpoint_for_listen_port(public_signal_endpoint, listen_port)
+        .or_else(|| {
+            let configured = endpoint_with_listen_port(&app.node.endpoint, listen_port);
+            (!endpoint_is_local_only(&configured)).then_some(configured)
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(feature = "embedded-fips")]
@@ -4450,6 +4488,7 @@ async fn sync_fips_private_runtime(
     iface: &str,
     relays: &[String],
     own_pubkey: Option<&str>,
+    public_signal_endpoint: Option<&DiscoveredPublicSignalEndpoint>,
     session_enabled: bool,
     expected_peers: usize,
 ) -> Result<()> {
@@ -4464,15 +4503,30 @@ async fn sync_fips_private_runtime(
         .as_ref()
         .map(|runtime| runtime.iface().to_string())
         .unwrap_or_else(|| iface.to_string());
-    let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+    let config = fips_tunnel_config_from_app(
         app,
         network_id,
         config_iface,
         relays,
         own_pubkey,
+        public_signal_endpoint,
     )?;
 
-    if let Some(existing) = runtime.as_mut() {
+    let restart = runtime
+        .as_ref()
+        .is_some_and(|existing| existing.requires_endpoint_restart(&config));
+    if restart {
+        if let Some(existing) = runtime.take() {
+            existing.stop().await?;
+        }
+        let started = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
+        eprintln!(
+            "daemon: restarted FIPS private mesh on {}; exit capability remains {}",
+            started.iface(),
+            app.exit_data_plane
+        );
+        *runtime = Some(started);
+    } else if let Some(existing) = runtime.as_mut() {
         existing.apply_config(config).await?;
     } else {
         let started = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;

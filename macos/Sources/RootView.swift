@@ -236,7 +236,9 @@ struct RootView: View {
                     }
                 }
                 HStack(spacing: 8) {
-                    Text(deviceSubtitle(participant))
+                    if !deviceSubtitle(participant).isEmpty {
+                        Text(deviceSubtitle(participant))
+                    }
                     if !cleanIp(participant.tunnelIp).isEmpty {
                         Text(cleanIp(participant.tunnelIp))
                     }
@@ -1095,10 +1097,7 @@ struct RootView: View {
         if isSelf(participant) {
             return "This device"
         }
-        if !participant.lastSignalText.isEmpty {
-            return participant.lastSignalText
-        }
-        return short(participant.npub, prefix: 14, suffix: 6)
+        return ""
     }
 
     private func deviceStatusText(_ participant: NativeParticipantState) -> String {

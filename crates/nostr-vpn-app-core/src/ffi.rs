@@ -1232,10 +1232,10 @@ impl NativeAppRuntime {
         if is_local {
             return "self".to_string();
         }
-        peer.and_then(peer_last_signal_secs).map_or_else(
-            || "nostr unseen".to_string(),
-            |seen| format!("nostr seen {}", compact_age_text(age_secs_since(seen))),
-        )
+        peer.and_then(peer_last_signal_secs)
+            .map_or_else(String::new, |seen| {
+                format!("seen {}", compact_age_text(age_secs_since(seen)))
+            })
     }
 
     fn config_path_str(&self) -> Result<&str> {
@@ -1274,10 +1274,7 @@ impl NativeAppRuntime {
                 "nvpn CLI binary not found; set {NVPN_BIN_ENV} or install nvpn"
             ));
         };
-        let shell_command = std::iter::once(nvpn_bin.display().to_string())
-            .chain(args.iter().map(|arg| shell_quote(arg)))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let shell_command = macos_admin_shell_command(nvpn_bin, &args);
         let script = format!(
             "do shell script {} with administrator privileges",
             applescript_quote(&shell_command)
@@ -1612,6 +1609,14 @@ fn non_empty(value: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
+fn macos_admin_shell_command(nvpn_bin: &Path, args: &[&str]) -> String {
+    std::iter::once(shell_quote(&nvpn_bin.display().to_string()))
+        .chain(args.iter().map(|arg| shell_quote(arg)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(target_os = "macos")]
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -1680,5 +1685,17 @@ mod tests {
                 participant.pubkey_hex == own_pubkey && participant.reachable
             })
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_admin_shell_command_quotes_bundled_cli_path() {
+        let command = macos_admin_shell_command(
+            Path::new("/Applications/Nostr VPN.app/Contents/Resources/nvpn"),
+            &["service", "install", "--force"],
+        );
+
+        assert!(command.starts_with("'/Applications/Nostr VPN.app/Contents/Resources/nvpn' "));
+        assert!(command.contains(" 'service' 'install' '--force'"));
     }
 }

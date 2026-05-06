@@ -400,6 +400,7 @@ impl FipsPrivateMeshRuntime {
 struct FipsEndpointTransportConfig {
     listen_port: u16,
     advertised_endpoint: String,
+    advertise_endpoint: bool,
     stun_servers: Vec<String>,
 }
 
@@ -411,7 +412,8 @@ fn fips_endpoint_config(
 ) -> Config {
     let mut config = Config::new();
     config.node.discovery.nostr.enabled = !relays.is_empty();
-    config.node.discovery.nostr.advertise = !relays.is_empty() && transport.is_some();
+    config.node.discovery.nostr.advertise =
+        !relays.is_empty() && transport.is_some_and(|transport| transport.advertise_endpoint);
     config.node.discovery.nostr.policy = NostrDiscoveryPolicy::ConfiguredOnly;
     config.node.discovery.nostr.app = scope.to_string();
     if !relays.is_empty() {
@@ -420,7 +422,8 @@ fn fips_endpoint_config(
     }
     let bind_addr = transport.map(fips_udp_bind_addr);
     let external_addr = transport.and_then(fips_udp_external_addr);
-    let advertise_udp = !relays.is_empty() && transport.is_some();
+    let advertise_udp =
+        !relays.is_empty() && transport.is_some_and(|transport| transport.advertise_endpoint);
     if let Some(transport) = transport {
         config.node.discovery.nostr.stun_servers = transport.stun_servers.clone();
     }
@@ -475,6 +478,7 @@ pub(crate) struct FipsPrivateTunnelConfig {
     pub(crate) local_address: String,
     pub(crate) listen_port: u16,
     pub(crate) advertised_endpoint: String,
+    pub(crate) advertise_endpoint: bool,
     pub(crate) stun_servers: Vec<String>,
     pub(crate) peers: Vec<FipsMeshPeerConfig>,
     pub(crate) route_targets: Vec<String>,
@@ -549,6 +553,7 @@ impl FipsPrivateTunnelConfig {
                 .unwrap_or_else(|| local_interface_address_for_tunnel(&app.node.tunnel_ip)),
             listen_port: app.node.listen_port,
             advertised_endpoint: app.node.endpoint.clone(),
+            advertise_endpoint: app.fips_advertise_endpoint,
             stun_servers: app.nat.stun_servers.clone(),
             peers,
             route_targets,
@@ -611,6 +616,7 @@ impl FipsPrivateTunnelRuntime {
         let transport = FipsEndpointTransportConfig {
             listen_port: config.listen_port,
             advertised_endpoint: config.advertised_endpoint.clone(),
+            advertise_endpoint: config.advertise_endpoint,
             stun_servers: config.stun_servers.clone(),
         };
         let endpoint_config =
@@ -676,6 +682,16 @@ impl FipsPrivateTunnelRuntime {
 
     pub(crate) fn peer_pubkeys(&self) -> Vec<String> {
         self.mesh.peer_pubkeys()
+    }
+
+    pub(crate) fn requires_endpoint_restart(&self, config: &FipsPrivateTunnelConfig) -> bool {
+        self.config.identity_nsec != config.identity_nsec
+            || self.config.network_id != config.network_id
+            || self.config.relays != config.relays
+            || self.config.listen_port != config.listen_port
+            || self.config.advertised_endpoint != config.advertised_endpoint
+            || self.config.advertise_endpoint != config.advertise_endpoint
+            || self.config.stun_servers != config.stun_servers
     }
 
     pub(crate) async fn apply_config(&mut self, config: FipsPrivateTunnelConfig) -> Result<()> {
@@ -1592,6 +1608,7 @@ mod tests {
         let transport = FipsEndpointTransportConfig {
             listen_port: 51820,
             advertised_endpoint: "192.168.50.20:51820".to_string(),
+            advertise_endpoint: true,
             stun_servers: vec!["stun:stun.example.org:3478".to_string()],
         };
 

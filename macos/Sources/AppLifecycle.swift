@@ -157,8 +157,8 @@ final class SingleInstanceCoordinator: NSObject {
         let dir = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first?
-            .appendingPathComponent("Nostr VPN", isDirectory: true)
-            ?? FileManager.default.temporaryDirectory.appendingPathComponent("Nostr VPN", isDirectory: true)
+            .appendingPathComponent("nvpn", isDirectory: true)
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("nvpn", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("NostrVpnMac.lock").path
     }

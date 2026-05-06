@@ -15,26 +15,33 @@ pub struct RelaySummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonRuntimeState {
+    #[serde(alias = "updated_at")]
     pub updated_at: u64,
-    #[serde(default)]
+    #[serde(default, alias = "binary_version")]
     pub binary_version: String,
-    #[serde(default)]
+    #[serde(default, alias = "local_endpoint")]
     pub local_endpoint: String,
-    #[serde(default)]
+    #[serde(default, alias = "advertised_endpoint")]
     pub advertised_endpoint: String,
-    #[serde(default)]
+    #[serde(default, alias = "listen_port")]
     pub listen_port: u16,
+    #[serde(alias = "session_active")]
     pub session_active: bool,
+    #[serde(alias = "relay_connected")]
     pub relay_connected: bool,
+    #[serde(alias = "session_status")]
     pub session_status: String,
+    #[serde(alias = "expected_peer_count")]
     pub expected_peer_count: usize,
+    #[serde(alias = "connected_peer_count")]
     pub connected_peer_count: usize,
+    #[serde(alias = "mesh_ready")]
     pub mesh_ready: bool,
     #[serde(default)]
     pub health: Vec<HealthIssue>,
     #[serde(default)]
     pub network: NetworkSummary,
-    #[serde(default)]
+    #[serde(default, alias = "port_mapping")]
     pub port_mapping: PortMappingStatus,
     pub peers: Vec<DaemonPeerState>,
 }
@@ -42,21 +49,29 @@ pub struct DaemonRuntimeState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonPeerState {
+    #[serde(alias = "participant_pubkey")]
     pub participant_pubkey: String,
+    #[serde(alias = "node_id")]
     pub node_id: String,
+    #[serde(alias = "tunnel_ip")]
     pub tunnel_ip: String,
     pub endpoint: String,
-    #[serde(default)]
+    #[serde(default, alias = "runtime_endpoint")]
     pub runtime_endpoint: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "tx_bytes")]
     pub tx_bytes: u64,
-    #[serde(default)]
+    #[serde(default, alias = "rx_bytes")]
     pub rx_bytes: u64,
+    #[serde(alias = "public_key")]
     pub public_key: String,
+    #[serde(alias = "advertised_routes")]
     pub advertised_routes: Vec<String>,
+    #[serde(alias = "presence_timestamp")]
     pub presence_timestamp: u64,
+    #[serde(alias = "last_signal_seen_at")]
     pub last_signal_seen_at: Option<u64>,
     pub reachable: bool,
+    #[serde(alias = "last_handshake_at")]
     pub last_handshake_at: Option<u64>,
     pub error: Option<String>,
 }
@@ -312,5 +327,50 @@ mod tests {
         let value = serde_json::to_value(network).expect("serialize network");
         assert_eq!(value["joinRequestsEnabled"], true);
         assert!(value.get("listenForJoinRequests").is_none());
+    }
+
+    #[test]
+    fn daemon_runtime_state_accepts_cli_snake_case_json() {
+        let json = r#"{
+            "updated_at": 1778104080,
+            "binary_version": "0.3.23",
+            "local_endpoint": "89.27.103.157:51820",
+            "advertised_endpoint": "89.27.103.157:51820",
+            "listen_port": 51820,
+            "session_active": true,
+            "relay_connected": true,
+            "session_status": "Running",
+            "expected_peer_count": 1,
+            "connected_peer_count": 1,
+            "mesh_ready": true,
+            "port_mapping": {
+                "upnp": { "state": "unknown" },
+                "natPmp": { "state": "unknown" },
+                "pcp": { "state": "unknown" }
+            },
+            "peers": [{
+                "participant_pubkey": "67c745be74407dd6d3427c0c2815fcf924313aed9416fd0d10806571c674cd08",
+                "node_id": "",
+                "tunnel_ip": "10.44.219.172/32",
+                "endpoint": "fips",
+                "runtime_endpoint": "fips",
+                "tx_bytes": 8340,
+                "rx_bytes": 19269,
+                "public_key": "",
+                "advertised_routes": [],
+                "presence_timestamp": 1778104080,
+                "last_signal_seen_at": 1778104080,
+                "reachable": true,
+                "last_handshake_at": 1778104080,
+                "error": null
+            }]
+        }"#;
+
+        let state = serde_json::from_str::<DaemonRuntimeState>(json).expect("parse daemon state");
+
+        assert_eq!(state.connected_peer_count, 1);
+        assert_eq!(state.port_mapping.active_protocol, None);
+        assert_eq!(state.peers[0].runtime_endpoint.as_deref(), Some("fips"));
+        assert!(state.peers[0].reachable);
     }
 }

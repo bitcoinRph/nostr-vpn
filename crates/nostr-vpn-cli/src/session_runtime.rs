@@ -116,14 +116,33 @@ pub(crate) async fn connect_session(args: ConnectArgs) -> Result<()> {
     let mut outbound_announces = OutboundAnnounceBook::default();
     let iface = args.iface.clone();
     let mut tunnel_runtime = CliTunnelRuntime::new(iface.clone());
+    let mut network_snapshot = capture_network_snapshot();
+    let timeout = network_probe_timeout(&app);
+    let mut port_mapping_runtime = PortMappingRuntime::default();
+    let mut public_signal_endpoint = restored_public_signal_endpoint_from_state(
+        read_daemon_state(&daemon_state_file_path(&config_path))
+            .ok()
+            .flatten()
+            .as_ref(),
+        app.node.listen_port,
+    );
+    refresh_public_signal_endpoint_with_port_mapping(
+        &app,
+        &network_snapshot,
+        app.node.listen_port,
+        &mut port_mapping_runtime,
+        &mut public_signal_endpoint,
+    )
+    .await;
     #[cfg(feature = "embedded-fips")]
     let mut fips_tunnel_runtime = if app.private_mesh_uses_fips() {
-        let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+        let config = fips_tunnel_config_from_app(
             &app,
             &network_id,
             iface.clone(),
             &relays,
             own_pubkey.as_deref(),
+            public_signal_endpoint.as_ref(),
         )?;
         let runtime = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
         println!(
@@ -136,16 +155,6 @@ pub(crate) async fn connect_session(args: ConnectArgs) -> Result<()> {
         None
     };
     let magic_dns_runtime = ConnectMagicDnsRuntime::start(&app);
-    let mut network_snapshot = capture_network_snapshot();
-    let timeout = network_probe_timeout(&app);
-    let mut port_mapping_runtime = PortMappingRuntime::default();
-    let mut public_signal_endpoint = restored_public_signal_endpoint_from_state(
-        read_daemon_state(&daemon_state_file_path(&config_path))
-            .ok()
-            .flatten()
-            .as_ref(),
-        app.node.listen_port,
-    );
 
     let mut client = NostrSignalingClient::from_secret_key_with_networks(
         &app.nostr.secret_key,
@@ -157,14 +166,6 @@ pub(crate) async fn connect_session(args: ConnectArgs) -> Result<()> {
     }
     let mut relay_connected = true;
 
-    refresh_public_signal_endpoint_with_port_mapping(
-        &app,
-        &network_snapshot,
-        app.node.listen_port,
-        &mut port_mapping_runtime,
-        &mut public_signal_endpoint,
-    )
-    .await;
     apply_presence_runtime_update(
         &app,
         own_pubkey.as_deref(),
@@ -787,14 +788,34 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
     let mut fips_join_request_sends: HashMap<String, u64> = HashMap::new();
     let iface = args.iface.clone();
     let mut tunnel_runtime = CliTunnelRuntime::new(iface.clone());
+    let mut network_snapshot = capture_network_snapshot();
+    let mut network_changed_at = Some(unix_timestamp());
+    let timeout = network_probe_timeout(&app);
+    let mut captive_portal = detect_captive_portal(timeout).await;
+    let mut port_mapping_runtime = PortMappingRuntime::default();
+    let mut public_signal_endpoint = restored_public_signal_endpoint_from_state(
+        read_daemon_state(&state_file).ok().flatten().as_ref(),
+        app.node.listen_port,
+    );
+    if daemon_session_active(true, expected_peers) {
+        refresh_public_signal_endpoint_with_port_mapping(
+            &app,
+            &network_snapshot,
+            app.node.listen_port,
+            &mut port_mapping_runtime,
+            &mut public_signal_endpoint,
+        )
+        .await;
+    }
     #[cfg(feature = "embedded-fips")]
     let mut fips_tunnel_runtime = if fips_private_runtime_active(&app, true, expected_peers) {
-        let config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+        let config = fips_tunnel_config_from_app(
             &app,
             &network_id,
             iface.clone(),
             &relays,
             own_pubkey.as_deref(),
+            public_signal_endpoint.as_ref(),
         )?;
         let runtime = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
         eprintln!(
@@ -807,15 +828,6 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
         None
     };
     let magic_dns_runtime = ConnectMagicDnsRuntime::start(&app);
-    let mut network_snapshot = capture_network_snapshot();
-    let mut network_changed_at = Some(unix_timestamp());
-    let timeout = network_probe_timeout(&app);
-    let mut captive_portal = detect_captive_portal(timeout).await;
-    let mut port_mapping_runtime = PortMappingRuntime::default();
-    let mut public_signal_endpoint = restored_public_signal_endpoint_from_state(
-        read_daemon_state(&state_file).ok().flatten().as_ref(),
-        app.node.listen_port,
-    );
     let mut last_written_peer_cache = None;
 
     let mut client = NostrSignalingClient::from_secret_key_with_networks(
@@ -823,16 +835,6 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
         signaling_networks_for_app(&app),
     )?;
 
-    if daemon_session_active(true, expected_peers) {
-        refresh_public_signal_endpoint_with_port_mapping(
-            &app,
-            &network_snapshot,
-            app.node.listen_port,
-            &mut port_mapping_runtime,
-            &mut public_signal_endpoint,
-        )
-        .await;
-    }
     let restored_peer_cache = if daemon_session_active(true, expected_peers) {
         match restore_daemon_peer_cache(
             DaemonPeerCacheRestore {
@@ -1471,6 +1473,7 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                                 &network_id,
                                 &relays,
                                 own_pubkey.as_deref(),
+                                public_signal_endpoint.as_ref(),
                             )
                             .await
                             {
@@ -1814,6 +1817,7 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                         &iface,
                         &relays,
                         own_pubkey.as_deref(),
+                        public_signal_endpoint.as_ref(),
                         session_enabled,
                         expected_peers,
                     )
