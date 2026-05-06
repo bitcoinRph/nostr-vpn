@@ -12,7 +12,7 @@ The app is SwiftUI/AppKit over `nostr-vpn-app-core` through UniFFI:
 Build locally:
 
 ```bash
-just macos-build
+just build
 ```
 
 Run locally:

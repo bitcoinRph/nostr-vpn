@@ -10,6 +10,11 @@ info:
     @echo "  just run"
     @echo "  just run-macos"
     @echo
+    @echo "Build"
+    @echo "  just build"
+    @echo "  just release"
+    @echo "  just release-publish"
+    @echo
     @echo "macOS"
     @echo "  just macos-gen-swift"
     @echo "  just macos-rust"
@@ -35,6 +40,12 @@ run:
 run-macos:
     ./tools/run-macos
 
+build:
+    @case "$(uname -s)" in \
+        Darwin) just macos-build ;; \
+        *) cargo build -p nostr-vpn-cli -p nostr-vpn-relay ;; \
+    esac
+
 macos-gen-swift:
     ./scripts/macos-build macos-gen-swift
 
@@ -49,6 +60,12 @@ macos-xcodeproj:
 
 macos-build:
     ./scripts/macos-build macos-build
+
+release:
+    node scripts/local-release.mjs
+
+release-publish:
+    node scripts/local-release.mjs --publish
 
 test:
     cargo test

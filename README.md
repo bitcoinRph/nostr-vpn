@@ -120,7 +120,7 @@ Typical flow:
 ```bash
 cp .env.release.example .env.release.local
 $EDITOR .env.release.local
-node scripts/local-release.mjs --publish
+just release-publish
 ```
 
 Notes:
@@ -137,11 +137,13 @@ Notes:
 
 ### Native macOS App
 
-Build the native macOS shell:
+Build the native app for this machine:
 
 ```bash
-just macos-build
+just build
 ```
+
+For macOS specifically, `just build` runs `just macos-build`.
 
 Launch the native macOS shell:
 
@@ -303,7 +305,7 @@ Native app work is split into a Rust-owned state/action core and platform shells
 
 The native UI rewrite parity target is tracked in [`docs/native-ui-parity-matrix.md`](docs/native-ui-parity-matrix.md).
 The shared native app contract lives in [`crates/nostr-vpn-app-core`](crates/nostr-vpn-app-core), with native shell targets under [`macos`](macos), [`windows`](windows), [`linux`](linux), [`android`](android), and [`ios`](ios).
-The macOS native shell can be built with `just macos-build` and launched with `just run`.
+The macOS native shell can be built with `just build` and launched with `just run`.
 
 Notes:
 
