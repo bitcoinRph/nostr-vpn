@@ -1,8 +1,9 @@
 [Desktop Entry]
 Type=Application
 Name=Nostr VPN
-Exec=nostr-vpn
+Exec=nostr-vpn %u
 Icon=nostr-vpn
 Terminal=false
 Categories=Network;Security;
+MimeType=x-scheme-handler/nvpn;
 StartupNotify=true

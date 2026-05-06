@@ -1,0 +1,133 @@
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeepLink {
+    Invite(String),
+    Debug(DebugAction),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DebugAction {
+    Tick,
+    RequestJoin {
+        network_id: Option<String>,
+    },
+    AcceptJoin {
+        network_id: Option<String>,
+        requester_npub: Option<String>,
+    },
+}
+
+pub fn parse(raw: &str) -> Option<DeepLink> {
+    let raw = raw.trim();
+    if !raw.starts_with("nvpn://") {
+        return None;
+    }
+    if raw.starts_with("nvpn://invite/") {
+        return Some(DeepLink::Invite(raw.to_string()));
+    }
+
+    let without_scheme = &raw["nvpn://".len()..];
+    let head = without_scheme
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(without_scheme);
+    let mut parts = head.splitn(2, '/');
+    let host = parts.next().unwrap_or_default();
+    if !host.eq_ignore_ascii_case("debug") {
+        return None;
+    }
+
+    let action = parts.next().unwrap_or_default().trim_matches('/');
+    match action {
+        "tick" => Some(DeepLink::Debug(DebugAction::Tick)),
+        "request-join" => Some(DeepLink::Debug(DebugAction::RequestJoin {
+            network_id: query_value(raw, &["networkId", "network"]),
+        })),
+        "accept-join" => Some(DeepLink::Debug(DebugAction::AcceptJoin {
+            network_id: query_value(raw, &["networkId", "network"]),
+            requester_npub: query_value(raw, &["requester", "requesterNpub"]),
+        })),
+        _ => None,
+    }
+}
+
+fn query_value(raw: &str, names: &[&str]) -> Option<String> {
+    let query = raw.split_once('?')?.1.split('#').next().unwrap_or_default();
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let key = percent_decode(key);
+        if names.iter().any(|name| key == *name) {
+            return Some(percent_decode(value));
+        }
+    }
+    None
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' if index + 2 < bytes.len() => {
+                if let (Some(high), Some(low)) =
+                    (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+                {
+                    out.push(high << 4 | low);
+                    index += 3;
+                    continue;
+                }
+                out.push(bytes[index]);
+            }
+            b'+' => out.push(b' '),
+            byte => out.push(byte),
+        }
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_invite_links_verbatim() {
+        assert_eq!(
+            parse(" nvpn://invite/example "),
+            Some(DeepLink::Invite("nvpn://invite/example".to_string()))
+        );
+    }
+
+    #[test]
+    fn parses_debug_request_join_network_id() {
+        assert_eq!(
+            parse("nvpn://debug/request-join?networkId=net%201"),
+            Some(DeepLink::Debug(DebugAction::RequestJoin {
+                network_id: Some("net 1".to_string())
+            }))
+        );
+    }
+
+    #[test]
+    fn parses_debug_accept_join_requester_alias() {
+        assert_eq!(
+            parse("nvpn://debug/accept-join?network=mesh&requesterNpub=npub1abc"),
+            Some(DeepLink::Debug(DebugAction::AcceptJoin {
+                network_id: Some("mesh".to_string()),
+                requester_npub: Some("npub1abc".to_string())
+            }))
+        );
+    }
+}

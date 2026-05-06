@@ -1,4 +1,6 @@
+mod deep_link;
 mod qr;
+mod qr_scan;
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -6,7 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use adw::prelude::*;
-use gtk::glib;
+use gtk::{gio, glib};
 use nostr_vpn_app_core::{
     FfiApp, NativeAppAction, NativeAppState, NativeNetworkState, NativeParticipantState,
     NativeRelayState, SettingsPatch,
@@ -15,6 +17,12 @@ use nostr_vpn_app_core::{
 const APP_ID: &str = "to.iris.nvpn";
 
 type AppRef = Rc<RefCell<AppModel>>;
+
+#[derive(Clone, Default)]
+struct AppRuntime {
+    model: Rc<RefCell<Option<AppRef>>>,
+    pending_urls: Rc<RefCell<Vec<String>>>,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Page {
@@ -67,6 +75,7 @@ struct AppModel {
     sidebar: gtk::Box,
     content: gtk::Box,
     drafts: Drafts,
+    notice: String,
 }
 
 impl AppModel {
@@ -82,6 +91,7 @@ impl AppModel {
             sidebar,
             content,
             drafts,
+            notice: String::new(),
         }
     }
 }
@@ -89,21 +99,54 @@ impl AppModel {
 fn main() -> glib::ExitCode {
     bootstrap_session_bus();
 
-    let app = adw::Application::builder().application_id(APP_ID).build();
+    let runtime = AppRuntime::default();
+    let app = adw::Application::builder()
+        .application_id(APP_ID)
+        .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
+        .build();
     app.connect_startup(|_| {
         install_css();
         gtk::Window::set_default_icon_name("nostr-vpn");
     });
-    app.connect_activate(build_ui);
+    {
+        let runtime = runtime.clone();
+        app.connect_activate(move |app| {
+            build_ui(app, &runtime, true);
+        });
+    }
+    {
+        let runtime = runtime.clone();
+        app.connect_command_line(move |app, command_line| {
+            let mut present = true;
+            let mut urls = Vec::new();
+            for arg in command_line.arguments() {
+                let arg = arg.to_string_lossy();
+                if arg == "--autostart" || arg == "--hidden" {
+                    present = false;
+                }
+                if arg.starts_with("nvpn://") {
+                    urls.push(arg.into_owned());
+                    present = true;
+                }
+            }
+            runtime.pending_urls.borrow_mut().extend(urls);
+            build_ui(app, &runtime, present);
+            drain_pending_urls(&runtime);
+            glib::ExitCode::SUCCESS.into()
+        });
+    }
     app.run()
 }
 
-fn build_ui(app: &adw::Application) {
+fn build_ui(app: &adw::Application, runtime: &AppRuntime, present: bool) {
     if let Some(window) = app
         .active_window()
         .or_else(|| app.windows().into_iter().next())
     {
-        window.present();
+        if present {
+            window.present();
+        }
+        drain_pending_urls(runtime);
         return;
     }
 
@@ -153,6 +196,7 @@ fn build_ui(app: &adw::Application) {
         sidebar.clone(),
         content.clone(),
     )));
+    *runtime.model.borrow_mut() = Some(model.clone());
 
     {
         let model = model.clone();
@@ -169,7 +213,10 @@ fn build_ui(app: &adw::Application) {
         });
     }
 
-    window.present();
+    if present {
+        window.present();
+    }
+    drain_pending_urls(runtime);
 }
 
 fn refresh_now(app: &AppRef) {
@@ -183,6 +230,86 @@ fn dispatch(app: &AppRef, action: NativeAppAction) {
     let core = app.borrow().core.clone();
     let state = core.dispatch(action);
     app.borrow_mut().state = state;
+    render(app);
+}
+
+fn drain_pending_urls(runtime: &AppRuntime) {
+    let Some(app) = runtime.model.borrow().clone() else {
+        return;
+    };
+    let urls: Vec<String> = runtime.pending_urls.borrow_mut().drain(..).collect();
+    for url in urls {
+        handle_deep_link(&app, &url);
+    }
+}
+
+fn handle_deep_link(app: &AppRef, raw: &str) {
+    match deep_link::parse(raw) {
+        Some(deep_link::DeepLink::Invite(invite)) => import_invite(app, invite),
+        Some(deep_link::DeepLink::Debug(deep_link::DebugAction::Tick)) => {
+            dispatch(app, NativeAppAction::Tick);
+        }
+        Some(deep_link::DeepLink::Debug(deep_link::DebugAction::RequestJoin { network_id })) => {
+            let network_id = {
+                let state = app.borrow().state.clone();
+                resolve_network_id(&state, network_id)
+            };
+            if let Some(network_id) = network_id {
+                dispatch(app, NativeAppAction::RequestNetworkJoin { network_id });
+            }
+        }
+        Some(deep_link::DeepLink::Debug(deep_link::DebugAction::AcceptJoin {
+            network_id,
+            requester_npub,
+        })) => {
+            let (network_id, requester_npub) = {
+                let state = app.borrow().state.clone();
+                let network_id = resolve_network_id(&state, network_id);
+                let requester_npub = requester_npub.or_else(|| {
+                    network_id
+                        .as_deref()
+                        .and_then(|id| {
+                            state
+                                .networks
+                                .iter()
+                                .find(|network| network.id == id || network.network_id == id)
+                        })
+                        .or_else(|| active_network(&state))
+                        .and_then(|network| network.inbound_join_requests.first())
+                        .map(|request| request.requester_npub.clone())
+                });
+                (network_id, requester_npub)
+            };
+            if let (Some(network_id), Some(requester_npub)) = (network_id, requester_npub) {
+                dispatch(
+                    app,
+                    NativeAppAction::AcceptJoinRequest {
+                        network_id,
+                        requester_npub,
+                    },
+                );
+            }
+        }
+        None => {}
+    }
+}
+
+fn import_invite(app: &AppRef, invite: String) {
+    let invite = invite.trim().to_string();
+    if invite.is_empty() {
+        return;
+    }
+    {
+        let mut model = app.borrow_mut();
+        model.page = Page::Share;
+        model.drafts.invite.clear();
+        model.notice.clear();
+    }
+    dispatch(app, NativeAppAction::ImportNetworkInvite { invite });
+}
+
+fn set_notice(app: &AppRef, notice: impl Into<String>) {
+    app.borrow_mut().notice = notice.into();
     render(app);
 }
 
@@ -725,16 +852,24 @@ fn build_share_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         let app = app.clone();
         import.connect_clicked(move |_| {
             let invite = app.borrow().drafts.invite.trim().to_string();
-            if invite.is_empty() {
-                return;
-            }
-            app.borrow_mut().drafts.invite.clear();
-            dispatch(&app, NativeAppAction::ImportNetworkInvite { invite });
+            import_invite(&app, invite);
         });
+    }
+    let image = gtk::Button::from_icon_name("insert-image-symbolic");
+    image.set_tooltip_text(Some("Import QR image"));
+    {
+        let app = app.clone();
+        image.connect_clicked(move |button| choose_invite_qr_image(&app, button));
     }
     import_row.append(&invite_entry);
     import_row.append(&import);
+    import_row.append(&image);
     column.append(&import_row);
+
+    let notice = app.borrow().notice.clone();
+    if !notice.trim().is_empty() {
+        row_label(&column, "Import", &notice, "dialog-warning-symbolic");
+    }
 
     if network.outbound_join_request.is_some() {
         column.append(&badge("Join requested", "warn"));
@@ -827,12 +962,7 @@ fn build_share_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
                 let app = app.clone();
                 let invite = peer.invite.clone();
                 join.connect_clicked(move |_| {
-                    dispatch(
-                        &app,
-                        NativeAppAction::ImportNetworkInvite {
-                            invite: invite.clone(),
-                        },
-                    );
+                    import_invite(&app, invite.clone());
                 });
             }
             row.append(&join);
@@ -840,6 +970,30 @@ fn build_share_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         }
     }
     page.append(&nearby);
+}
+
+fn choose_invite_qr_image(app: &AppRef, button: &gtk::Button) {
+    let parent = button
+        .root()
+        .and_then(|root| root.downcast::<gtk::Window>().ok());
+    let dialog = gtk::FileDialog::builder()
+        .title("Import QR image")
+        .accept_label("Import")
+        .build();
+    let app = app.clone();
+    dialog.open(parent.as_ref(), gio::Cancellable::NONE, move |result| {
+        let Ok(file) = result else {
+            return;
+        };
+        let Some(path) = file.path() else {
+            set_notice(&app, "Could not open image");
+            return;
+        };
+        match qr_scan::decode_from_path(&path) {
+            Ok(invite) => import_invite(&app, invite),
+            Err(error) => set_notice(&app, error),
+        }
+    });
 }
 
 fn build_routing_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
@@ -1937,6 +2091,20 @@ fn active_network(state: &NativeAppState) -> Option<&NativeNetworkState> {
         .iter()
         .find(|network| network.enabled)
         .or_else(|| state.networks.first())
+}
+
+fn resolve_network_id(state: &NativeAppState, requested: Option<String>) -> Option<String> {
+    if let Some(requested) = requested {
+        if let Some(network) = state
+            .networks
+            .iter()
+            .find(|network| network.id == requested || network.network_id == requested)
+        {
+            return Some(network.id.clone());
+        }
+        return Some(requested);
+    }
+    active_network(state).map(|network| network.id.clone())
 }
 
 fn display_network_name(network: &NativeNetworkState) -> String {

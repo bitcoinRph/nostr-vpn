@@ -203,7 +203,7 @@ flow like the Swift app rather than the removed Svelte UI.
 | Device roster | Ready | Shows participant name, admin/exit badges, tunnel IP, npub copy, reachability, admin toggle, remove action, and a Manage Devices disclosure. | Add destructive confirmations if needed. |
 | Participant alias editing | Ready | Manage Devices includes per-participant alias save, admin toggle, and remove controls. | Add debounce if explicit save feels too heavy. |
 | Join requests | Ready | Inbound request rows show requester info, npub copy, and admin-gated accept action. | None. |
-| Invite share/import | Ready | Share page renders the core invite as a QR code, supports copy, paste/import, join request status, and LAN peer join. | Add native camera/image QR scanning and share portal support. |
+| Invite share/import | Ready | Share page renders the core invite as a QR code, supports copy, paste/import, image QR import, join request status, and LAN peer join. | Add native camera scanning and share portal support. |
 | LAN pairing | Ready | Start/stop pairing, countdown, nearby peer rows, and invite import are wired through app-core actions. | Mobile permission parity is out of scope for Linux. |
 | Routing | Ready | Direct route, searchable exit-node candidates, advertised route editing, and offer-exit toggle mirror the macOS Routing page. | Add richer route helper text from core if added. |
 | Active network settings | Ready | Settings exposes active network name, editable/copyable network ID, and admin-gated join-request toggle. | Add blur/Enter commit polish. |
@@ -213,7 +213,7 @@ flow like the Swift app rather than the removed Svelte UI.
 | Relay list/status | Ready | Advanced panel shows relay summary counts, relay rows with status text, add/remove, and disables removing the last relay. | None. |
 | Diagnostics | Ready | Advanced diagnostics shows interface/IP/gateway/mapping metrics, identity/config/runtime fields, MagicDNS, and health issue rows. | Auto-open diagnostics on new health issues if users need parity with macOS. |
 | Tray/status menu | Missing | Preference is visible because the shared state exposes it. | Implement Linux status notifier tray, close-to-tray behavior, and autostart-hidden launch. |
-| Deep links and single-instance | Missing | GApplication gives basic app single-instance behavior in normal Linux desktops. | Add `nvpn://` desktop registration, startup/running URL routing, and debug automation links. |
+| Deep links and single-instance | Ready | GApplication routes startup and already-running `nvpn://` URLs into the existing GTK app; the desktop entry registers `x-scheme-handler/nvpn`; invite and debug automation links dispatch typed core actions. | Add installed-package smoke coverage once Linux packaging tests exist. |
 | Updater | Missing | No Linux updater UI yet. | Decide hashtree updater vs distro-package-only updates, then port the macOS updater shape if product wants desktop parity. |
 | Screenshot/dev harness | Ready | Docker Xvfb/Fluxbox dev environment runs the GTK app and supports window screenshots over VNC on `localhost:5902`. | Add automated screenshot fixture states. |
 

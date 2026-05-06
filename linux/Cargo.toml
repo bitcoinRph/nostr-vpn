@@ -13,8 +13,10 @@ adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
 gio = "0.20"
 glib = "0.20"
 gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 nostr-vpn-app-core = { path = "../crates/nostr-vpn-app-core" }
 qrcode = { version = "0.14", default-features = false }
+rqrr = "0.7"
 
 [package.metadata.deb]
 name = "nostr-vpn"
