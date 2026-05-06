@@ -189,8 +189,17 @@ gateway: 10.10.243.254\n\
 }
 
 #[test]
-fn macos_tunnel_mtu_matches_other_desktop_tunnels() {
-    assert_eq!(MACOS_TUNNEL_MTU, "1380");
+fn local_tunnel_mtu_matches_wireguard_sized_desktop_tunnels() {
+    assert_eq!(LOCAL_TUNNEL_MTU, "1380");
+}
+
+#[test]
+fn fips_tunnel_mtu_stays_below_observed_fragmentation_ceiling() {
+    let fips_mtu = FIPS_TUNNEL_MTU.parse::<u16>().expect("FIPS MTU");
+    let local_mtu = LOCAL_TUNNEL_MTU.parse::<u16>().expect("local MTU");
+
+    assert_eq!(FIPS_TUNNEL_MTU, "1150");
+    assert!(fips_mtu < local_mtu);
 }
 
 #[test]

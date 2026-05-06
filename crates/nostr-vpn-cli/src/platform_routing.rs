@@ -60,8 +60,10 @@ pub(crate) struct MacosEndpointBypassRoute {
     pub(crate) interface: String,
 }
 
-#[cfg(any(target_os = "macos", test))]
-pub(crate) const MACOS_TUNNEL_MTU: &str = "1380";
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+pub(crate) const LOCAL_TUNNEL_MTU: &str = "1380";
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+pub(crate) const FIPS_TUNNEL_MTU: &str = "1150";
 
 #[cfg(any(target_os = "linux", test))]
 pub(crate) fn linux_default_route_device_from_output(output: &str) -> Option<String> {
@@ -798,6 +800,16 @@ pub(crate) fn apply_local_interface_network(
     address: &str,
     route_targets: &[String],
 ) -> Result<()> {
+    apply_local_interface_network_with_mtu(iface, address, route_targets, LOCAL_TUNNEL_MTU)
+}
+
+#[cfg(any(test, not(target_os = "windows")))]
+pub(crate) fn apply_local_interface_network_with_mtu(
+    iface: &str,
+    address: &str,
+    route_targets: &[String],
+    mtu: &str,
+) -> Result<()> {
     #[cfg(target_os = "linux")]
     {
         let ipv4_route_source = linux_ipv4_route_source(address);
@@ -814,7 +826,7 @@ pub(crate) fn apply_local_interface_network(
                 .arg("link")
                 .arg("set")
                 .arg("mtu")
-                .arg("1380")
+                .arg(mtu)
                 .arg("up")
                 .arg("dev")
                 .arg(iface),
@@ -864,7 +876,7 @@ pub(crate) fn apply_local_interface_network(
                 .arg("netmask")
                 .arg("255.255.255.0")
                 .arg("mtu")
-                .arg(MACOS_TUNNEL_MTU)
+                .arg(mtu)
                 .arg("up"),
         )?;
         eprintln!(

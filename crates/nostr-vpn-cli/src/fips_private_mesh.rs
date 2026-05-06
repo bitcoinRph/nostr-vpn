@@ -798,10 +798,11 @@ impl FipsPrivateTunnelRuntime {
         }
         #[cfg(target_os = "macos")]
         {
-            crate::apply_local_interface_network(
+            crate::apply_local_interface_network_with_mtu(
                 &self.iface,
                 &config.local_address,
                 &config.route_targets,
+                crate::FIPS_TUNNEL_MTU,
             )
             .with_context(|| format!("failed to configure FIPS tunnel interface {}", self.iface))?;
         }
@@ -846,8 +847,13 @@ impl FipsPrivateTunnelRuntime {
         };
         self.reconcile_linux_endpoint_bypass_routes(&endpoint_bypass_specs);
 
-        crate::apply_local_interface_network(&self.iface, &config.local_address, &route_targets)
-            .with_context(|| format!("failed to configure FIPS tunnel interface {}", self.iface))?;
+        crate::apply_local_interface_network_with_mtu(
+            &self.iface,
+            &config.local_address,
+            &route_targets,
+            crate::FIPS_TUNNEL_MTU,
+        )
+        .with_context(|| format!("failed to configure FIPS tunnel interface {}", self.iface))?;
         if let Err(error) = crate::flush_linux_route_cache() {
             eprintln!("fips: failed to flush linux route cache: {error}");
         }
