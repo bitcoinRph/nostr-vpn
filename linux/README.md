@@ -19,10 +19,12 @@ just linux-build
 ./tools/run-linux cargo run
 ```
 
-The shell currently owns the same core flows as the Swift UI: connect/disconnect,
-roster presence, invite QR/import, LAN pairing, exit-node selection, advertised
-routes, relays, service install, and diagnostics. Remaining Linux-native work is
-desktop portal integration, file/camera QR scanning, tray/status notifier support,
-and packaged update UX.
+The shell follows the current SwiftUI/AppKit app structure: Devices, Share,
+Routing, Settings, and an Advanced disclosure for relays and diagnostics. It
+owns the same core flows for connect/disconnect, roster presence, participant
+management, invite QR/import, LAN pairing, saved networks, exit-node selection,
+advertised routes, relays, service/CLI actions, and diagnostics. Remaining
+Linux-native work is desktop portal integration, file/camera QR scanning,
+tray/status notifier support, deep links, and packaged update UX.
 
 The parity checklist is in `../docs/native-ui-parity-matrix.md`.

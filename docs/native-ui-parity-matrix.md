@@ -189,12 +189,40 @@ Status legend:
 | Mock/demo fixtures | `mock-backend.ts` | Ready | `macos/Resources/preview-state.json` provides a native state snapshot for previews and screenshot tests without the old mock backend. | None. |
 | Public relay fallback UI | Removed relay fallback/public services code | Removed | Removed upstream in `origin/master`; native shell also omits those fields and controls. | No parity work unless product reintroduces a public-service feature. |
 
+## Linux App Parity Status
+
+This table tracks the GTK/libadwaita shell under `linux/` against the current
+macOS shell. Tauri remains the feature inventory above, but Linux should look and
+flow like the Swift app rather than the removed Svelte UI.
+
+| Feature group | Linux status | Native Linux coverage | Remaining parity work |
+| --- | --- | --- | --- |
+| Typed Rust core boundary | Ready | `linux/src/main.rs` uses `FfiApp.state()`, `refresh()`, and typed `NativeAppAction` directly from Rust. | Keep additions typed and shared with macOS. |
+| Initial state and refresh | Ready | The GTK shell reads initial state synchronously and refreshes through `FfiApp.refresh()` on a two-second timer plus the toolbar refresh button. | Add a boot-ready automation hook if native e2e needs it. |
+| Main status hero | Ready | Matches the macOS hierarchy: active network title, admin badge, mesh/session/daemon/relay badges, identity copy, tunnel IP, exit indication, and connect/disconnect control. | Add richer service-repair prompt text if core exposes a shared helper. |
+| Device roster | Ready | Shows participant name, admin/exit badges, tunnel IP, npub copy, reachability, admin toggle, remove action, and a Manage Devices disclosure. | Add destructive confirmations if needed. |
+| Participant alias editing | Ready | Manage Devices includes per-participant alias save, admin toggle, and remove controls. | Add debounce if explicit save feels too heavy. |
+| Join requests | Ready | Inbound request rows show requester info, npub copy, and admin-gated accept action. | None. |
+| Invite share/import | Ready | Share page renders the core invite as a QR code, supports copy, paste/import, join request status, and LAN peer join. | Add native camera/image QR scanning and share portal support. |
+| LAN pairing | Ready | Start/stop pairing, countdown, nearby peer rows, and invite import are wired through app-core actions. | Mobile permission parity is out of scope for Linux. |
+| Routing | Ready | Direct route, searchable exit-node candidates, advertised route editing, and offer-exit toggle mirror the macOS Routing page. | Add richer route helper text from core if added. |
+| Active network settings | Ready | Settings exposes active network name, editable/copyable network ID, and admin-gated join-request toggle. | Add blur/Enter commit polish. |
+| Saved networks | Ready | Saved Networks disclosure lists inactive networks with counts, activate action, and delete action guarded by the last-network rule. | Expand inactive profiles if Linux needs the full macOS saved-network detail surface. |
+| Device/system settings | Ready | Name, tunnel IP, endpoint, listen port, MagicDNS suffix, autoconnect, startup, and tray preferences dispatch typed settings patches. | Implement actual Linux startup registration and tray/status notifier behavior. |
+| CLI and service controls | Partial | Shows CLI/service status badges and install/reinstall/uninstall plus enable/disable service actions when supported. | Add polkit/sudo UX, settlement progress, and stale-version repair prompt parity. |
+| Relay list/status | Ready | Advanced panel shows relay summary counts, relay rows with status text, add/remove, and disables removing the last relay. | None. |
+| Diagnostics | Ready | Advanced diagnostics shows interface/IP/gateway/mapping metrics, identity/config/runtime fields, MagicDNS, and health issue rows. | Auto-open diagnostics on new health issues if users need parity with macOS. |
+| Tray/status menu | Missing | Preference is visible because the shared state exposes it. | Implement Linux status notifier tray, close-to-tray behavior, and autostart-hidden launch. |
+| Deep links and single-instance | Missing | GApplication gives basic app single-instance behavior in normal Linux desktops. | Add `nvpn://` desktop registration, startup/running URL routing, and debug automation links. |
+| Updater | Missing | No Linux updater UI yet. | Decide hashtree updater vs distro-package-only updates, then port the macOS updater shape if product wants desktop parity. |
+| Screenshot/dev harness | Ready | Docker Xvfb/Fluxbox dev environment runs the GTK app and supports window screenshots over VNC on `localhost:5902`. | Add automated screenshot fixture states. |
+
 ## Native Implementation Phases
 
 | Phase | Deliverable | Exit criteria |
 | --- | --- | --- |
 | 0. Contract extraction | Move backend state, settings patches, action handlers, derived labels, invite parsing, mesh ID validation, and tray projections into a native-ready Rust app core | `crates/nostr-vpn-app-core` exposes typed UniFFI state/actions and the macOS shell consumes `FfiApp` directly; remaining legacy behavior is tracked as explicit native parity work. |
-| 1. Desktop minimum | macOS, Windows, and Linux render the main status, active network, invite import/share, participant management, routing, diagnostics, relays, service panel, system settings, deep links, and tray/menu actions | Desktop smoke tests can import invites, request/accept join, toggle VPN, and exercise tray actions. macOS covers the native shell surface; Linux is the next desktop shell to bring to parity. |
+| 1. Desktop minimum | macOS, Windows, and Linux render the main status, active network, invite import/share, participant management, routing, diagnostics, relays, service panel, system settings, deep links, and tray/menu actions | Desktop smoke tests can import invites, request/accept join, toggle VPN, and exercise tray actions. macOS covers the full native shell surface; Linux now covers the main app surface and still needs tray, deep links, updater, and Linux-specific service UX. |
 | 2. Mobile minimum | Android and iPhone render the same state/action surface with native VPN permission/session control, invite QR scan/share, LAN pairing, saved networks, routing, diagnostics, relays, and deep links | Android emulator/device and iPhone simulator/device smoke tests can import invites and start supported VPN flows |
 | 3. Desktop niceties | Hashtree updater, CLI install/uninstall, startup registration, close-to-tray, service repair prompts, single-instance conflict handling | Legacy desktop e2e scenarios have native replacements |
 | 4. Polish/parity hardening | Platform screenshots, accessibility pass, empty/error states, fixture preview coverage | All rows above are either implemented or explicitly marked removed/deferred in this file |
