@@ -140,7 +140,13 @@ Notes:
 Build the native macOS shell:
 
 ```bash
-./scripts/macos-build macos-build
+just macos-build
+```
+
+Launch the native macOS shell:
+
+```bash
+just run-macos
 ```
 
 If you only want the CLI and test binaries:
@@ -297,7 +303,7 @@ Native app work is split into a Rust-owned state/action core and platform shells
 
 The native UI rewrite parity target is tracked in [`docs/native-ui-parity-matrix.md`](docs/native-ui-parity-matrix.md).
 The shared native app contract lives in [`crates/nostr-vpn-app-core`](crates/nostr-vpn-app-core), with native shell targets under [`macos`](macos), [`windows`](windows), [`linux`](linux), [`android`](android), and [`ios`](ios).
-The macOS native shell can be built with `./scripts/macos-build macos-build` and launched with `./tools/run-macos`.
+The macOS native shell can be built with `just macos-build` and launched with `just run-macos`.
 
 Notes:
 
