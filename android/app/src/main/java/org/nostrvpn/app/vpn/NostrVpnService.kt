@@ -5,8 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -24,6 +28,7 @@ class NostrVpnService : VpnService() {
     private var tunnelInterface: ParcelFileDescriptor? = null
     private var readThread: Thread? = null
     private var writeThread: Thread? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -78,6 +83,7 @@ class NostrVpnService : VpnService() {
         tunnelInterface = descriptor
         tunnelHandle = handle
         running.set(true)
+        registerUnderlyingNetworkUpdates()
         readThread = Thread({ readTunLoop(descriptor, handle) }, "nvpn-tun-read").also { it.start() }
         writeThread = Thread({ writeTunLoop(descriptor, handle) }, "nvpn-tun-write").also { it.start() }
     }
@@ -87,6 +93,13 @@ class NostrVpnService : VpnService() {
             .setSession("Nostr VPN")
             .setMtu(config.optInt("mtu", 1280))
             .setBlocking(true)
+            .allowBypass()
+
+        val underlyingNetworks = currentUnderlyingNetworks()
+        if (underlyingNetworks.isNotEmpty()) {
+            builder.setUnderlyingNetworks(underlyingNetworks)
+        }
+        excludeOwnProcess(builder)
 
         val local = parseCidr(config.optString("localAddress", "10.44.0.1/32")) ?: return null
         builder.addAddress(local.address, local.prefix)
@@ -100,6 +113,71 @@ class NostrVpnService : VpnService() {
         }
 
         return builder.establish()
+    }
+
+    private fun currentUnderlyingNetworks(): Array<Network> {
+        val connectivity = getSystemService(ConnectivityManager::class.java) ?: return emptyArray()
+        val network = connectivity.activeNetwork ?: return emptyArray()
+        val capabilities = connectivity.getNetworkCapabilities(network) ?: return emptyArray()
+        if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+            return emptyArray()
+        }
+        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+            return emptyArray()
+        }
+        return arrayOf(network)
+    }
+
+    private fun excludeOwnProcess(builder: Builder) {
+        try {
+            builder.addDisallowedApplication(packageName)
+        } catch (_: PackageManager.NameNotFoundException) {
+            // The package must exist for a running service; ignore impossible platform races.
+        }
+    }
+
+    private fun registerUnderlyingNetworkUpdates() {
+        unregisterUnderlyingNetworkUpdates()
+        val connectivity = getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                refreshUnderlyingNetworks()
+            }
+
+            override fun onLost(network: Network) {
+                refreshUnderlyingNetworks()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities,
+            ) {
+                refreshUnderlyingNetworks()
+            }
+        }
+        try {
+            connectivity.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+            refreshUnderlyingNetworks()
+        } catch (_: RuntimeException) {
+            networkCallback = null
+        }
+    }
+
+    private fun unregisterUnderlyingNetworkUpdates() {
+        val callback = networkCallback ?: return
+        networkCallback = null
+        val connectivity = getSystemService(ConnectivityManager::class.java) ?: return
+        try {
+            connectivity.unregisterNetworkCallback(callback)
+        } catch (_: RuntimeException) {
+            // The callback may already be gone during service teardown.
+        }
+    }
+
+    private fun refreshUnderlyingNetworks() {
+        val networks = currentUnderlyingNetworks()
+        setUnderlyingNetworks(networks.takeIf { it.isNotEmpty() })
     }
 
     private fun readTunLoop(descriptor: ParcelFileDescriptor, handle: Long) {
@@ -136,6 +214,7 @@ class NostrVpnService : VpnService() {
     }
 
     private fun stopTunnel() {
+        unregisterUnderlyingNetworkUpdates()
         running.set(false)
         val descriptor = tunnelInterface
         tunnelInterface = null
