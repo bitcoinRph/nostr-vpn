@@ -68,7 +68,7 @@ struct RootView: View {
     private var sidebar: some View {
         List(selection: $selectedSidebarItem) {
             Section {
-                sidebarItem(.devices, "Devices", "desktopcomputer")
+                sidebarItem(.devices, "Devices", "circle.grid.2x2.fill")
                 sidebarItem(.sharing, "Share", "qrcode")
                 sidebarItem(.routing, "Routing", "arrow.triangle.branch")
                 sidebarItem(.settings, "Settings", "gearshape")
@@ -80,7 +80,7 @@ struct RootView: View {
                         Text(displayName(activeNetwork))
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
-                        Text("\(state.connectedPeerCount) of \(state.expectedPeerCount) connected")
+                        Text(peerAvailabilityText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -232,7 +232,7 @@ struct RootView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Devices")
                             .font(.system(size: 24, weight: .semibold))
-                        Text(displayName(network))
+                        Text(peerAvailabilityText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -341,7 +341,6 @@ struct RootView: View {
                     deviceDetailHeader(participant, network: network)
                     deviceAddressesSection(participant)
                     deviceConnectivitySection(participant)
-                    deviceActionsSection(participant, network: network)
                 }
                 .padding(.horizontal, 22)
                 .padding(.top, 26)
@@ -362,11 +361,12 @@ struct RootView: View {
     }
 
     private func deviceDetailHeader(_ participant: NativeParticipantState, network: NativeNetworkState) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 Text(deviceName(participant))
                     .font(.system(size: 24, weight: .semibold))
                     .lineLimit(2)
+                Spacer()
                 HStack(spacing: 7) {
                     connectivityDot(participant, size: 8)
                     Text(deviceStatusText(participant))
@@ -374,8 +374,7 @@ struct RootView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Spacer()
-            deviceMenu(participant, network: network)
+            deviceActionButtons(participant, network: network)
         }
     }
 
@@ -409,34 +408,43 @@ struct RootView: View {
         }
     }
 
-    private func deviceActionsSection(_ participant: NativeParticipantState, network: NativeNetworkState) -> some View {
-        surface {
-            Text("Actions")
-                .font(.headline)
-            HStack(spacing: 8) {
-                Button {
-                    manager.copy(participant.npub, as: .peerNpub, peerNpub: participant.npub)
-                } label: {
-                    Label("Copy npub", systemImage: "doc.on.doc")
-                }
-                if !cleanIp(participant.tunnelIp).isEmpty {
-                    Button {
-                        manager.copy(cleanIp(participant.tunnelIp), as: .peerNpub, peerNpub: participant.npub)
-                    } label: {
-                        Label("Copy IP", systemImage: "doc.on.doc")
-                    }
-                }
-                Button(participant.isAdmin ? "Remove Admin" : "Make Admin") {
-                    manager.toggleAdmin(networkId: network.id, participant: participant)
-                }
-                .disabled(!network.localIsAdmin || manager.actionInFlight)
-                Button(role: .destructive) {
-                    manager.removeParticipant(networkId: network.id, npub: participant.npub)
-                } label: {
-                    Label("Remove", systemImage: "trash")
-                }
-                .disabled(!network.localIsAdmin || isSelf(participant) || manager.actionInFlight)
+    private func deviceActionButtons(_ participant: NativeParticipantState, network: NativeNetworkState) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: 8)], alignment: .leading, spacing: 8) {
+            Button {
+                manager.copy(participant.npub, as: .peerNpub, peerNpub: participant.npub)
+            } label: {
+                Label("Copy key", systemImage: "key")
             }
+            .frame(maxWidth: .infinity)
+            .help("Copy npub")
+            if !cleanIp(participant.tunnelIp).isEmpty {
+                Button {
+                    manager.copy(cleanIp(participant.tunnelIp), as: .peerNpub, peerNpub: participant.npub)
+                } label: {
+                    Label("Copy IP", systemImage: "network")
+                }
+                .frame(maxWidth: .infinity)
+                .help("Copy IP")
+            }
+            Button {
+                manager.toggleAdmin(networkId: network.id, participant: participant)
+            } label: {
+                Label(
+                    participant.isAdmin ? "Remove admin" : "Make admin",
+                    systemImage: participant.isAdmin ? "star.slash" : "star"
+                )
+            }
+            .frame(maxWidth: .infinity)
+            .disabled(!network.localIsAdmin || manager.actionInFlight)
+            .help(participant.isAdmin ? "Remove admin" : "Make admin")
+            Button(role: .destructive) {
+                manager.removeParticipant(networkId: network.id, npub: participant.npub)
+            } label: {
+                Label("Remove", systemImage: "trash")
+            }
+            .frame(maxWidth: .infinity)
+            .disabled(!network.localIsAdmin || isSelf(participant) || manager.actionInFlight)
+            .help("Remove device")
         }
     }
 
@@ -465,36 +473,6 @@ struct RootView: View {
             }
         }
         .padding(.vertical, 3)
-    }
-
-    private func deviceMenu(_ participant: NativeParticipantState, network: NativeNetworkState) -> some View {
-        Menu {
-            Button("Copy npub") {
-                manager.copy(participant.npub, as: .peerNpub, peerNpub: participant.npub)
-            }
-            if !cleanIp(participant.tunnelIp).isEmpty {
-                Button {
-                    manager.copy(cleanIp(participant.tunnelIp), as: .peerNpub, peerNpub: participant.npub)
-                } label: {
-                    Text("Copy IP")
-                }
-            }
-            Divider()
-            Button(participant.isAdmin ? "Remove Admin" : "Make Admin") {
-                manager.toggleAdmin(networkId: network.id, participant: participant)
-            }
-            .disabled(!network.localIsAdmin || manager.actionInFlight)
-            Button(role: .destructive) {
-                manager.removeParticipant(networkId: network.id, npub: participant.npub)
-            } label: {
-                Text("Remove Device")
-            }
-            .disabled(!network.localIsAdmin || isSelf(participant) || manager.actionInFlight)
-        } label: {
-            Image(systemName: "ellipsis.circle")
-        }
-        .menuStyle(.button)
-        .fixedSize()
     }
 
     private func manageDevicesSection(_ network: NativeNetworkState) -> some View {
@@ -1231,7 +1209,7 @@ struct RootView: View {
 
     private var heroSubtext: String {
         if state.meshReady {
-            return "\(state.connectedPeerCount) of \(state.expectedPeerCount) devices connected"
+            return "VPN on · \(peerAvailabilityText)"
         }
         if state.sessionActive {
             return state.sessionStatus.isEmpty ? "Connecting" : state.sessionStatus
@@ -1240,6 +1218,14 @@ struct RootView: View {
             return "Background service needs repair"
         }
         return "Private network is off"
+    }
+
+    private var peerAvailabilityText: String {
+        if state.expectedPeerCount == 0 {
+            return "No devices"
+        }
+        let deviceWord = state.expectedPeerCount == 1 ? "device" : "devices"
+        return "\(state.connectedPeerCount) online · \(state.expectedPeerCount) \(deviceWord)"
     }
 
     private var statusMessage: String {

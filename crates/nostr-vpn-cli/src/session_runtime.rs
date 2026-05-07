@@ -923,7 +923,7 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
             .to_string()
     } else {
         if app.private_mesh_uses_fips() {
-            "Starting FIPS mesh".to_string()
+            "VPN on".to_string()
         } else {
             "Connecting to relays".to_string()
         }
@@ -1602,7 +1602,7 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                                         &mut public_signal_endpoint,
                                     )
                                     .await;
-                                    session_status = "Resuming".to_string();
+                                    session_status = "VPN on".to_string();
                                 } else {
                                     port_mapping_runtime.stop().await;
                                     public_signal_endpoint = None;
@@ -2545,12 +2545,12 @@ pub(crate) fn build_daemon_runtime_state(
             now,
         )
     };
-    let mesh_ready = expected_peers > 0 && connected_peer_count >= expected_peers;
     let signal_connected = if app.private_mesh_uses_fips() {
         session_active
     } else {
         relay_connected
     };
+    let mesh_ready = session_active && (signal_connected || connected_peer_count > 0);
     let health = build_health_issues(
         app,
         session_active,

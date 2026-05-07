@@ -173,7 +173,7 @@ fn daemon_status_does_not_repair_network_state_when_daemon_is_stopped() {
 }
 
 #[test]
-fn persist_daemon_runtime_state_marks_resuming_as_active() {
+fn persist_daemon_runtime_state_marks_vpn_on_as_active() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock is after epoch")
@@ -197,7 +197,7 @@ fn persist_daemon_runtime_state_marks_resuming_as_active() {
         &tunnel_runtime,
         &[],
         None,
-        "Resuming",
+        "VPN on",
         false,
         &nostr_vpn_core::diagnostics::NetworkSummary::default(),
         &nostr_vpn_core::diagnostics::PortMappingStatus::default(),
@@ -208,10 +208,37 @@ fn persist_daemon_runtime_state_marks_resuming_as_active() {
         .expect("read daemon state")
         .expect("daemon state should exist");
     assert!(state.session_active);
-    assert_eq!(state.session_status, "Resuming");
+    assert_eq!(state.session_status, "VPN on");
     assert!(!state.relay_connected);
 
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fips_runtime_state_is_ready_without_waiting_for_every_peer() {
+    let mut config = AppConfig::generated();
+    config.private_data_plane = nostr_vpn_core::data_plane::PrivateDataPlane::Fips;
+    config.networks[0].participants = vec!["11".repeat(32), "22".repeat(32)];
+    let presence = PeerPresenceBook::default();
+    let tunnel_runtime = crate::CliTunnelRuntime::new("utun100");
+
+    let state = crate::build_daemon_runtime_state(
+        &config,
+        true,
+        2,
+        &presence,
+        &tunnel_runtime,
+        &[],
+        None,
+        "VPN on",
+        false,
+        &nostr_vpn_core::diagnostics::NetworkSummary::default(),
+        &nostr_vpn_core::diagnostics::PortMappingStatus::default(),
+    );
+
+    assert_eq!(state.connected_peer_count, 0);
+    assert!(state.mesh_ready);
+    assert_eq!(state.session_status, "VPN on");
 }
 
 #[cfg(target_os = "macos")]

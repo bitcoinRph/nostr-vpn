@@ -323,10 +323,7 @@ impl NativeAppRuntime {
             close_to_tray_on_close: self.config.close_to_tray_on_close,
             connected_peer_count: connected_peer_count as u64,
             expected_peer_count: expected_peer_count as u64,
-            mesh_ready: daemon_state.map_or_else(
-                || expected_peer_count > 0 && connected_peer_count >= expected_peer_count,
-                |state| state.mesh_ready,
-            ),
+            mesh_ready: daemon_state.map_or_else(|| self.session_active, |state| state.mesh_ready),
             health,
             network,
             port_mapping,
