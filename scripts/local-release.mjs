@@ -304,6 +304,8 @@ $guestRepo = Join-Path $env:USERPROFILE 'src\\nostr-vpn'
 $guestRoot = Split-Path $guestRepo
 New-Item -ItemType Directory -Force -Path $guestRoot | Out-Null
 robocopy $sharedRepo $guestRepo /MIR /XD target dist .git artifacts /XF .env.release.local | Out-Null
+if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
+exit 0
 `,
     { dryRun },
   )
