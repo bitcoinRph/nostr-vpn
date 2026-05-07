@@ -144,6 +144,7 @@ just build
 ```
 
 For macOS specifically, `just build` runs `just macos-build`.
+After a successful build, it prints the app output path.
 
 Launch the native macOS shell:
 

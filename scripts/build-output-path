@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+print_one() {
+  printf 'Build output: %s\n' "$1"
+}
+
+print_many() {
+  printf 'Build outputs:\n'
+  for path in "$@"; do
+    printf '  %s\n' "$path"
+  done
+}
+
+macos_app_path() {
+  local project="$ROOT/macos/NostrVpnMac.xcodeproj"
+  local scheme="NostrVpnMac"
+  local build_dir="$ROOT/macos/.build"
+  local configuration="${NVPN_MACOS_XCODE_CONFIGURATION:-Debug}"
+  local host_arch
+  local settings
+  local target_build_dir
+  local wrapper_name
+  local app_path
+
+  host_arch="$(uname -m)"
+  settings="$(
+    xcodebuild \
+      -project "$project" \
+      -scheme "$scheme" \
+      -configuration "$configuration" \
+      -derivedDataPath "$build_dir/DerivedData" \
+      -destination "platform=macOS,arch=$host_arch" \
+      -showBuildSettings 2>/dev/null || true
+  )"
+  target_build_dir="$(awk -F' = ' '/^[[:space:]]*(TARGET_BUILD_DIR|BUILT_PRODUCTS_DIR) = / { print $2; exit }' <<<"$settings")"
+  wrapper_name="$(awk -F' = ' '/^[[:space:]]*(WRAPPER_NAME|FULL_PRODUCT_NAME) = / { print $2; exit }' <<<"$settings")"
+  if [[ -n "${target_build_dir:-}" && -n "${wrapper_name:-}" ]]; then
+    app_path="$target_build_dir/$wrapper_name"
+    if [[ -d "$app_path" ]]; then
+      print_one "$app_path"
+      return 0
+    fi
+  fi
+
+  app_path="$(find "$build_dir/DerivedData/Build/Products" -maxdepth 4 -name 'Nostr VPN.app' -type d -print -quit 2>/dev/null || true)"
+  if [[ -n "${app_path:-}" && -d "$app_path" ]]; then
+    print_one "$app_path"
+    return 0
+  fi
+
+  echo "Build output not found under $build_dir/DerivedData/Build/Products" >&2
+  return 1
+}
+
+case "$(uname -s)" in
+  Darwin)
+    macos_app_path
+    ;;
+  Linux)
+    print_one "nostr-vpn-linux-dev:/workspace/nostr-vpn/linux/target/debug/nostr-vpn"
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    print_one "$ROOT/windows/NostrVpn.Windows/bin/Debug/net8.0-windows/NostrVpn.Windows.exe"
+    ;;
+  *)
+    print_many "$ROOT/target/debug/nvpn" "$ROOT/target/debug/nostr-vpn-relay" "$ROOT/target/debug/nvpn-reflector"
+    ;;
+esac

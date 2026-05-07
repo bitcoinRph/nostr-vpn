@@ -80,6 +80,7 @@ build:
         MINGW*|MSYS*|CYGWIN*) just windows-build ;; \
         *) cargo build -p nostr-vpn-cli -p nostr-vpn-relay ;; \
     esac
+    @./scripts/build-output-path
 
 linux-build:
     ./tools/run-linux cargo build
