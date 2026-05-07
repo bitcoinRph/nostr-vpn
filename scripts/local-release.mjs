@@ -212,8 +212,8 @@ install -m 755 nvpn "\${INSTALL_DIR}/"
 function writeUnixReadme(path) {
   writeFileSync(
     path,
-    `nvpn - Nostr-signaled WireGuard control plane
-============================================
+    `nvpn - FIPS private mesh CLI
+============================
 
 Binary included:
   nvpn  - CLI control plane
@@ -381,7 +381,7 @@ function buildLinuxArtifacts({ env, tag, dryRun, builtLines }) {
     `cp target/${muslTriple}/release/nvpn /work/dist/nvpn/`,
     "printf '%s\\n' '#!/bin/bash' 'set -e' 'install -d \"${1:-/usr/local/bin}\"' 'install -m 755 nvpn \"${1:-/usr/local/bin}/\"' > /work/dist/nvpn/install.sh",
     'chmod +x /work/dist/nvpn/install.sh',
-    "printf '%s\\n' 'nvpn - Nostr-signaled WireGuard control plane' > /work/dist/nvpn/README.txt",
+    "printf '%s\\n' 'nvpn - FIPS private mesh CLI' > /work/dist/nvpn/README.txt",
     `tar -czf /work/dist/nvpn-${muslTriple}.tar.gz -C /work/dist nvpn`,
     `cp /work/dist/nvpn-${muslTriple}.tar.gz /work/dist/nvpn-${tag}-${muslTriple}.tar.gz`,
   ].join(' && ')

@@ -7,12 +7,12 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, broadcast};
 
 use crate::config::{normalize_nostr_pubkey, normalize_runtime_network_id};
-use crate::signaling::NOSTR_KIND_NOSTR_VPN;
 
 const JOIN_REQUEST_PROTOCOL_VERSION: u8 = 1;
 const JOIN_REQUEST_EXPIRATION_SECS: u64 = 7 * 24 * 60 * 60;
 const JOIN_REQUEST_LOOKBACK_SECS: u64 = JOIN_REQUEST_EXPIRATION_SECS;
 const JOIN_REQUEST_IDENTIFIER_PREFIX: &str = "join-request:";
+const NOSTR_KIND_NOSTR_VPN_JOIN_REQUEST: u16 = 38_333;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MeshJoinRequest {
@@ -238,11 +238,11 @@ fn join_request_identifier(recipient: &str) -> String {
 }
 
 fn join_request_event_kind() -> Kind {
-    Kind::from(NOSTR_KIND_NOSTR_VPN)
+    Kind::from(NOSTR_KIND_NOSTR_VPN_JOIN_REQUEST)
 }
 
 fn is_join_request_event(event: &Event) -> bool {
-    event.kind.as_u16() == NOSTR_KIND_NOSTR_VPN
+    event.kind.as_u16() == NOSTR_KIND_NOSTR_VPN_JOIN_REQUEST
 }
 
 pub(crate) fn decode_received_join_request_event(

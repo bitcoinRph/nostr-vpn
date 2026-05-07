@@ -5,7 +5,7 @@ use nostr_sdk::prelude::{PublicKey, ToBech32};
 use serde::{Deserialize, Serialize};
 
 use crate::config::normalize_nostr_pubkey;
-use crate::data_plane::{MeshPeerStatus, PrivateDataPlane, PrivatePacket};
+use crate::data_plane::{MeshPeerStatus, PrivatePacket};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FipsMeshPeerConfig {
@@ -144,7 +144,6 @@ impl FipsMeshRuntime {
             .map(|peer| MeshPeerStatus {
                 pubkey: peer.participant_pubkey.clone(),
                 connected: false,
-                data_plane: PrivateDataPlane::Fips,
                 endpoint_npub: peer.endpoint_npub.clone(),
                 transport_addr: None,
                 transport_type: None,
@@ -156,7 +155,7 @@ impl FipsMeshRuntime {
                 last_seen_at: None,
                 tx_bytes: 0,
                 rx_bytes: 0,
-                error: Some("fips presence pending".to_string()),
+                error: Some("fips link pending".to_string()),
             })
             .collect()
     }

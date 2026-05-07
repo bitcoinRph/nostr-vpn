@@ -68,9 +68,10 @@ pub(crate) struct DaemonPeerState {
     pub public_key: String,
     #[serde(default)]
     pub advertised_routes: Vec<String>,
-    pub presence_timestamp: u64,
-    #[serde(default)]
-    pub last_signal_seen_at: Option<u64>,
+    #[serde(default, alias = "presence_timestamp", alias = "presenceTimestamp")]
+    pub last_mesh_seen_at: u64,
+    #[serde(default, alias = "last_signal_seen_at", alias = "lastSignalSeenAt")]
+    pub last_fips_seen_at: Option<u64>,
     pub reachable: bool,
     #[serde(default)]
     pub last_handshake_at: Option<u64>,
@@ -117,9 +118,9 @@ pub(crate) struct ParticipantView {
     pub fips_bytes_sent: u64,
     pub fips_bytes_recv: u64,
     pub state: String,
-    pub presence_state: String,
+    pub mesh_state: String,
     pub status_text: String,
-    pub last_signal_text: String,
+    pub last_seen_text: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

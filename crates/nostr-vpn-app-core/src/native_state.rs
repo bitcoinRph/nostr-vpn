@@ -41,9 +41,9 @@ pub struct NativeParticipantState {
     pub fips_bytes_sent: u64,
     pub fips_bytes_recv: u64,
     pub state: String,
-    pub presence_state: String,
+    pub mesh_state: String,
     pub status_text: String,
-    pub last_signal_text: String,
+    pub last_seen_text: String,
 }
 
 #[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

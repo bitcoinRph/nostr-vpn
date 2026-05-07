@@ -148,7 +148,6 @@ wait_for_mesh() {
     compact="$(printf '%s' "$status" | compact_json)"
     if grep -q '"status_source":"daemon"' <<<"$compact" \
       && grep -q '"running":true' <<<"$compact" \
-      && grep -q '"private_data_plane":"fips"' <<<"$compact" \
       && grep -q '"mesh_ready":true' <<<"$compact" \
       && grep -q "\"connected_peer_count\":$expected" <<<"$compact"; then
       printf '%s\n' "$status"

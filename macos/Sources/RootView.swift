@@ -384,7 +384,7 @@ struct RootView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
                 metric("Role", deviceRoleText(participant))
                 metric("State", deviceStatusText(participant))
-                metric("Last signal", participant.lastSignalText.isEmpty ? "-" : participant.lastSignalText)
+                metric("Last seen", participant.lastSeenText.isEmpty ? "-" : participant.lastSeenText)
                 metric("Sent", formatBytes(participant.txBytes))
                 metric("Received", formatBytes(participant.rxBytes))
             }
@@ -1232,7 +1232,7 @@ struct RootView: View {
     }
 
     private func isSelf(_ participant: NativeParticipantState) -> Bool {
-        participant.npub == state.ownNpub || participant.presenceState == "local"
+        participant.npub == state.ownNpub || participant.meshState == "local"
     }
 
     private func deviceName(_ participant: NativeParticipantState) -> String {

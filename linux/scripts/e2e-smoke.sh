@@ -129,7 +129,6 @@ case "\${1:-}" in
       "listen_port": 51820,
       "vpn_enabled": true,
       "vpn_active": true,
-      "relay_connected": true,
       "vpn_status": "FIPS private mesh ready",
       "expected_peer_count": 1,
       "connected_peer_count": 1,
@@ -149,8 +148,8 @@ case "\${1:-}" in
         "rx_bytes": 8192,
         "public_key": "",
         "advertised_routes": [],
-        "presence_timestamp": $now,
-        "last_signal_seen_at": $now,
+        "last_mesh_seen_at": $now,
+        "last_fips_seen_at": $now,
         "reachable": true,
         "last_handshake_at": $now,
         "error": null

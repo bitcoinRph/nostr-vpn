@@ -12,7 +12,7 @@ use crate::ui_types::{
     ParticipantView,
 };
 
-const PEER_PRESENCE_GRACE_SECS: u64 = 45;
+const PEER_MESH_GRACE_SECS: u64 = 45;
 
 #[derive(Debug, Clone, Default)]
 struct PeerSnapshot {
@@ -22,7 +22,7 @@ struct PeerSnapshot {
     tx_bytes: u64,
     rx_bytes: u64,
     error: Option<String>,
-    last_signal_seen_at: Option<SystemTime>,
+    last_fips_seen_at: Option<SystemTime>,
     advertised_routes: Vec<String>,
     offers_exit_node: bool,
     fips_endpoint_npub: String,
@@ -45,7 +45,7 @@ enum TransportStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PresenceStatus {
+enum MeshStatus {
     Local,
     Present,
     Absent,
@@ -104,10 +104,10 @@ fn peer_snapshots(
                     ..PeerSnapshot::default()
                 }
             } else if let Some(peer) = daemon_peers.get(participant.as_str()) {
-                let last_signal_seen_at = peer
-                    .last_signal_seen_at
+                let last_fips_seen_at = peer
+                    .last_fips_seen_at
                     .and_then(epoch_secs_to_system_time)
-                    .or_else(|| epoch_secs_to_system_time(peer.presence_timestamp));
+                    .or_else(|| epoch_secs_to_system_time(peer.last_mesh_seen_at));
                 PeerSnapshot {
                     reachable: Some(peer.reachable),
                     last_handshake_at: peer.last_handshake_at.and_then(epoch_secs_to_system_time),
@@ -128,10 +128,10 @@ fn peer_snapshots(
                         Some(
                             peer.error
                                 .clone()
-                                .unwrap_or_else(|| "fips presence pending".to_string()),
+                                .unwrap_or_else(|| "fips link pending".to_string()),
                         )
                     },
-                    last_signal_seen_at,
+                    last_fips_seen_at,
                     advertised_routes: peer.advertised_routes.clone(),
                     offers_exit_node: peer_offers_exit_node(&peer.advertised_routes),
                 }
@@ -252,7 +252,7 @@ fn participant_view(
 ) -> ParticipantView {
     let snapshot = snapshots.get(participant);
     let transport_status = peer_transport_status(snapshot, participant, own_pubkey_hex);
-    let presence_status = peer_presence_status(snapshot, participant, own_pubkey_hex);
+    let mesh_status = peer_mesh_status(snapshot, participant, own_pubkey_hex);
     let is_local = Some(participant) == own_pubkey_hex;
     let (magic_dns_alias, magic_dns_name) = if is_local {
         (
@@ -308,9 +308,9 @@ fn participant_view(
         fips_bytes_sent: snapshot.map(|value| value.fips_bytes_sent).unwrap_or(0),
         fips_bytes_recv: snapshot.map(|value| value.fips_bytes_recv).unwrap_or(0),
         state: transport_state_label(transport_status).to_string(),
-        presence_state: presence_state_label(presence_status).to_string(),
+        mesh_state: mesh_state_label(mesh_status).to_string(),
         status_text: peer_status_line(snapshot, transport_status),
-        last_signal_text: peer_presence_line(snapshot, participant, own_pubkey_hex),
+        last_seen_text: peer_last_seen_line(snapshot, participant, own_pubkey_hex),
     }
 }
 
@@ -347,7 +347,7 @@ fn peer_transport_status(
 
     match snapshot {
         Some(status) if status.reachable == Some(true) => TransportStatus::Online,
-        Some(status) if within_peer_presence_grace(status.last_signal_seen_at) => {
+        Some(status) if within_peer_mesh_grace(status.last_fips_seen_at) => {
             TransportStatus::Present
         }
         Some(status) if status.reachable == Some(false) => TransportStatus::Offline,
@@ -355,22 +355,20 @@ fn peer_transport_status(
     }
 }
 
-fn peer_presence_status(
+fn peer_mesh_status(
     snapshot: Option<&PeerSnapshot>,
     participant: &str,
     own_pubkey_hex: Option<&str>,
-) -> PresenceStatus {
+) -> MeshStatus {
     if Some(participant) == own_pubkey_hex {
-        return PresenceStatus::Local;
+        return MeshStatus::Local;
     }
 
     match snapshot {
-        Some(status) if status.reachable == Some(true) => PresenceStatus::Present,
-        Some(status) if within_peer_presence_grace(status.last_signal_seen_at) => {
-            PresenceStatus::Present
-        }
-        Some(status) if status.reachable == Some(false) => PresenceStatus::Absent,
-        _ => PresenceStatus::Unknown,
+        Some(status) if status.reachable == Some(true) => MeshStatus::Present,
+        Some(status) if within_peer_mesh_grace(status.last_fips_seen_at) => MeshStatus::Present,
+        Some(status) if status.reachable == Some(false) => MeshStatus::Absent,
+        _ => MeshStatus::Unknown,
     }
 }
 
@@ -407,12 +405,12 @@ fn peer_status_line(snapshot: Option<&PeerSnapshot>, status: TransportStatus) ->
                 let endpoint = snapshot.endpoint.as_deref().unwrap_or_default();
                 format!("fips pending via {}", shorten_middle(endpoint, 18, 10))
             }
-            _ => "fips presence pending".to_string(),
+            _ => "fips link pending".to_string(),
         },
         TransportStatus::Offline => match snapshot {
             Some(value) => {
                 let checked = value
-                    .last_signal_seen_at
+                    .last_fips_seen_at
                     .and_then(|seen_at| seen_at.elapsed().ok())
                     .map(|elapsed| elapsed.as_secs());
                 match (value.error.as_deref(), checked) {
@@ -434,7 +432,7 @@ fn peer_status_line(snapshot: Option<&PeerSnapshot>, status: TransportStatus) ->
     }
 }
 
-fn peer_presence_line(
+fn peer_last_seen_line(
     snapshot: Option<&PeerSnapshot>,
     participant: &str,
     own_pubkey_hex: Option<&str>,
@@ -443,7 +441,7 @@ fn peer_presence_line(
         return "self".to_string();
     }
 
-    let Some(seen_at) = snapshot.and_then(|value| value.last_signal_seen_at) else {
+    let Some(seen_at) = snapshot.and_then(|value| value.last_fips_seen_at) else {
         return String::new();
     };
 
@@ -464,19 +462,19 @@ fn transport_state_label(status: TransportStatus) -> &'static str {
     }
 }
 
-fn presence_state_label(status: PresenceStatus) -> &'static str {
+fn mesh_state_label(status: MeshStatus) -> &'static str {
     match status {
-        PresenceStatus::Local => "local",
-        PresenceStatus::Present => "present",
-        PresenceStatus::Absent => "absent",
-        PresenceStatus::Unknown => "unknown",
+        MeshStatus::Local => "local",
+        MeshStatus::Present => "present",
+        MeshStatus::Absent => "absent",
+        MeshStatus::Unknown => "unknown",
     }
 }
 
-fn within_peer_presence_grace(last_seen_at: Option<SystemTime>) -> bool {
+fn within_peer_mesh_grace(last_seen_at: Option<SystemTime>) -> bool {
     last_seen_at
         .and_then(|seen_at| seen_at.elapsed().ok())
-        .map(|elapsed| elapsed.as_secs() <= PEER_PRESENCE_GRACE_SECS)
+        .map(|elapsed| elapsed.as_secs() <= PEER_MESH_GRACE_SECS)
         .unwrap_or(false)
 }
 

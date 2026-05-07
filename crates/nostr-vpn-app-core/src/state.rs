@@ -82,10 +82,10 @@ pub struct DaemonPeerState {
     pub public_key: String,
     #[serde(alias = "advertised_routes")]
     pub advertised_routes: Vec<String>,
-    #[serde(alias = "presence_timestamp")]
-    pub presence_timestamp: u64,
-    #[serde(alias = "last_signal_seen_at")]
-    pub last_signal_seen_at: Option<u64>,
+    #[serde(default, alias = "presence_timestamp", alias = "presenceTimestamp")]
+    pub last_mesh_seen_at: u64,
+    #[serde(default, alias = "last_signal_seen_at", alias = "lastSignalSeenAt")]
+    pub last_fips_seen_at: Option<u64>,
     pub reachable: bool,
     #[serde(alias = "last_handshake_at")]
     pub last_handshake_at: Option<u64>,
@@ -122,9 +122,9 @@ pub struct ParticipantView {
     pub fips_bytes_sent: u64,
     pub fips_bytes_recv: u64,
     pub state: String,
-    pub presence_state: String,
+    pub mesh_state: String,
     pub status_text: String,
-    pub last_signal_text: String,
+    pub last_seen_text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -384,8 +384,8 @@ mod tests {
                 "rx_bytes": 19269,
                 "public_key": "",
                 "advertised_routes": [],
-                "presence_timestamp": 1778104080,
-                "last_signal_seen_at": 1778104080,
+                "last_mesh_seen_at": 1778104080,
+                "last_fips_seen_at": 1778104080,
                 "reachable": true,
                 "last_handshake_at": 1778104080,
                 "error": null

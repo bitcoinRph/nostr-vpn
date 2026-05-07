@@ -11,11 +11,10 @@ use nostr_vpn_core::config::{
 };
 use nostr_vpn_core::data_plane::{MeshPeerStatus, PrivatePacket};
 use nostr_vpn_core::fips_control::{
-    FipsControlFrame, decode_fips_control_frame, encode_fips_control_frame,
+    FipsControlFrame, NetworkRoster, decode_fips_control_frame, encode_fips_control_frame,
 };
 use nostr_vpn_core::fips_mesh::{FipsMeshPeerConfig, FipsMeshRuntime};
 use nostr_vpn_core::join_requests::MeshJoinRequest;
-use nostr_vpn_core::signaling::NetworkRoster;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -590,7 +589,7 @@ impl FipsPrivateMeshRuntime {
             } else {
                 peer_presence
                     .and_then(|value| value.error.clone())
-                    .or_else(|| Some("fips presence pending".to_string()))
+                    .or_else(|| Some("fips link pending".to_string()))
             };
         }
         statuses
@@ -2154,11 +2153,11 @@ mod tests {
     };
     use nostr_sdk::prelude::{Keys, ToBech32};
     use nostr_vpn_core::config::{AppConfig, derive_mesh_tunnel_ip};
-    use nostr_vpn_core::data_plane::{MeshPeerStatus, PrivateDataPlane};
+    use nostr_vpn_core::data_plane::MeshPeerStatus;
     use nostr_vpn_core::fips_control::FipsControlFrame;
+    use nostr_vpn_core::fips_control::NetworkRoster;
     use nostr_vpn_core::fips_mesh::{FipsMeshPeerConfig, FipsMeshRuntime};
     use nostr_vpn_core::join_requests::MeshJoinRequest;
-    use nostr_vpn_core::signaling::NetworkRoster;
     use std::collections::HashMap;
     use std::net::{Ipv4Addr, UdpSocket};
     use std::time::Duration;
@@ -2188,7 +2187,6 @@ mod tests {
         MeshPeerStatus {
             pubkey: pubkey.as_ref().to_string(),
             connected,
-            data_plane: PrivateDataPlane::Fips,
             endpoint_npub: endpoint_npub.as_ref().to_string(),
             transport_addr: transport_addr.map(str::to_string),
             transport_type: transport_type.map(str::to_string),

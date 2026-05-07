@@ -15,7 +15,6 @@ data class AppState(
     val vpnActive: Boolean = false,
     val vpnStatus: String = "Disconnected",
     val daemonRunning: Boolean = false,
-    val relayConnected: Boolean = false,
     val ownNpub: String = "",
     val nodeName: String = "",
     val selfMagicDnsName: String = "",
@@ -74,7 +73,7 @@ data class ParticipantState(
     val fipsBytesSent: Long = 0,
     val fipsBytesRecv: Long = 0,
     val statusText: String = "",
-    val lastSignalText: String = "",
+    val lastSeenText: String = "",
 )
 
 data class InboundJoinRequest(
@@ -119,7 +118,6 @@ fun parseAppState(jsonText: String): AppState {
         vpnActive = json.optBoolean("vpnActive"),
         vpnStatus = json.optString("vpnStatus", "Disconnected"),
         daemonRunning = json.optBoolean("daemonRunning"),
-        relayConnected = json.optBoolean("relayConnected"),
         ownNpub = json.optString("ownNpub"),
         nodeName = json.optString("nodeName"),
         selfMagicDnsName = json.optString("selfMagicDnsName"),
@@ -182,7 +180,7 @@ private fun JSONArray?.toParticipantList(): List<ParticipantState> = mapObjects 
         fipsBytesSent = item.optLong("fipsBytesSent"),
         fipsBytesRecv = item.optLong("fipsBytesRecv"),
         statusText = item.optString("statusText"),
-        lastSignalText = item.optString("lastSignalText"),
+        lastSeenText = item.optString("lastSeenText", item.optString("lastSignalText")),
     )
 }
 

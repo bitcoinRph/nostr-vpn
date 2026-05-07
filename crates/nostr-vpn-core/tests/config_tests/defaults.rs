@@ -41,8 +41,8 @@ fn generated_config_auto_populates_keys() {
 }
 
 #[test]
-fn load_migrates_legacy_wireguard_private_mesh_to_fips() {
-    let path = unique_temp_config_path("legacy-wireguard-private-migration");
+fn load_ignores_legacy_data_plane_switches() {
+    let path = unique_temp_config_path("legacy-data-plane-switches");
     let raw = r#"
 private_data_plane = "wireguard"
 exit_data_plane = "wireguard"
@@ -52,8 +52,8 @@ exit_data_plane = "wireguard"
     let config = AppConfig::load(&path).expect("load config");
     let _ = fs::remove_file(&path);
 
-    assert_eq!(config.private_data_plane, PrivateDataPlane::Fips);
-    assert_eq!(config.exit_data_plane, ExitDataPlane::WireGuard);
+    assert!(config.fips_peer_endpoints.is_empty());
+    assert!(config.exit_node.is_empty());
 }
 
 #[test]

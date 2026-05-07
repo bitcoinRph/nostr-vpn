@@ -14,8 +14,5 @@ mod network_roster;
 mod network_routes;
 pub mod paths;
 pub mod platform_paths;
-pub mod presence;
-pub mod signaling;
-pub mod wireguard;
 
 pub use config::DEFAULT_RELAYS;

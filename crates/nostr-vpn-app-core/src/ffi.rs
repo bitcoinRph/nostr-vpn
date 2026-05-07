@@ -1058,7 +1058,7 @@ impl NativeAppRuntime {
             peer_offers_exit_node(&advertised_routes)
         };
         let peer_state = self.peer_state_label(participant, daemon_peer, is_local, vpn_active);
-        let presence_state = Self::peer_presence_label(daemon_peer, is_local, vpn_active);
+        let mesh_state = Self::peer_mesh_label(daemon_peer, is_local, vpn_active);
 
         NativeParticipantState {
             npub: to_npub(participant),
@@ -1088,9 +1088,9 @@ impl NativeAppRuntime {
             fips_bytes_sent: daemon_peer.map_or(0, |peer| peer.fips_bytes_sent),
             fips_bytes_recv: daemon_peer.map_or(0, |peer| peer.fips_bytes_recv),
             state: peer_state.clone(),
-            presence_state,
+            mesh_state,
             status_text: Self::peer_status_text(daemon_peer, is_local, &peer_state),
-            last_signal_text: Self::peer_last_signal_text(daemon_peer, is_local),
+            last_seen_text: Self::peer_last_fips_seen_text(daemon_peer, is_local),
         }
     }
 
@@ -1203,7 +1203,7 @@ impl NativeAppRuntime {
             return "online".to_string();
         }
         if peer
-            .and_then(peer_last_signal_secs)
+            .and_then(peer_last_fips_seen_secs)
             .is_some_and(within_presence_grace)
         {
             return "pending".to_string();
@@ -1222,11 +1222,7 @@ impl NativeAppRuntime {
         "unknown".to_string()
     }
 
-    fn peer_presence_label(
-        peer: Option<&DaemonPeerState>,
-        is_local: bool,
-        vpn_active: bool,
-    ) -> String {
+    fn peer_mesh_label(peer: Option<&DaemonPeerState>, is_local: bool, vpn_active: bool) -> String {
         if !vpn_active {
             return "off".to_string();
         }
@@ -1235,7 +1231,7 @@ impl NativeAppRuntime {
         }
         if peer.is_some_and(|peer| peer.reachable)
             || peer
-                .and_then(peer_last_signal_secs)
+                .and_then(peer_last_fips_seen_secs)
                 .is_some_and(within_presence_grace)
         {
             return "present".to_string();
@@ -1270,10 +1266,10 @@ impl NativeAppRuntime {
                     })
                 })
                 .map_or_else(
-                    || "fips presence pending".to_string(),
+                    || "fips link pending".to_string(),
                     |endpoint| format!("fips pending via {}", shorten_middle(&endpoint, 18, 10)),
                 ),
-            "offline" => peer.and_then(peer_last_signal_secs).map_or_else(
+            "offline" => peer.and_then(peer_last_fips_seen_secs).map_or_else(
                 || "offline".to_string(),
                 |seen| format!("offline ({})", compact_age_text(age_secs_since(seen))),
             ),
@@ -1281,11 +1277,11 @@ impl NativeAppRuntime {
         }
     }
 
-    fn peer_last_signal_text(peer: Option<&DaemonPeerState>, is_local: bool) -> String {
+    fn peer_last_fips_seen_text(peer: Option<&DaemonPeerState>, is_local: bool) -> String {
         if is_local {
             return "self".to_string();
         }
-        peer.and_then(peer_last_signal_secs)
+        peer.and_then(peer_last_fips_seen_secs)
             .map_or_else(String::new, |seen| {
                 format!("seen {}", compact_age_text(age_secs_since(seen)))
             })
@@ -1490,9 +1486,9 @@ fn peer_offers_exit_node(routes: &[String]) -> bool {
         .any(|route| route == "0.0.0.0/0" || route == "::/0")
 }
 
-fn peer_last_signal_secs(peer: &DaemonPeerState) -> Option<u64> {
-    peer.last_signal_seen_at
-        .or_else(|| (peer.presence_timestamp > 0).then_some(peer.presence_timestamp))
+fn peer_last_fips_seen_secs(peer: &DaemonPeerState) -> Option<u64> {
+    peer.last_fips_seen_at
+        .or_else(|| (peer.last_mesh_seen_at > 0).then_some(peer.last_mesh_seen_at))
 }
 
 fn within_presence_grace(seen_at: u64) -> bool {

@@ -171,8 +171,6 @@ for _ in $(seq 1 60); do
     && grep -q '"status_source":"daemon"' <<<"$BOB_COMPACT" \
     && grep -q '"running":true' <<<"$ALICE_COMPACT" \
     && grep -q '"running":true' <<<"$BOB_COMPACT" \
-    && grep -q '"private_data_plane":"fips"' <<<"$ALICE_COMPACT" \
-    && grep -q '"private_data_plane":"fips"' <<<"$BOB_COMPACT" \
     && grep -q '"mesh_ready":true' <<<"$ALICE_COMPACT" \
     && grep -q '"mesh_ready":true' <<<"$BOB_COMPACT" \
     && grep -q '"endpoint":"fips"' <<<"$ALICE_COMPACT" \
@@ -194,8 +192,6 @@ grep -q '"status_source":"daemon"' <<<"$ALICE_COMPACT"
 grep -q '"status_source":"daemon"' <<<"$BOB_COMPACT"
 grep -q '"running":true' <<<"$ALICE_COMPACT"
 grep -q '"running":true' <<<"$BOB_COMPACT"
-grep -q '"private_data_plane":"fips"' <<<"$ALICE_COMPACT"
-grep -q '"private_data_plane":"fips"' <<<"$BOB_COMPACT"
 grep -q '"mesh_ready":true' <<<"$ALICE_COMPACT"
 grep -q '"mesh_ready":true' <<<"$BOB_COMPACT"
 grep -q '"endpoint":"fips"' <<<"$ALICE_COMPACT"

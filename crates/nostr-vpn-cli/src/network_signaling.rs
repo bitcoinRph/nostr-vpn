@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
@@ -10,7 +9,6 @@ use nostr_vpn_core::config::{
     AppConfig, NetworkConfig, PendingOutboundJoinRequest, maybe_autoconfigure_node,
     normalize_nostr_pubkey, normalize_runtime_network_id,
 };
-use nostr_vpn_core::signaling::{NetworkRoster, NostrSignalingClient, SignalPayload};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -420,53 +418,6 @@ pub(crate) struct NetworkInvite {
     pub(crate) participants: Vec<String>,
     #[serde(default)]
     pub(crate) relays: Vec<String>,
-}
-
-pub(crate) async fn publish_active_network_roster(
-    client: &NostrSignalingClient,
-    app: &AppConfig,
-    recipients: Option<&[String]>,
-) -> Result<usize> {
-    let network = app.active_network();
-    let own_pubkey = match app.own_nostr_pubkey_hex() {
-        Ok(pubkey) => pubkey,
-        Err(_) => return Ok(0),
-    };
-    let roster = app.shared_network_roster(&network.id)?;
-    if !crate::shared_roster_publish_allowed(app, &network.id, &own_pubkey, &roster.signed_by) {
-        return Ok(0);
-    }
-    let allowed = app.active_network_signal_pubkeys_hex();
-    let allowed_set = allowed.iter().cloned().collect::<HashSet<_>>();
-    let mut recipients = recipients
-        .map(|recipients| {
-            recipients
-                .iter()
-                .filter(|recipient| allowed_set.contains(recipient.as_str()))
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or(allowed);
-    recipients.retain(|recipient| recipient != &own_pubkey);
-    recipients.sort();
-    recipients.dedup();
-    if recipients.is_empty() {
-        return Ok(0);
-    }
-
-    let payload = SignalPayload::Roster(NetworkRoster {
-        network_name: roster.name,
-        participants: roster.participants,
-        admins: roster.admins,
-        aliases: roster.aliases,
-        signed_at: if roster.updated_at > 0 {
-            roster.updated_at
-        } else {
-            unix_timestamp()
-        },
-    });
-    client.publish_to(payload, &recipients).await?;
-    Ok(recipients.len())
 }
 
 fn network_should_adopt_invite(network: &nostr_vpn_core::config::NetworkConfig) -> bool {

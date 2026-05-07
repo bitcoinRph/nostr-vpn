@@ -1,292 +1,101 @@
 # Protocol
 
-This document describes the protocol that `nostr-vpn` currently implements in this repository.
+This document describes the protocol shape that `nostr-vpn` currently implements after the FIPS-only private mesh cleanup.
 
-The `README.md` should stay product-facing. Protocol details live here so they can track the code more closely.
+The `README.md` stays product-facing. Protocol details live here so they can track the code more closely.
 
 ## Scope
 
 `nostr-vpn` is split into three layers:
 
 - Out-of-band bootstrapping with invite payloads and QR codes
-- A Nostr-based control plane for discovery, membership, and signaling
-- A UDP/WireGuard data plane for the actual tunnel
+- Network membership and admin roster state
+- A FIPS-backed private mesh data plane for tunnel traffic
 
-Only the active network participates in the live runtime.
+Only the active network participates in the live runtime. `nostr-vpn` no longer runs its legacy relay-announced peer roster or WireGuard mesh mode.
 
 ## Identities And Stable IDs
 
 | Name | Purpose | Format |
 | --- | --- | --- |
-| Nostr identity keypair | Authenticates Nostr events and admin actions | `nsec`/`npub` at the edges, normalized to hex internally |
-| WireGuard keypair | Authenticates the tunnel peer itself | WireGuard base64 keys |
-| `node_id` | Human-meaningful node/session identifier in announcements and disconnects | String |
-| `network_id` | Mesh identifier used for signaling scope and tunnel-IP derivation | String |
+| Nostr identity keypair | Authenticates device identity, invites, admin actions, and FIPS discovery identity | `nsec`/`npub` at the edges, normalized to hex internally |
+| `network_id` | Stable mesh identifier used for roster scope and tunnel-IP derivation | String |
 
 Important details:
 
 - `network_id` is normalized at runtime by stripping the legacy `nostr-vpn:` prefix if present.
-- The active network's signal audience is `participants + admins`, deduped.
+- Each configured network carries its own participant and admin set.
 - If tunnel IP auto-configuration is enabled, the local node derives its `/32` as:
   - `SHA256(network_id + "\n" + own_nostr_pubkey_hex)`
   - `10.44.(digest[0] % 254 + 1).(digest[1] % 254 + 1)/32`
 
-## Nostr Event Kinds
+## Invites
 
-Two Nostr kinds matter today:
+Network invites are `nvpn://invite` payloads. They carry enough information for another device to join or request access:
 
-| Kind | Purpose |
-| --- | --- |
-| `25050` | Mesh signaling and join requests |
+- network name and stable `network_id`
+- inviter identity
+- optional admin and participant metadata
+- optional relay list for the discovery layer
 
-Kind `25050` is multiplexed by tags and decrypted JSON shape rather than by separate kinds.
+Relay URLs in invites configure the discovery/rendezvous layer used by FIPS. They are not a nostr-vpn relay roster, and importing an invite does not enable the removed legacy peer-announcement protocol.
 
-## Control Plane On Kind 25050
+## Admin Roster Sync
 
-### Public Hello
+Network membership is represented as an admin-signed roster. Operationally, the roster is the authority for:
 
-Peers publish a small public heartbeat to let configured peers notice them:
+- network name
+- participants
+- admins
+- join-request settings
+- per-peer aliases and route settings
 
-- Kind: `25050`
-- Content: empty string
-- Tags:
-  - `d=hello`
-  - `l=hello`
-  - `expiration=<now+300s>`
-- Subscription lookback: 60 seconds
+When a newer valid roster arrives, peers reload the active network membership and keep the FIPS mesh runtime aligned with that roster.
 
-This message is public and not encrypted.
+## FIPS Private Mesh
 
-### Private Mesh Signals
+`nvpn` uses FIPS as the only private mesh data plane.
 
-Most control-plane traffic is sent as one NIP-44 v2 encrypted event per recipient:
+The CLI builds FIPS peer configuration from the active network participants:
 
-- Kind: `25050`
-- Encryption: NIP-44 v2 from sender Nostr secret key to recipient Nostr pubkey
-- Tags:
-  - `d=private:<network_id>:<recipient_pubkey_hex>`
-  - `p=<recipient_pubkey_hex>`
-  - `expiration=<now+300s>`
-- Subscription lookback: 120 seconds
+- each participant is mapped to its derived tunnel address
+- advertised routes are included in peer allowed IPs
+- static FIPS peer endpoints may be supplied with `fips_peer_endpoints`
+- FIPS discovery may use configured Nostr relays internally
 
-Decrypted payload shape:
+The daemon reports each peer with FIPS-specific state:
 
-```json
-{
-  "network_id": "mesh-home",
-  "sender_pubkey": "<sender_pubkey_hex>",
-  "payload": {
-    "type": "Announce",
-    "data": {}
-  }
-}
-```
+- `endpoint` and `runtime_endpoint` are `"fips"` or a FIPS transport address
+- `fips_endpoint_npub`, `fips_transport_addr`, and `fips_transport_type` describe the selected FIPS link
+- `last_mesh_seen_at` and `last_fips_seen_at` replace the legacy presence/signal timestamps
+- packet and byte counters are read from FIPS link state
 
-`payload.type` can currently be:
+`nostr-vpn` should not publish or consume its old Nostr relay peer announcements. If FIPS uses relays, that behavior belongs to FIPS discovery/rendezvous, not to a separate nostr-vpn signaling model.
 
-- `Hello`
-- `Announce`
-- `Roster`
-- `Disconnect`
-- `JoinRequest`
+## NAT Discovery
 
-In practice:
+NAT discovery remains a local endpoint aid:
 
-- `Hello` is published as the public hello event above, then surfaced to the runtime as `SignalPayload::Hello`.
-- `JoinRequest` is normally sent with the dedicated join-request envelope described below, then converted into `SignalPayload::JoinRequest` when received.
+- reflectors and STUN servers can discover a public UDP endpoint
+- discovery is bound to the active listen port when possible
+- port-mapping state is surfaced in diagnostics
 
-Receivers discard decrypted signal envelopes unless:
+The discovered endpoint is input to FIPS configuration. It is not a WireGuard endpoint announcement.
 
-- `network_id` matches a configured active network
-- `sender_pubkey` matches the actual event author
-- the sender is in the configured participant/admin set for that network
+## Routing
 
-### Peer Announcement Payload
+Route targets come from the active network roster and local node settings. FIPS receives the route map and carries private mesh traffic for the selected peers.
 
-`Announce` carries the current WireGuard and reachability state for a node:
-
-| Field | Meaning |
-| --- | --- |
-| `node_id` | Sender's node identifier |
-| `public_key` | Sender's WireGuard public key |
-| `endpoint` | Compatibility endpoint field; usually public when available, otherwise local |
-| `local_endpoint` | Sender's LAN/private UDP endpoint when known |
-| `public_endpoint` | Sender's discovered public UDP endpoint when known |
-| `tunnel_ip` | Sender's tunnel `/32` |
-| `advertised_routes` | Extra routes the sender wants to carry |
-| `timestamp` | Sender-side timestamp |
-
-Runtime endpoint selection is path-aware, but the broad rule is:
-
-- Prefer a same-subnet local endpoint when both peers appear to be on the same private LAN
-- Otherwise prefer a public endpoint
-- Keep using a recently successful path until there is a reason to rotate
-
-### Disconnect Payload
-
-`Disconnect` contains only:
-
-```json
-{
-  "type": "Disconnect",
-  "data": {
-    "node_id": "..."
-  }
-}
-```
-
-It removes the sender's current active announcement from peer presence.
-
-## Membership Protocol
-
-### Invite Format
-
-Invites are shared out of band as:
-
-- `nvpn://invite/<base64url(json)>`
-
-Current invite payload version: `2`
-
-Accepted versions on import: `1` and `2`
-
-Normalized payload shape:
-
-```json
-{
-  "v": 2,
-  "network_name": "Home",
-  "network_id": "mesh-home",
-  "inviter_npub": "npub1...",
-  "inviter_node_name": "laptop",
-  "admins": ["npub1..."],
-  "participants": ["npub1..."],
-  "relays": ["wss://example.com"]
-}
-```
-
-Normalization rules:
-
-- the inviter is always added to `admins`
-- `participants` defaults to the inviter if omitted
-- relay URLs are deduped and merged into local config on import
-- invite pubkeys are stored in invite payloads as `npub`, then normalized to hex in config/runtime
-
-Invites are bootstrap material, not authority. The authoritative membership state comes from admin-signed shared rosters.
-
-### Join Requests
-
-After importing an invite, a joining node sends join requests to all known admins for that network.
-
-Wire format:
-
-- Kind: `25050`
-- Encryption: NIP-44 v2
-- Tags:
-  - `d=join-request:<recipient_pubkey_hex>`
-  - `p=<recipient_pubkey_hex>`
-  - `expiration=<now+7d>`
-
-Decrypted payload:
-
-```json
-{
-  "v": 1,
-  "network_id": "mesh-home",
-  "requester_node_name": "phone"
-}
-```
-
-Notes:
-
-- the daemon can stay connected only for join-request listening even when the mesh session itself is paused
-- inbound join requests are stored per network and deduped by requester
-- once a requester becomes a participant, stale stored join requests for that requester are dropped
-
-### Admin-Signed Shared Roster
-
-Admins synchronize membership by sending `Roster` payloads over the private signal channel.
-
-Payload shape:
-
-```json
-{
-  "type": "Roster",
-  "data": {
-    "network_name": "Home",
-    "participants": ["<pubkey_hex>", "<pubkey_hex>"],
-    "admins": ["<pubkey_hex>"],
-    "signed_at": 1760000000
-  }
-}
-```
-
-Rules enforced by the receiver:
-
-- the sender must already be an admin for that network
-- `signed_at` must be newer than the local stored roster timestamp
-- the roster must contain at least one admin
-- the local node removes itself from the persisted participant list when applying a roster
-
-Operational meaning:
-
-- rosters are the current authority for participants, admins, and network name
-- local admin edits bump `shared_roster_updated_at` and `shared_roster_signed_by`
-- when a newer valid roster arrives, peers reload signaling membership, prune stale participant state, and keep going with the new roster
-
-## NAT Traversal And Endpoint Discovery
-
-`nostr-vpn` tries to make direct UDP work for the legacy WireGuard data plane. There is no public UDP relay fallback path.
-
-Current behavior:
-
-- discover a public UDP endpoint from configured reflectors first, then STUN servers
-- keep the discovery bound to the same UDP listen port used by the tunnel
-- advertise both local and public endpoints when they differ
-- run UDP hole-punch attempts toward peer candidate endpoints when there is still no handshake
-- re-apply the tunnel runtime after punching so WireGuard uses the refreshed socket state
-
-The path cache tracks:
-
-- endpoints learned from announcements
-- endpoints selected by the runtime
-- endpoints that produced successful handshakes
-
-That cache keeps working paths sticky enough to avoid flapping while still allowing rotation toward better candidates.
-
-## WireGuard Data Plane
-
-The actual encrypted tunnel is WireGuard in userspace:
-
-- desktop/CLI uses `boringtun`
-- mobile targets use platform-specific VPN runtimes around the same control model
-
-For each peer, the runtime builds:
-
-- peer WireGuard public key from the latest announcement
-- one selected UDP endpoint
-- `allowed_ips` containing:
-  - the peer's tunnel `/32`
-  - any routes currently assigned to that peer
-
-Exit-node behavior is policy on top of the same data plane:
-
-- peers may advertise default routes
-- a client picks at most one exit node
-- only the selected exit node gets `0.0.0.0/0` or `::/0`
-
-## Nostr Relay Connectivity Policy
-
-Nostr relays are used for signaling, not for the actual tunnel.
-
-Relays stay connected so control-plane changes propagate promptly.
+Exit-node behavior is still represented in config and UI state, but WireGuard exit-node support is no longer part of the main nostr-vpn mesh runtime. Any WireGuard exit work should live as a separate component instead of reintroducing the legacy data plane.
 
 ## Canonical Source
 
 If this document and the code diverge, the code wins. The main protocol implementations currently live in:
 
-- `crates/nostr-vpn-core/src/signaling.rs`
+- `crates/nostr-vpn-core/src/fips_control.rs`
+- `crates/nostr-vpn-core/src/fips_mesh.rs`
 - `crates/nostr-vpn-core/src/join_requests.rs`
 - `crates/nostr-vpn-core/src/config.rs`
-- `crates/nostr-vpn-core/src/paths.rs`
-- `crates/nostr-vpn-cli/src/main.rs`
+- `crates/nostr-vpn-cli/src/fips_private_mesh.rs`
+- `crates/nostr-vpn-cli/src/session_runtime.rs`
 - `crates/nostr-vpn-app-core/src/ffi.rs`

@@ -1,53 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PrivateDataPlane {
-    #[default]
-    #[serde(alias = "wireguard")]
-    Fips,
-}
-
-impl PrivateDataPlane {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Fips => "fips",
-        }
-    }
-}
-
-impl fmt::Display for PrivateDataPlane {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ExitDataPlane {
-    None,
-    #[default]
-    #[serde(rename = "wireguard")]
-    WireGuard,
-}
-
-impl ExitDataPlane {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::WireGuard => "wireguard",
-        }
-    }
-}
-
-impl fmt::Display for ExitDataPlane {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FipsDataPlaneCapability {
@@ -95,7 +48,6 @@ pub struct PrivatePacket {
 pub struct MeshPeerStatus {
     pub pubkey: String,
     pub connected: bool,
-    pub data_plane: PrivateDataPlane,
     pub endpoint_npub: String,
     pub transport_addr: Option<String>,
     pub transport_type: Option<String>,
@@ -121,42 +73,9 @@ pub trait PrivateMeshBackend: Send {
     async fn peer_status(&self) -> Result<Vec<MeshPeerStatus>>;
 }
 
-pub fn private_data_plane_routes_to_fips(private_data_plane: PrivateDataPlane) -> bool {
-    matches!(private_data_plane, PrivateDataPlane::Fips)
-}
-
-pub fn exit_data_plane_routes_to_wireguard(exit_data_plane: ExitDataPlane) -> bool {
-    exit_data_plane == ExitDataPlane::WireGuard
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        DataPlaneCapability, ExitDataPlane, FipsDataPlaneCapability, PrivateDataPlane,
-        exit_data_plane_routes_to_wireguard, private_data_plane_routes_to_fips,
-    };
-
-    #[test]
-    fn defaults_use_fips_private_mesh_with_wireguard_exit() {
-        assert_eq!(PrivateDataPlane::default(), PrivateDataPlane::Fips);
-        assert_eq!(ExitDataPlane::default(), ExitDataPlane::WireGuard);
-        assert!(private_data_plane_routes_to_fips(
-            PrivateDataPlane::default()
-        ));
-        assert!(exit_data_plane_routes_to_wireguard(ExitDataPlane::default()));
-    }
-
-    #[test]
-    fn legacy_wireguard_private_data_plane_deserializes_as_fips() {
-        let data_plane: PrivateDataPlane =
-            serde_json::from_str("\"wireguard\"").expect("legacy value should load");
-
-        assert_eq!(data_plane, PrivateDataPlane::Fips);
-        assert_eq!(
-            serde_json::to_string(&data_plane).expect("serialize data plane"),
-            "\"fips\""
-        );
-    }
+    use super::{DataPlaneCapability, FipsDataPlaneCapability};
 
     #[test]
     fn fips_capability_advertises_endpoint_without_app_protocol() {

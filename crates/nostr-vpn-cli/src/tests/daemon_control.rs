@@ -5,7 +5,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::control_daemon_request_for_test;
 use crate::*;
-use nostr_vpn_core::presence::PeerPresenceBook;
 
 #[test]
 fn daemon_runtime_state_requires_advertised_routes() {
@@ -24,8 +23,8 @@ fn daemon_runtime_state_requires_advertised_routes() {
   "tunnel_ip": "10.44.0.239/32",
   "endpoint": "192.168.178.80:51820",
   "public_key": "+fi3YvMFH0JQFNuQPiPy5xBXNKvpaCKIbbbgrlXT5yw=",
-  "presence_timestamp": 1773650779,
-  "last_signal_seen_at": 1773650779,
+  "last_mesh_seen_at": 1773650779,
+  "last_fips_seen_at": 1773650779,
   "reachable": true,
   "last_handshake_at": null,
   "error": null
@@ -225,9 +224,7 @@ fn persist_daemon_runtime_state_marks_vpn_on_as_active() {
     let state_path = dir.join("daemon.state.json");
 
     let mut config = AppConfig::generated();
-    config.private_data_plane = nostr_vpn_core::data_plane::PrivateDataPlane::Fips;
     config.networks[0].participants = vec!["11".repeat(32)];
-    let presence = PeerPresenceBook::default();
     let tunnel_runtime = crate::CliTunnelRuntime::new("utun100");
 
     crate::persist_daemon_runtime_state(
@@ -235,7 +232,6 @@ fn persist_daemon_runtime_state_marks_vpn_on_as_active() {
         &config,
         true,
         1,
-        &presence,
         &tunnel_runtime,
         &[],
         None,
@@ -257,9 +253,7 @@ fn persist_daemon_runtime_state_marks_vpn_on_as_active() {
 #[test]
 fn fips_runtime_state_is_ready_without_waiting_for_every_peer() {
     let mut config = AppConfig::generated();
-    config.private_data_plane = nostr_vpn_core::data_plane::PrivateDataPlane::Fips;
     config.networks[0].participants = vec!["11".repeat(32), "22".repeat(32)];
-    let presence = PeerPresenceBook::default();
     let tunnel_runtime = crate::CliTunnelRuntime::new("utun100");
 
     let state = crate::build_daemon_runtime_state(
@@ -267,7 +261,6 @@ fn fips_runtime_state_is_ready_without_waiting_for_every_peer() {
         true,
         true,
         2,
-        &presence,
         &tunnel_runtime,
         &[],
         None,
@@ -285,15 +278,12 @@ fn fips_runtime_state_is_ready_without_waiting_for_every_peer() {
 #[test]
 fn daemon_runtime_state_marks_peers_unreachable_when_vpn_is_off() {
     let mut config = AppConfig::generated();
-    config.private_data_plane = nostr_vpn_core::data_plane::PrivateDataPlane::Fips;
     let peer_pubkey = "11".repeat(32);
     config.networks[0].participants = vec![peer_pubkey.clone()];
-    let presence = PeerPresenceBook::default();
     let tunnel_runtime = crate::CliTunnelRuntime::new("utun100");
     let peer_status = MeshPeerStatus {
         pubkey: peer_pubkey,
         connected: true,
-        data_plane: nostr_vpn_core::data_plane::PrivateDataPlane::Fips,
         endpoint_npub: "npub1endpoint".to_string(),
         transport_addr: Some("127.0.0.1:9000".to_string()),
         transport_type: Some("loopback".to_string()),
@@ -313,7 +303,6 @@ fn daemon_runtime_state_marks_peers_unreachable_when_vpn_is_off() {
         false,
         false,
         1,
-        &presence,
         &tunnel_runtime,
         &[peer_status],
         None,
@@ -329,89 +318,6 @@ fn daemon_runtime_state_marks_peers_unreachable_when_vpn_is_off() {
     assert_eq!(state.peers.len(), 1);
     assert!(!state.peers[0].reachable);
     assert!(state.peers[0].runtime_endpoint.is_none());
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn persist_daemon_network_cleanup_state_writes_and_clears_macos_state() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock is after epoch")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("nvpn-daemon-cleanup-test-{nonce}"));
-    fs::create_dir_all(&dir).expect("create temp dir");
-    let config_path = dir.join("config.toml");
-    fs::write(&config_path, "").expect("write config placeholder");
-
-    let mut tunnel_runtime = crate::CliTunnelRuntime::new("utun100");
-    tunnel_runtime.endpoint_bypass_routes = vec![
-        crate::MacosEndpointBypassRoute {
-            target: "203.0.113.10/32".to_string(),
-            gateway: Some("192.168.64.1".to_string()),
-            interface: "en0".to_string(),
-        },
-        crate::MacosEndpointBypassRoute {
-            target: "198.51.100.9/32".to_string(),
-            gateway: Some("192.168.64.1".to_string()),
-            interface: "en0".to_string(),
-        },
-    ];
-    tunnel_runtime.original_default_route = Some(crate::MacosRouteSpec {
-        gateway: Some("192.168.64.1".to_string()),
-        interface: "en0".to_string(),
-    });
-    tunnel_runtime.exit_node_runtime.ipv4_forward_was_enabled = Some(false);
-    tunnel_runtime.exit_node_runtime.pf_was_enabled = Some(false);
-
-    persist_daemon_network_cleanup_state(&config_path, &tunnel_runtime)
-        .expect("persist daemon cleanup state");
-
-    let cleanup_path = daemon_network_cleanup_file_path(&config_path);
-    let cleanup = read_daemon_network_cleanup_state(&cleanup_path)
-        .expect("read daemon cleanup state")
-        .expect("cleanup state should exist");
-    assert_eq!(cleanup.iface, "utun100");
-    assert_eq!(
-        cleanup.endpoint_bypass_routes,
-        vec!["198.51.100.9/32".to_string(), "203.0.113.10/32".to_string()]
-    );
-    assert_eq!(
-        cleanup.managed_routes,
-        vec![
-            crate::MacosManagedRoute {
-                target: "0.0.0.0/1".to_string(),
-                gateway: None,
-                interface: Some("utun100".to_string()),
-            },
-            crate::MacosManagedRoute {
-                target: "128.0.0.0/1".to_string(),
-                gateway: None,
-                interface: Some("utun100".to_string()),
-            },
-            crate::MacosManagedRoute {
-                target: "198.51.100.9/32".to_string(),
-                gateway: Some("192.168.64.1".to_string()),
-                interface: Some("en0".to_string()),
-            },
-            crate::MacosManagedRoute {
-                target: "203.0.113.10/32".to_string(),
-                gateway: Some("192.168.64.1".to_string()),
-                interface: Some("en0".to_string()),
-            },
-        ]
-    );
-    assert_eq!(
-        cleanup.original_default_route,
-        tunnel_runtime.original_default_route
-    );
-    assert_eq!(cleanup.ipv4_forward_was_enabled, Some(false));
-    assert_eq!(cleanup.pf_was_enabled, Some(false));
-
-    persist_daemon_network_cleanup_state(&config_path, &crate::CliTunnelRuntime::new("utun100"))
-        .expect("clear daemon cleanup state");
-    assert!(!cleanup_path.exists());
-
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -594,7 +500,6 @@ fn macos_ifconfig_has_ipv4_matches_exact_interface_address() {
 #[test]
 fn daemon_runtime_state_tracks_live_endpoint_and_listen_port() {
     let config = AppConfig::generated();
-    let presence = PeerPresenceBook::default();
     let mut tunnel_runtime = crate::CliTunnelRuntime::new("utun100");
     tunnel_runtime.active_listen_port = Some(53083);
     let public_endpoint = crate::DiscoveredPublicSignalEndpoint {
@@ -606,7 +511,6 @@ fn daemon_runtime_state_tracks_live_endpoint_and_listen_port() {
         true,
         true,
         0,
-        &presence,
         &tunnel_runtime,
         &[],
         Some(&public_endpoint),
@@ -779,7 +683,6 @@ fn daemon_reload_config_uses_reloaded_network_id() {
     );
 
     assert_eq!(reload.network_id, reloaded_network_id);
-    assert_eq!(reload.configured_participants, vec!["22".repeat(32)]);
     assert_eq!(reload.relays, vec!["wss://relay.example.com".to_string()]);
 }
 

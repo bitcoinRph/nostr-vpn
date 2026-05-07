@@ -101,9 +101,9 @@ public sealed class NativeParticipantState
     public ulong FipsBytesSent { get; set; }
     public ulong FipsBytesRecv { get; set; }
     public string State { get; set; } = "";
-    public string PresenceState { get; set; } = "";
+    public string MeshState { get; set; } = "";
     public string StatusText { get; set; } = "";
-    public string LastSignalText { get; set; } = "";
+    public string LastSeenText { get; set; } = "";
 }
 
 public sealed class NativeOutboundJoinRequestState

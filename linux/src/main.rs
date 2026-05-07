@@ -1092,14 +1092,6 @@ fn build_network_hero(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         if state.daemon_running { "ok" } else { "muted" },
     ));
     badges.append(&badge(
-        if state.relay_connected {
-            "Relays"
-        } else {
-            "Relays down"
-        },
-        if state.relay_connected { "ok" } else { "warn" },
-    ));
-    badges.append(&badge(
         if state.mesh_ready {
             "Mesh ready"
         } else {
@@ -2559,7 +2551,7 @@ fn device_status_text(participant: &NativeParticipantState) -> String {
     for value in [
         participant.status_text.as_str(),
         participant.state.as_str(),
-        participant.presence_state.as_str(),
+        participant.mesh_state.as_str(),
     ] {
         if !value.trim().is_empty() {
             return value.to_string();
