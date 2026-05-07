@@ -117,6 +117,10 @@ impl AppModel {
 }
 
 fn main() -> glib::ExitCode {
+    if let Some(exit_code) = run_update_e2e_from_args() {
+        return exit_code;
+    }
+
     bootstrap_session_bus();
 
     let runtime = AppRuntime::default();
@@ -156,6 +160,103 @@ fn main() -> glib::ExitCode {
         });
     }
     app.run()
+}
+
+fn run_update_e2e_from_args() -> Option<glib::ExitCode> {
+    let args = std::env::args().collect::<Vec<_>>();
+    if !args.iter().any(|arg| arg == "--nvpn-e2e-update-check") {
+        return None;
+    }
+
+    let result = run_update_e2e(args.iter().any(|arg| arg == "--nvpn-e2e-install-update"));
+    let output_path = std::env::var("NVPN_UPDATE_E2E_RESULT_PATH").ok();
+    let success = result
+        .as_ref()
+        .map(|value| value["ok"].as_bool().unwrap_or(false))
+        .unwrap_or(false);
+    match (output_path, result) {
+        (Some(path), Ok(value)) => {
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Err(error) = std::fs::write(
+                &path,
+                serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string()),
+            ) {
+                eprintln!("failed to write update e2e result {path}: {error}");
+                return Some(glib::ExitCode::FAILURE);
+            }
+        }
+        (Some(path), Err(error)) => {
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let value = serde_json::json!({
+                "ok": false,
+                "platform": "linux",
+                "error": error,
+            });
+            let _ = std::fs::write(
+                &path,
+                serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string()),
+            );
+        }
+        (None, Ok(value)) => {
+            println!("{value}");
+        }
+        (None, Err(error)) => {
+            eprintln!("{error}");
+        }
+    }
+
+    Some(if success {
+        glib::ExitCode::SUCCESS
+    } else {
+        glib::ExitCode::FAILURE
+    })
+}
+
+fn run_update_e2e(install: bool) -> Result<serde_json::Value, String> {
+    let current_version = std::env::var("NVPN_UPDATE_E2E_CURRENT_VERSION")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    let check = updater::check_blocking(&current_version)?;
+    let mut downloaded_path = None;
+    let mut executable = None;
+    if install {
+        let asset = check
+            .asset
+            .as_ref()
+            .ok_or_else(|| "no Linux update asset selected".to_string())?;
+        let path = updater::download_blocking(asset)?;
+        executable = std::fs::metadata(&path)
+            .ok()
+            .map(|metadata| {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    metadata.permissions().mode() & 0o111 != 0
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = metadata;
+                    false
+                }
+            });
+        downloaded_path = Some(path.display().to_string());
+    }
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "platform": "linux",
+        "available": check.newer,
+        "tag": check.tag,
+        "assetName": check.asset.as_ref().map(|asset| asset.name.clone()),
+        "assetUrl": check.asset.as_ref().map(|asset| asset.url.clone()),
+        "downloadedPath": downloaded_path,
+        "downloadedExecutable": executable,
+    }))
 }
 
 fn build_ui(app: &adw::Application, runtime: &AppRuntime, present: bool) {

@@ -353,6 +353,21 @@ Docker e2e scripts under [`scripts/`](scripts):
   Verifies exit-node advertisement, selection, tunnel traffic to the chosen exit node, and default-route traffic crossing the exit path to an external target. Set `NVPN_EXIT_NODE_E2E_PUBLIC_IP=9.9.9.9` (or another reachable public IP) to also prove a real internet hop routes through the tunnel.
 These flows are Linux-oriented because they require real tunnel devices and container networking privileges.
 
+## Desktop update end-to-end coverage
+
+Desktop updater scripts under [`scripts/`](scripts):
+
+- `./scripts/e2e-update-desktop.sh`
+  Runs the macOS app updater path, Linux GTK updater path in Docker, and Windows WPF updater path in a Parallels VM.
+- `./scripts/e2e-update-macos.sh`
+  Builds the macOS app, checks a local release manifest, downloads a fake `.app.tar.gz`, and verifies the app bundle can be unpacked.
+- `./scripts/e2e-update-linux.sh`
+  Runs the Linux app in the Docker dev image, checks a local release manifest, downloads the selected AppImage, and verifies it is executable.
+- `./scripts/e2e-update-windows-vm.sh`
+  Runs `scripts/e2e-update-windows.ps1` inside the Windows VM, builds the WPF app, checks a local release manifest, and verifies the selected setup executable downloads.
+
+The update E2E scripts set `NVPN_UPDATE_MANIFEST_URL` to a local fixture and suppress opening installers/packages, so they test update selection and download/install preparation without touching production release storage.
+
 ## Workspace layout
 
 - [`Cargo.toml`](Cargo.toml): workspace definition
@@ -361,7 +376,7 @@ These flows are Linux-oriented because they require real tunnel devices and cont
 - [`crates/nostr-vpn-app-core`](crates/nostr-vpn-app-core): native app state/action contract and UniFFI bridge
 - [`macos`](macos), [`linux`](linux), [`windows`](windows), [`android`](android), [`ios`](ios): native platform shells
 - [`crates/nostr-vpn-relay`](crates/nostr-vpn-relay): test relay and reflector binaries
-- [`scripts`](scripts): build, release, and Docker e2e entrypoints
+- [`scripts`](scripts): build, release, Docker e2e, and desktop updater e2e entrypoints
 
 ## Release workflow notes
 

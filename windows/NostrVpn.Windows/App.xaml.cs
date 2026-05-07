@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Reflection;
+using System.Text.Json;
 using NostrVpn.Windows.Services;
 using NostrVpn.Windows.ViewModels;
 
@@ -23,6 +25,12 @@ public partial class App : System.Windows.Application
         }
 
         base.OnStartup(e);
+        if (e.Args.Contains("--nvpn-e2e-update-check", StringComparer.OrdinalIgnoreCase))
+        {
+            _ = RunUpdateE2EAsync(e.Args);
+            return;
+        }
+
         _viewModel = new AppViewModel();
         _window = new MainWindow(_viewModel);
         _tray = new TrayService();
@@ -36,6 +44,72 @@ public partial class App : System.Windows.Application
         {
             ShowMainWindow();
         }
+    }
+
+    private async Task RunUpdateE2EAsync(string[] args)
+    {
+        var resultPath = Environment.GetEnvironmentVariable("NVPN_UPDATE_E2E_RESULT_PATH");
+        var install = args.Contains("--nvpn-e2e-install-update", StringComparer.OrdinalIgnoreCase);
+        var ok = false;
+        object result;
+        try
+        {
+            var service = new UpdateService();
+            var currentVersion = Environment.GetEnvironmentVariable("NVPN_UPDATE_E2E_CURRENT_VERSION");
+            if (string.IsNullOrWhiteSpace(currentVersion))
+            {
+                currentVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+            }
+            var check = await service.CheckAsync(currentVersion);
+            string? downloadedPath = null;
+            long? downloadedBytes = null;
+            if (install)
+            {
+                if (check.AssetUrl is null)
+                {
+                    throw new InvalidOperationException("no Windows update asset selected");
+                }
+                downloadedPath = await service.DownloadAsync(check.AssetUrl);
+                downloadedBytes = new FileInfo(downloadedPath).Length;
+            }
+            ok = true;
+            result = new
+            {
+                ok = true,
+                platform = "windows",
+                available = check.Available,
+                tag = check.Tag,
+                assetName = check.AssetName,
+                assetUrl = check.AssetUrl?.ToString(),
+                downloadedPath,
+                downloadedBytes
+            };
+        }
+        catch (Exception error)
+        {
+            result = new
+            {
+                ok = false,
+                platform = "windows",
+                error = error.Message
+            };
+        }
+
+        var json = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+        if (!string.IsNullOrWhiteSpace(resultPath))
+        {
+            var parent = Path.GetDirectoryName(resultPath);
+            if (!string.IsNullOrWhiteSpace(parent))
+            {
+                Directory.CreateDirectory(parent);
+            }
+            await File.WriteAllTextAsync(resultPath, json);
+        }
+        else
+        {
+            Console.WriteLine(json);
+        }
+        Shutdown(ok ? 0 : 1);
     }
 
     protected override void OnExit(System.Windows.ExitEventArgs e)

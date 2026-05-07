@@ -7,7 +7,7 @@ use std::thread;
 
 use serde::Deserialize;
 
-const MANIFEST_URL: &str = "https://upload.iris.to/npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm/releases/nostr-vpn/latest/release.json";
+const DEFAULT_MANIFEST_URL: &str = "https://upload.iris.to/npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm/releases/nostr-vpn/latest/release.json";
 
 #[derive(Clone, Debug, Default)]
 pub struct UpdateState {
@@ -55,30 +55,44 @@ struct ManifestAsset {
 
 pub fn check(current_version: String, manual: bool, sender: Sender<UpdateEvent>) {
     thread::spawn(move || {
-        let result = fetch_manifest()
-            .and_then(|manifest| {
-                let tag = manifest.tag.clone();
-                Ok(UpdateCheck {
-                    asset: preferred_linux_asset(&manifest),
-                    newer: version_is_newer(&tag, &current_version),
-                    tag,
-                })
-            })
-            .map_err(|error| error.to_string());
+        let result = check_blocking(&current_version).map_err(|error| error.to_string());
         let _ = sender.send(UpdateEvent::Checked { manual, result });
     });
 }
 
 pub fn download(asset: ReleaseAsset, sender: Sender<UpdateEvent>) {
     thread::spawn(move || {
-        let result = download_asset(&asset).map_err(|error| error.to_string());
+        let result = download_blocking(&asset).map_err(|error| error.to_string());
         let _ = sender.send(UpdateEvent::Downloaded(result));
     });
 }
 
-fn fetch_manifest() -> Result<ReleaseManifest, String> {
+pub fn check_blocking(current_version: &str) -> Result<UpdateCheck, String> {
+    let manifest_url = manifest_url();
+    fetch_manifest(&manifest_url).and_then(|manifest| {
+        let tag = manifest.tag.clone();
+        Ok(UpdateCheck {
+            asset: preferred_linux_asset(&manifest, &manifest_url),
+            newer: version_is_newer(&tag, current_version),
+            tag,
+        })
+    })
+}
+
+pub fn download_blocking(asset: &ReleaseAsset) -> Result<PathBuf, String> {
+    download_asset(asset)
+}
+
+fn manifest_url() -> String {
+    std::env::var("NVPN_UPDATE_MANIFEST_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_MANIFEST_URL.to_string())
+}
+
+fn fetch_manifest(manifest_url: &str) -> Result<ReleaseManifest, String> {
     let output = Command::new("curl")
-        .args(["-fsSL", "--max-time", "45", MANIFEST_URL])
+        .args(["-fsSL", "--max-time", "45", manifest_url])
         .output()
         .map_err(|error| format!("Could not run curl: {error}"))?;
     if !output.status.success() {
@@ -88,7 +102,7 @@ fn fetch_manifest() -> Result<ReleaseManifest, String> {
         .map_err(|error| format!("Could not read release manifest: {error}"))
 }
 
-fn preferred_linux_asset(manifest: &ReleaseManifest) -> Option<ReleaseAsset> {
+fn preferred_linux_asset(manifest: &ReleaseManifest, manifest_url: &str) -> Option<ReleaseAsset> {
     preferred_asset_patterns()
         .iter()
         .find_map(|pattern| {
@@ -105,7 +119,7 @@ fn preferred_linux_asset(manifest: &ReleaseManifest) -> Option<ReleaseAsset> {
         })
         .map(|asset| ReleaseAsset {
             name: asset.name.clone(),
-            url: manifest_asset_url(&asset.path),
+            url: manifest_asset_url(manifest_url, &asset.path),
         })
 }
 
@@ -124,21 +138,22 @@ fn preferred_asset_patterns() -> &'static [&'static str] {
     }
 }
 
-fn manifest_asset_url(path: &str) -> String {
+fn manifest_asset_url(manifest_url: &str, path: &str) -> String {
     if path.starts_with("http://") || path.starts_with("https://") {
         return path.to_string();
     }
-    let base = MANIFEST_URL
+    if path.starts_with("file://") {
+        return path.to_string();
+    }
+    let base = manifest_url
         .rsplit_once('/')
         .map(|(base, _)| base)
-        .unwrap_or(MANIFEST_URL);
+        .unwrap_or(manifest_url);
     format!("{}/{}", base, path.trim_start_matches('/'))
 }
 
 fn download_asset(asset: &ReleaseAsset) -> Result<PathBuf, String> {
-    let destination = std::env::temp_dir()
-        .join("NostrVpnDownloads")
-        .join(&asset.name);
+    let destination = update_download_dir().join(&asset.name);
     let parent = destination
         .parent()
         .ok_or_else(|| "Download folder unavailable".to_string())?;
@@ -171,8 +186,18 @@ fn download_asset(asset: &ReleaseAsset) -> Result<PathBuf, String> {
             .map_err(|error| format!("Could not make AppImage executable: {error}"))?;
     }
 
-    let _ = Command::new("xdg-open").arg(&destination).spawn();
+    if std::env::var("NVPN_UPDATE_SKIP_OPEN").ok().as_deref() != Some("1") {
+        let _ = Command::new("xdg-open").arg(&destination).spawn();
+    }
     Ok(destination)
+}
+
+fn update_download_dir() -> PathBuf {
+    std::env::var("NVPN_UPDATE_DOWNLOAD_DIR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("NostrVpnDownloads"))
 }
 
 fn command_error(prefix: &str, output: &std::process::Output) -> String {
@@ -236,7 +261,7 @@ mod tests {
                 },
             ],
         };
-        let asset = preferred_linux_asset(&manifest).expect("asset");
+        let asset = preferred_linux_asset(&manifest, DEFAULT_MANIFEST_URL).expect("asset");
         assert_eq!(asset.name, preferred_test_asset_name());
         assert!(asset.url.ends_with("/assets/app"));
     }

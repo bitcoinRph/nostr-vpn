@@ -427,7 +427,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             UpdateAvailable = result.Available;
             UpdateVersion = result.Tag;
             UpdateStatus = result.Message;
-            if (result.Available && result.AssetUrl is not null)
+            if (result.Available && result.AssetUrl is not null && !UpdateService.SkipOpen)
             {
                 _ = Process.Start(new ProcessStartInfo(result.AssetUrl.ToString()) { UseShellExecute = true });
             }

@@ -3,10 +3,15 @@ import SwiftUI
 
 @main
 struct NostrVpnMacApp: App {
-    @StateObject private var manager = AppManager()
+    @StateObject private var manager: AppManager
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openWindow) private var openWindow
+
+    init() {
+        runUpdateE2ECommandIfRequested()
+        _manager = StateObject(wrappedValue: AppManager())
+    }
 
     var body: some Scene {
         WindowGroup("Nostr VPN", id: "main") {

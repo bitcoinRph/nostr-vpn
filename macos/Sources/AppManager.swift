@@ -5,6 +5,8 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+private let defaultUpdateManifestUrl = URL(string: "https://upload.iris.to/npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm/releases/nostr-vpn/latest/release.json")!
+
 @MainActor
 final class AppManager: ObservableObject {
     @Published private(set) var state: NativeAppState
@@ -39,7 +41,9 @@ final class AppManager: ObservableObject {
     private var startupUrlsDrained = false
     private var startupUpdateCheckDone = false
     private var updateAssetUrl: URL?
-    private let updateManifestUrl = URL(string: "https://upload.iris.to/npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm/releases/nostr-vpn/latest/release.json")!
+    private let updateManifestUrl = ProcessInfo.processInfo.environment["NVPN_UPDATE_MANIFEST_URL"]
+        .flatMap(URL.init(string:))
+        ?? defaultUpdateManifestUrl
     let launchedHidden: Bool
 
     init() {
@@ -411,28 +415,9 @@ final class AppManager: ObservableObject {
                 return
             }
             do {
-                let manifestUrl = await MainActor.run { self.updateManifestUrl }
-                let (data, _) = try await URLSession.shared.data(from: manifestUrl)
-                let manifest = try JSONDecoder().decode(ReleaseManifest.self, from: data)
-                let currentVersion = await MainActor.run { self.state.appVersion }
-                let asset = manifest.preferredMacAsset()
-                let assetUrl = asset.flatMap { URL(string: $0.path, relativeTo: manifestUrl)?.absoluteURL }
-                let isNewer = versionIsNewer(manifest.tag, than: currentVersion)
+                let check = try await self.fetchUpdateCheck()
                 await MainActor.run {
-                    self.updateChecking = false
-                    self.updateAvailable = isNewer
-                    self.updateVersion = manifest.tag
-                    self.updateAssetUrl = isNewer ? assetUrl : nil
-                    if isNewer {
-                        self.updateStatus = assetUrl == nil ? "Update \(manifest.tag) found without a macOS asset" : "Update \(manifest.tag) available"
-                        if self.autoInstallUpdates, assetUrl != nil {
-                            self.installUpdate()
-                        }
-                    } else if manual {
-                        self.updateStatus = "Up to date"
-                    } else {
-                        self.updateStatus = ""
-                    }
+                    self.applyUpdateCheck(check, manual: manual)
                 }
             } catch {
                 await MainActor.run {
@@ -460,8 +445,7 @@ final class AppManager: ObservableObject {
                 return
             }
             do {
-                let (downloadedUrl, _) = try await URLSession.shared.download(from: updateAssetUrl)
-                let savedUrl = try moveDownloadedUpdate(downloadedUrl, from: updateAssetUrl)
+                let savedUrl = try await self.downloadUpdateAsset(from: updateAssetUrl)
                 try await MainActor.run {
                     try self.installDownloadedUpdate(savedUrl)
                 }
@@ -472,6 +456,51 @@ final class AppManager: ObservableObject {
                 }
             }
         }
+    }
+
+    private func fetchUpdateCheck() async throws -> UpdateCheck {
+        let manifestUrl = await MainActor.run { self.updateManifestUrl }
+        let data = try await loadUpdateData(from: manifestUrl)
+        let manifest = try JSONDecoder().decode(ReleaseManifest.self, from: data)
+        let currentVersion = await MainActor.run { self.state.appVersion }
+        let asset = manifest.preferredMacAsset()
+        let assetUrl = asset.flatMap { URL(string: $0.path, relativeTo: manifestUrl)?.absoluteURL }
+        return UpdateCheck(
+            manifest: manifest,
+            asset: asset,
+            assetUrl: assetUrl,
+            isNewer: versionIsNewer(manifest.tag, than: currentVersion)
+        )
+    }
+
+    @MainActor
+    private func applyUpdateCheck(_ check: UpdateCheck, manual: Bool, allowAutoInstall: Bool = true) {
+        updateChecking = false
+        updateAvailable = check.isNewer
+        updateVersion = check.manifest.tag
+        updateAssetUrl = check.isNewer ? check.assetUrl : nil
+        if check.isNewer {
+            updateStatus = check.assetUrl == nil ? "Update \(check.manifest.tag) found without a macOS asset" : "Update \(check.manifest.tag) available"
+            if allowAutoInstall, autoInstallUpdates, check.assetUrl != nil {
+                installUpdate()
+            }
+        } else if manual {
+            updateStatus = "Up to date"
+        } else {
+            updateStatus = ""
+        }
+    }
+
+    private func downloadUpdateAsset(from assetUrl: URL) async throws -> URL {
+        let downloadedUrl: URL
+        if assetUrl.isFileURL {
+            downloadedUrl = FileManager.default.temporaryDirectory
+                .appendingPathComponent("nostr-vpn-update-download-\(UUID().uuidString)")
+            try FileManager.default.copyItem(at: assetUrl, to: downloadedUrl)
+        } else {
+            (downloadedUrl, _) = try await URLSession.shared.download(from: assetUrl)
+        }
+        return try moveDownloadedUpdate(downloadedUrl, from: assetUrl)
     }
 
     private func decodeQrCode(from url: URL) throws -> String {
@@ -623,6 +652,13 @@ struct ReleaseAsset: Decodable {
     let path: String
 }
 
+struct UpdateCheck {
+    let manifest: ReleaseManifest
+    let asset: ReleaseAsset?
+    let assetUrl: URL?
+    let isNewer: Bool
+}
+
 enum CopyValue {
     case pubkey
     case meshId
@@ -663,6 +699,118 @@ enum UpdateError: LocalizedError {
         case .missingAppBundle:
             return "Downloaded update did not contain Nostr VPN.app."
         }
+    }
+}
+
+enum UpdateE2EError: LocalizedError {
+    case noAsset
+
+    var errorDescription: String? {
+        switch self {
+        case .noAsset:
+            return "No macOS update asset was selected."
+        }
+    }
+}
+
+func runUpdateE2ECommandIfRequested() {
+    let arguments = Set(CommandLine.arguments)
+    guard arguments.contains("--nvpn-e2e-update-check") else {
+        return
+    }
+
+    let result = runUpdateE2ECommand(install: arguments.contains("--nvpn-e2e-install-update"))
+    writeUpdateE2EResult(result)
+    exit((result["ok"] as? Bool) == true ? EXIT_SUCCESS : EXIT_FAILURE)
+}
+
+private func runUpdateE2ECommand(install: Bool) -> [String: Any] {
+    do {
+        let manifestUrl = configuredUpdateManifestUrl()
+        let data = try loadUpdateDataBlocking(from: manifestUrl)
+        let manifest = try JSONDecoder().decode(ReleaseManifest.self, from: data)
+        let currentVersion = ProcessInfo.processInfo.environment["NVPN_UPDATE_E2E_CURRENT_VERSION"]
+            ?? Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+            ?? ""
+        let asset = manifest.preferredMacAsset()
+        let assetUrl = asset.flatMap { URL(string: $0.path, relativeTo: manifestUrl)?.absoluteURL }
+        let isNewer = versionIsNewer(manifest.tag, than: currentVersion)
+        var downloadedPath: String?
+        var preparedAppPath: String?
+
+        if install {
+            guard let assetUrl else {
+                throw UpdateE2EError.noAsset
+            }
+            let savedUrl = try downloadUpdateAssetBlocking(from: assetUrl)
+            downloadedPath = savedUrl.path
+            preparedAppPath = try prepareDownloadedUpdateForE2E(savedUrl)?.path
+        }
+
+        return [
+            "ok": true,
+            "platform": "macos",
+            "available": isNewer,
+            "tag": manifest.tag,
+            "assetName": asset?.name ?? NSNull(),
+            "assetUrl": assetUrl?.absoluteString ?? NSNull(),
+            "downloadedPath": downloadedPath ?? NSNull(),
+            "preparedAppPath": preparedAppPath ?? NSNull()
+        ]
+    } catch {
+        return [
+            "ok": false,
+            "platform": "macos",
+            "error": error.localizedDescription
+        ]
+    }
+}
+
+private func configuredUpdateManifestUrl() -> URL {
+    ProcessInfo.processInfo.environment["NVPN_UPDATE_MANIFEST_URL"]
+        .flatMap(URL.init(string:))
+        ?? defaultUpdateManifestUrl
+}
+
+private func loadUpdateDataBlocking(from url: URL) throws -> Data {
+    try Data(contentsOf: url)
+}
+
+private func downloadUpdateAssetBlocking(from assetUrl: URL) throws -> URL {
+    let downloadedUrl = FileManager.default.temporaryDirectory
+        .appendingPathComponent("nostr-vpn-update-download-\(UUID().uuidString)")
+    if assetUrl.isFileURL {
+        try FileManager.default.copyItem(at: assetUrl, to: downloadedUrl)
+    } else {
+        let data = try Data(contentsOf: assetUrl)
+        try data.write(to: downloadedUrl)
+    }
+    return try moveDownloadedUpdate(downloadedUrl, from: assetUrl)
+}
+
+private func prepareDownloadedUpdateForE2E(_ archiveUrl: URL) throws -> URL? {
+    guard archiveUrl.lastPathComponent.hasSuffix(".app.tar.gz") else {
+        return nil
+    }
+    let unpackDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("NostrVpnUpdateE2E-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: unpackDir, withIntermediateDirectories: true)
+    try runProcess("/usr/bin/tar", arguments: ["-xzf", archiveUrl.path, "-C", unpackDir.path])
+    guard let appBundle = findAppBundle(in: unpackDir) else {
+        throw UpdateError.missingAppBundle
+    }
+    return appBundle
+}
+
+private func writeUpdateE2EResult(_ result: [String: Any]) {
+    let data = (try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]))
+        ?? Data("{}".utf8)
+    if let path = ProcessInfo.processInfo.environment["NVPN_UPDATE_E2E_RESULT_PATH"], !path.isEmpty {
+        let url = URL(fileURLWithPath: path)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url)
+    } else if let text = String(data: data, encoding: .utf8) {
+        print(text)
     }
 }
 
@@ -726,6 +874,14 @@ private func moveDownloadedUpdate(_ downloadedUrl: URL, from assetUrl: URL) thro
     }
     try FileManager.default.moveItem(at: downloadedUrl, to: destination)
     return destination
+}
+
+private func loadUpdateData(from url: URL) async throws -> Data {
+    if url.isFileURL {
+        return try Data(contentsOf: url)
+    }
+    let (data, _) = try await URLSession.shared.data(from: url)
+    return data
 }
 
 private func versionIsNewer(_ candidate: String, than current: String) -> Bool {
