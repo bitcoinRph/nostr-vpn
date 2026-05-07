@@ -91,6 +91,14 @@ public sealed class NativeParticipantState
     public ulong RxBytes { get; set; }
     public List<string> AdvertisedRoutes { get; set; } = [];
     public bool OffersExitNode { get; set; }
+    public string FipsEndpointNpub { get; set; } = "";
+    public string FipsTransportAddr { get; set; } = "";
+    public string FipsTransportType { get; set; } = "";
+    public ulong FipsSrttMs { get; set; }
+    public ulong FipsPacketsSent { get; set; }
+    public ulong FipsPacketsRecv { get; set; }
+    public ulong FipsBytesSent { get; set; }
+    public ulong FipsBytesRecv { get; set; }
     public string State { get; set; } = "";
     public string PresenceState { get; set; } = "";
     public string StatusText { get; set; } = "";

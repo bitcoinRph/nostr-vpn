@@ -2,8 +2,8 @@
 
 use anyhow::{Context, Result, anyhow};
 use fips_endpoint::{
-    Config, ConnectPolicy, FipsEndpoint, FipsEndpointError, NostrDiscoveryPolicy, PeerAddress,
-    PeerConfig as FipsPeerConfig, TransportInstances, UdpConfig,
+    Config, ConnectPolicy, FipsEndpoint, FipsEndpointError, FipsEndpointPeer, NostrDiscoveryPolicy,
+    PeerAddress, PeerConfig as FipsPeerConfig, TransportInstances, UdpConfig,
 };
 use nostr_sdk::prelude::{PublicKey, ToBech32};
 use nostr_vpn_core::config::{
@@ -20,11 +20,15 @@ use std::collections::HashMap;
 #[cfg(target_os = "linux")]
 use std::net::Ipv4Addr;
 use std::net::{SocketAddr, SocketAddrV4};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use std::sync::Arc;
 use std::sync::RwLock;
+#[cfg(target_os = "windows")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "windows")]
+use std::thread::{self, JoinHandle as ThreadJoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use tokio::sync::mpsc;
 
 const FIPS_PEER_ONLINE_GRACE_SECS: u64 = 45;
@@ -32,15 +36,20 @@ const FIPS_NOSTR_DISCOVERY_APP: &str = "fips-overlay-v1";
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use boringtun::device::{Error as TunError, tun::TunSocket};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "windows")]
+use nostr_vpn_wintun::load_wintun;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use tokio::task::JoinHandle;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use tokio::time::{Duration, sleep};
+#[cfg(target_os = "windows")]
+use wintun::{Adapter, MAX_RING_CAPACITY, Session};
 
 pub(crate) struct FipsPrivateMeshRuntime {
     endpoint: FipsEndpoint,
     mesh: RwLock<FipsMeshRuntime>,
     presence: RwLock<HashMap<String, FipsPeerPresence>>,
+    link_status: RwLock<HashMap<String, FipsEndpointPeer>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -112,6 +121,7 @@ impl FipsPrivateMeshRuntime {
             endpoint,
             mesh: RwLock::new(FipsMeshRuntime::with_local_routes(peers, local_allowed_ips)),
             presence: RwLock::new(HashMap::new()),
+            link_status: RwLock::new(HashMap::new()),
         })
     }
 
@@ -231,6 +241,7 @@ impl FipsPrivateMeshRuntime {
     pub(crate) fn peer_statuses(&self) -> Vec<MeshPeerStatus> {
         let now = unix_timestamp();
         let presence = self.presence.read().ok();
+        let link_status = self.link_status.read().ok();
         let mut statuses = self
             .mesh
             .read()
@@ -240,12 +251,27 @@ impl FipsPrivateMeshRuntime {
             let peer_presence = presence
                 .as_ref()
                 .and_then(|presence| presence.get(&status.pubkey));
+            let peer_link = link_status
+                .as_ref()
+                .and_then(|link_status| link_status.get(&status.pubkey));
             status.last_seen_at = peer_presence.and_then(|value| value.last_seen_at);
             status.tx_bytes = peer_presence.map(|value| value.tx_bytes).unwrap_or(0);
             status.rx_bytes = peer_presence.map(|value| value.rx_bytes).unwrap_or(0);
-            status.connected = status.last_seen_at.is_some_and(|last_seen_at| {
+            let presence_connected = status.last_seen_at.is_some_and(|last_seen_at| {
                 now.saturating_sub(last_seen_at) <= FIPS_PEER_ONLINE_GRACE_SECS
             });
+            if let Some(peer_link) = peer_link {
+                status.endpoint_npub = peer_link.npub.clone();
+                status.transport_addr = peer_link.transport_addr.clone();
+                status.transport_type = peer_link.transport_type.clone();
+                status.srtt_ms = peer_link.srtt_ms;
+                status.link_packets_sent = peer_link.packets_sent;
+                status.link_packets_recv = peer_link.packets_recv;
+                status.link_bytes_sent = peer_link.bytes_sent;
+                status.link_bytes_recv = peer_link.bytes_recv;
+            }
+            let link_connected = status.transport_addr.is_some() || status.srtt_ms.is_some();
+            status.connected = presence_connected || link_connected;
             status.error = if status.connected {
                 None
             } else {
@@ -255,6 +281,29 @@ impl FipsPrivateMeshRuntime {
             };
         }
         statuses
+    }
+
+    pub(crate) async fn refresh_link_statuses(&self) -> Result<()> {
+        let endpoint_peers = self
+            .endpoint
+            .peers()
+            .await
+            .context("failed to snapshot FIPS endpoint peers")?;
+        let mesh = self
+            .mesh
+            .read()
+            .map_err(|_| anyhow!("FIPS mesh route table lock poisoned"))?;
+        let mut link_status = HashMap::new();
+        for peer in endpoint_peers {
+            if let Some(participant) = mesh.participant_for_endpoint_npub(&peer.npub) {
+                link_status.insert(participant, peer);
+            }
+        }
+        *self
+            .link_status
+            .write()
+            .map_err(|_| anyhow!("FIPS mesh link status lock poisoned"))? = link_status;
+        Ok(())
     }
 
     pub(crate) fn peer_pubkeys(&self) -> Vec<String> {
@@ -298,6 +347,10 @@ impl FipsPrivateMeshRuntime {
         self.presence
             .write()
             .map_err(|_| anyhow!("FIPS mesh presence lock poisoned"))?
+            .retain(|participant, _| configured.iter().any(|value| value == participant));
+        self.link_status
+            .write()
+            .map_err(|_| anyhow!("FIPS mesh link status lock poisoned"))?
             .retain(|participant, _| configured.iter().any(|value| value == participant));
         Ok(())
     }
@@ -823,6 +876,10 @@ impl FipsPrivateTunnelRuntime {
 
     pub(crate) async fn ping_peers(&self, network_id: &str, now: u64) -> Result<usize> {
         self.mesh.ping_peers(network_id, now).await
+    }
+
+    pub(crate) async fn refresh_link_statuses(&self) -> Result<()> {
+        self.mesh.refresh_link_statuses().await
     }
 
     pub(crate) async fn send_join_request(
@@ -1353,10 +1410,291 @@ fn temporary_tun_read_error(error: &TunError) -> bool {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(target_os = "windows")]
+pub(crate) struct FipsPrivateTunnelRuntime {
+    iface: String,
+    mesh: Arc<FipsPrivateMeshRuntime>,
+    config: FipsPrivateTunnelConfig,
+    session: Arc<Session>,
+    stop: Arc<AtomicBool>,
+    tun_read_thread: ThreadJoinHandle<()>,
+    mesh_send_task: JoinHandle<()>,
+    mesh_recv_task: JoinHandle<()>,
+    event_rx: mpsc::Receiver<FipsPrivateMeshEvent>,
+    interface_index: u32,
+    route_targets: Vec<String>,
+}
+
+#[cfg(target_os = "windows")]
+impl FipsPrivateTunnelRuntime {
+    pub(crate) async fn start(config: FipsPrivateTunnelConfig) -> Result<Self> {
+        let scope = format!("nostr-vpn:{}", config.network_id.trim());
+        let transport = FipsEndpointTransportConfig {
+            listen_port: config.listen_port,
+            advertised_endpoint: config.advertised_endpoint.clone(),
+            advertise_endpoint: config.advertise_endpoint,
+            stun_servers: config.stun_servers.clone(),
+        };
+        let endpoint_config = fips_endpoint_config(
+            &scope,
+            &config.relays,
+            &config.endpoint_peers,
+            Some(&transport),
+        );
+        let mesh = Arc::new(
+            FipsPrivateMeshRuntime::bind_with_config(
+                config.identity_nsec.clone(),
+                scope,
+                config.peers.clone(),
+                endpoint_config,
+                config.local_allowed_ips(),
+            )
+            .await?,
+        );
+        let (session, iface, interface_index) = start_windows_fips_wintun(&config)?;
+        let route_targets =
+            crate::windows_tunnel::apply_windows_routes(interface_index, &config.route_targets)?;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let (packet_tx, mut packet_rx) = mpsc::channel::<Vec<u8>>(1024);
+        let (event_tx, event_rx) = mpsc::channel::<FipsPrivateMeshEvent>(1024);
+        let tun_read_thread =
+            spawn_windows_fips_tun_read_thread(stop.clone(), session.clone(), packet_tx);
+        let mesh_send_task = {
+            let mesh = Arc::clone(&mesh);
+            tokio::spawn(async move {
+                while let Some(packet) = packet_rx.recv().await {
+                    if let Err(error) = mesh.send_tunnel_packet(&packet).await {
+                        eprintln!("fips: failed to send Windows tunnel packet: {error}");
+                    }
+                }
+            })
+        };
+        let mesh_recv_task =
+            spawn_windows_fips_mesh_recv_task(Arc::clone(&mesh), session.clone(), event_tx);
+
+        Ok(Self {
+            iface,
+            mesh,
+            config,
+            session,
+            stop,
+            tun_read_thread,
+            mesh_send_task,
+            mesh_recv_task,
+            event_rx,
+            interface_index,
+            route_targets,
+        })
+    }
+
+    pub(crate) fn iface(&self) -> &str {
+        &self.iface
+    }
+
+    pub(crate) fn peer_statuses(&self) -> Vec<MeshPeerStatus> {
+        self.mesh.peer_statuses()
+    }
+
+    pub(crate) fn peer_pubkeys(&self) -> Vec<String> {
+        self.mesh.peer_pubkeys()
+    }
+
+    pub(crate) fn requires_endpoint_restart(&self, config: &FipsPrivateTunnelConfig) -> bool {
+        self.config.identity_nsec != config.identity_nsec
+            || self.config.network_id != config.network_id
+            || self.config.relays != config.relays
+            || self.config.iface != config.iface
+            || self.config.local_address != config.local_address
+            || self.config.listen_port != config.listen_port
+            || self.config.advertised_endpoint != config.advertised_endpoint
+            || self.config.advertise_endpoint != config.advertise_endpoint
+            || self.config.stun_servers != config.stun_servers
+            || self.config.endpoint_peers != config.endpoint_peers
+    }
+
+    pub(crate) async fn apply_config(&mut self, config: FipsPrivateTunnelConfig) -> Result<()> {
+        self.mesh
+            .replace_peers(config.peers.clone(), config.local_allowed_ips())?;
+        if self.config.route_targets != config.route_targets {
+            crate::windows_tunnel::remove_windows_routes(self.interface_index, &self.route_targets)
+                .context("failed to remove stale Windows FIPS routes")?;
+            self.route_targets = crate::windows_tunnel::apply_windows_routes(
+                self.interface_index,
+                &config.route_targets,
+            )
+            .context("failed to apply Windows FIPS routes")?;
+        }
+        self.config = config;
+        Ok(())
+    }
+
+    pub(crate) async fn refresh_peer_dependent_routes(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    pub(crate) async fn ping_peers(&self, network_id: &str, now: u64) -> Result<usize> {
+        self.mesh.ping_peers(network_id, now).await
+    }
+
+    pub(crate) async fn refresh_link_statuses(&self) -> Result<()> {
+        self.mesh.refresh_link_statuses().await
+    }
+
+    pub(crate) async fn send_join_request(
+        &self,
+        participant: &str,
+        requested_at: u64,
+        request: MeshJoinRequest,
+    ) -> Result<()> {
+        self.mesh
+            .send_join_request(participant, requested_at, request)
+            .await
+    }
+
+    pub(crate) async fn send_roster(
+        &self,
+        participant: &str,
+        network_id: &str,
+        roster: NetworkRoster,
+    ) -> Result<()> {
+        self.mesh.send_roster(participant, network_id, roster).await
+    }
+
+    pub(crate) fn drain_events(&mut self) -> Vec<FipsPrivateMeshEvent> {
+        let mut events = Vec::new();
+        while let Ok(event) = self.event_rx.try_recv() {
+            events.push(event);
+        }
+        events
+    }
+
+    pub(crate) async fn stop(self) -> Result<()> {
+        let runtime = self;
+        runtime.stop.store(true, Ordering::Relaxed);
+        let _ = runtime.session.shutdown();
+        if let Err(error) = crate::windows_tunnel::remove_windows_routes(
+            runtime.interface_index,
+            &runtime.route_targets,
+        ) {
+            eprintln!("fips: failed to remove Windows FIPS routes: {error}");
+        }
+        let _ = runtime.tun_read_thread.join();
+        runtime.mesh_send_task.abort();
+        runtime.mesh_recv_task.abort();
+        let _ = runtime.mesh_send_task.await;
+        let _ = runtime.mesh_recv_task.await;
+        if let Ok(mesh) = Arc::try_unwrap(runtime.mesh) {
+            mesh.shutdown()
+                .await
+                .context("failed to stop FIPS endpoint")?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn start_windows_fips_wintun(
+    config: &FipsPrivateTunnelConfig,
+) -> Result<(Arc<Session>, String, u32)> {
+    let wintun = load_wintun()?;
+    let adapter = Adapter::open(&wintun, &config.iface)
+        .or_else(|_| Adapter::create(&wintun, &config.iface, "NostrVPN", None))
+        .with_context(|| format!("failed to open or create wintun adapter {}", config.iface))?;
+    let mtu = crate::platform_routing::FIPS_TUNNEL_MTU
+        .parse::<usize>()
+        .context("invalid FIPS tunnel MTU")?;
+    adapter
+        .set_mtu(mtu)
+        .with_context(|| format!("failed to set MTU on wintun adapter {}", config.iface))?;
+    let parsed_address = crate::windows_tunnel::windows_interface_address(&config.local_address)?;
+    adapter
+        .set_network_addresses_tuple(
+            parsed_address.address.into(),
+            parsed_address.mask.into(),
+            None,
+        )
+        .with_context(|| format!("failed to set address on wintun adapter {}", config.iface))?;
+    let interface_index = adapter
+        .get_adapter_index()
+        .with_context(|| format!("failed to resolve interface index for {}", config.iface))?;
+    let session = Arc::new(
+        adapter
+            .start_session(MAX_RING_CAPACITY)
+            .with_context(|| format!("failed to start wintun session for {}", config.iface))?,
+    );
+    Ok((session, config.iface.clone(), interface_index))
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_windows_fips_tun_read_thread(
+    stop: Arc<AtomicBool>,
+    session: Arc<Session>,
+    packet_tx: mpsc::Sender<Vec<u8>>,
+) -> ThreadJoinHandle<()> {
+    thread::spawn(move || {
+        while !stop.load(Ordering::Relaxed) {
+            let packet = match session.receive_blocking() {
+                Ok(packet) => packet,
+                Err(error) => {
+                    if !stop.load(Ordering::Relaxed) {
+                        eprintln!("fips: Windows Wintun receive failed: {error}");
+                    }
+                    break;
+                }
+            };
+            let payload = packet.bytes().to_vec();
+            drop(packet);
+            if packet_tx.blocking_send(payload).is_err() {
+                break;
+            }
+        }
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_windows_fips_mesh_recv_task(
+    mesh: Arc<FipsPrivateMeshRuntime>,
+    session: Arc<Session>,
+    event_tx: mpsc::Sender<FipsPrivateMeshEvent>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            match mesh.recv_mesh_event().await {
+                Ok(Some(FipsPrivateMeshEvent::Packet(packet))) => {
+                    let bytes = packet.bytes.clone();
+                    if let Err(error) =
+                        crate::windows_tunnel::write_tunnel_packets(&session, &[bytes])
+                    {
+                        eprintln!("fips: failed to write Windows tunnel packet: {error}");
+                    }
+                    if event_tx
+                        .send(FipsPrivateMeshEvent::Packet(packet))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(Some(event)) => {
+                    if event_tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    eprintln!("fips: failed to receive tunnel packet: {error}");
+                    sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+    })
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub(crate) struct FipsPrivateTunnelRuntime;
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 impl FipsPrivateTunnelRuntime {
     pub(crate) async fn start(_config: FipsPrivateTunnelConfig) -> Result<Self> {
         Err(anyhow!(
@@ -1376,6 +1714,10 @@ impl FipsPrivateTunnelRuntime {
         Vec::new()
     }
 
+    pub(crate) fn requires_endpoint_restart(&self, _config: &FipsPrivateTunnelConfig) -> bool {
+        false
+    }
+
     pub(crate) async fn apply_config(&self, _config: FipsPrivateTunnelConfig) -> Result<()> {
         Ok(())
     }
@@ -1386,6 +1728,10 @@ impl FipsPrivateTunnelRuntime {
 
     pub(crate) async fn ping_peers(&self, _network_id: &str, _now: u64) -> Result<usize> {
         Ok(0)
+    }
+
+    pub(crate) async fn refresh_link_statuses(&self) -> Result<()> {
+        Ok(())
     }
 
     pub(crate) async fn send_join_request(

@@ -1034,6 +1034,20 @@ impl NativeAppRuntime {
             rx_bytes: daemon_peer.map_or(0, |peer| peer.rx_bytes),
             advertised_routes,
             offers_exit_node,
+            fips_endpoint_npub: daemon_peer
+                .map(|peer| peer.fips_endpoint_npub.clone())
+                .unwrap_or_default(),
+            fips_transport_addr: daemon_peer
+                .map(|peer| peer.fips_transport_addr.clone())
+                .unwrap_or_default(),
+            fips_transport_type: daemon_peer
+                .map(|peer| peer.fips_transport_type.clone())
+                .unwrap_or_default(),
+            fips_srtt_ms: daemon_peer.and_then(|peer| peer.fips_srtt_ms).unwrap_or(0),
+            fips_packets_sent: daemon_peer.map_or(0, |peer| peer.fips_packets_sent),
+            fips_packets_recv: daemon_peer.map_or(0, |peer| peer.fips_packets_recv),
+            fips_bytes_sent: daemon_peer.map_or(0, |peer| peer.fips_bytes_sent),
+            fips_bytes_recv: daemon_peer.map_or(0, |peer| peer.fips_bytes_recv),
             state: peer_state.clone(),
             presence_state,
             status_text: Self::peer_status_text(daemon_peer, is_local, &peer_state),
@@ -1208,13 +1222,23 @@ impl NativeAppRuntime {
             return "local".to_string();
         }
         match state {
-            "online" => peer.and_then(|peer| peer.last_handshake_at).map_or_else(
+            "online" => peer.map_or_else(
                 || "online".to_string(),
-                |seen| format!("online (seen {})", compact_age_text(age_secs_since(seen))),
+                |peer| {
+                    if let Some(link) = peer_link_text(peer) {
+                        format!("online via {link}")
+                    } else if let Some(seen) = peer.last_handshake_at {
+                        format!("online (seen {})", compact_age_text(age_secs_since(seen)))
+                    } else {
+                        "online".to_string()
+                    }
+                },
             ),
             "pending" => peer
                 .and_then(|peer| {
-                    non_empty(peer.runtime_endpoint.as_deref().unwrap_or(&peer.endpoint))
+                    peer_link_text(peer).or_else(|| {
+                        non_empty(peer.runtime_endpoint.as_deref().unwrap_or(&peer.endpoint))
+                    })
                 })
                 .map_or_else(
                     || "fips presence pending".to_string(),
@@ -1484,6 +1508,16 @@ fn shorten_middle(value: &str, prefix: usize, suffix: usize) -> String {
         .skip(chars.len().saturating_sub(suffix))
         .collect::<String>();
     format!("{start}...{end}")
+}
+
+fn peer_link_text(peer: &DaemonPeerState) -> Option<String> {
+    let addr = non_empty(&peer.fips_transport_addr)?;
+    let transport = non_empty(&peer.fips_transport_type).unwrap_or_else(|| "fips".to_string());
+    let mut text = format!("{transport} {}", shorten_middle(&addr, 22, 10));
+    if let Some(srtt_ms) = peer.fips_srtt_ms {
+        text.push_str(&format!(" ({srtt_ms} ms)"));
+    }
+    Some(text)
 }
 
 fn native_config_path(data_dir: &str) -> PathBuf {

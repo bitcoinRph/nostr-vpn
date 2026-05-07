@@ -274,6 +274,9 @@ pub(crate) async fn connect_session(args: ConnectArgs) -> Result<()> {
                     if let Err(error) = runtime.ping_peers(&network_id, now).await {
                         eprintln!("fips: peer ping failed: {error}");
                     }
+                    if let Err(error) = runtime.refresh_link_statuses().await {
+                        eprintln!("fips: peer link snapshot failed: {error}");
+                    }
                     let _ = runtime.drain_events();
                     if let Err(error) = runtime.refresh_peer_dependent_routes().await {
                         eprintln!("fips: peer route refresh failed: {error}");
@@ -1121,6 +1124,9 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                         if let Err(error) = runtime.ping_peers(&network_id, now).await {
                             eprintln!("fips: peer ping failed: {error}");
                         }
+                        if let Err(error) = runtime.refresh_link_statuses().await {
+                            eprintln!("fips: peer link snapshot failed: {error}");
+                        }
                         if let Err(error) = send_pending_fips_join_requests(
                             runtime,
                             &app,
@@ -1141,6 +1147,9 @@ pub(crate) async fn daemon_session(args: DaemonArgs) -> Result<()> {
                         let now = unix_timestamp();
                         if let Err(error) = runtime.ping_peers(&network_id, now).await {
                             eprintln!("fips: peer ping failed: {error}");
+                        }
+                        if let Err(error) = runtime.refresh_link_statuses().await {
+                            eprintln!("fips: peer link snapshot failed: {error}");
                         }
                         if let Err(error) = send_pending_fips_join_requests(
                             runtime,
@@ -2410,13 +2419,28 @@ pub(crate) fn build_daemon_runtime_state(
             let status = fips_status_by_pubkey.get(participant.as_str()).copied();
             let last_seen_at = status.and_then(|status| status.last_seen_at);
             let reachable = status.is_some_and(|status| status.connected);
+            let fips_transport_addr = status.and_then(|status| status.transport_addr.clone());
             let tunnel_ip = derive_mesh_tunnel_ip(&network_id, participant).unwrap_or_default();
             peers.push(DaemonPeerState {
                 participant_pubkey: participant.clone(),
                 node_id: String::new(),
                 tunnel_ip,
                 endpoint: "fips".to_string(),
-                runtime_endpoint: reachable.then(|| "fips".to_string()),
+                runtime_endpoint: fips_transport_addr
+                    .clone()
+                    .or_else(|| reachable.then(|| "fips".to_string())),
+                fips_endpoint_npub: status
+                    .map(|status| status.endpoint_npub.clone())
+                    .unwrap_or_default(),
+                fips_transport_addr: fips_transport_addr.unwrap_or_default(),
+                fips_transport_type: status
+                    .and_then(|status| status.transport_type.clone())
+                    .unwrap_or_default(),
+                fips_srtt_ms: status.and_then(|status| status.srtt_ms),
+                fips_packets_sent: status.map(|status| status.link_packets_sent).unwrap_or(0),
+                fips_packets_recv: status.map(|status| status.link_packets_recv).unwrap_or(0),
+                fips_bytes_sent: status.map(|status| status.link_bytes_sent).unwrap_or(0),
+                fips_bytes_recv: status.map(|status| status.link_bytes_recv).unwrap_or(0),
                 tx_bytes: status.map(|status| status.tx_bytes).unwrap_or(0),
                 rx_bytes: status.map(|status| status.rx_bytes).unwrap_or(0),
                 public_key: String::new(),
@@ -2448,6 +2472,14 @@ pub(crate) fn build_daemon_runtime_state(
                     tunnel_ip: String::new(),
                     endpoint: String::new(),
                     runtime_endpoint: None,
+                    fips_endpoint_npub: String::new(),
+                    fips_transport_addr: String::new(),
+                    fips_transport_type: String::new(),
+                    fips_srtt_ms: None,
+                    fips_packets_sent: 0,
+                    fips_packets_recv: 0,
+                    fips_bytes_sent: 0,
+                    fips_bytes_recv: 0,
                     tx_bytes: 0,
                     rx_bytes: 0,
                     public_key: String::new(),
@@ -2472,6 +2504,14 @@ pub(crate) fn build_daemon_runtime_state(
                 tunnel_ip: announcement.tunnel_ip.clone(),
                 endpoint: announcement.endpoint.clone(),
                 runtime_endpoint: runtime_peer.and_then(|peer| peer.endpoint.clone()),
+                fips_endpoint_npub: String::new(),
+                fips_transport_addr: String::new(),
+                fips_transport_type: String::new(),
+                fips_srtt_ms: None,
+                fips_packets_sent: 0,
+                fips_packets_recv: 0,
+                fips_bytes_sent: 0,
+                fips_bytes_recv: 0,
                 tx_bytes: runtime_peer.map(|peer| peer.tx_bytes).unwrap_or(0),
                 rx_bytes: runtime_peer.map(|peer| peer.rx_bytes).unwrap_or(0),
                 public_key: announcement.public_key.clone(),

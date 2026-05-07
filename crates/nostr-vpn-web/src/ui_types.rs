@@ -46,6 +46,22 @@ pub(crate) struct DaemonPeerState {
     #[serde(default)]
     pub runtime_endpoint: Option<String>,
     #[serde(default)]
+    pub fips_endpoint_npub: String,
+    #[serde(default)]
+    pub fips_transport_addr: String,
+    #[serde(default)]
+    pub fips_transport_type: String,
+    #[serde(default)]
+    pub fips_srtt_ms: Option<u64>,
+    #[serde(default)]
+    pub fips_packets_sent: u64,
+    #[serde(default)]
+    pub fips_packets_recv: u64,
+    #[serde(default)]
+    pub fips_bytes_sent: u64,
+    #[serde(default)]
+    pub fips_bytes_recv: u64,
+    #[serde(default)]
     pub tx_bytes: u64,
     #[serde(default)]
     pub rx_bytes: u64,
@@ -92,6 +108,14 @@ pub(crate) struct ParticipantView {
     pub rx_bytes: u64,
     pub advertised_routes: Vec<String>,
     pub offers_exit_node: bool,
+    pub fips_endpoint_npub: String,
+    pub fips_transport_addr: String,
+    pub fips_transport_type: String,
+    pub fips_srtt_ms: Option<u64>,
+    pub fips_packets_sent: u64,
+    pub fips_packets_recv: u64,
+    pub fips_bytes_sent: u64,
+    pub fips_bytes_recv: u64,
     pub state: String,
     pub presence_state: String,
     pub status_text: String,

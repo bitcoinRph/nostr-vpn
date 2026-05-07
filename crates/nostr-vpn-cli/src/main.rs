@@ -846,14 +846,41 @@ fn run_cli(cli: Cli) -> Result<()> {
     match cli.command {
         #[cfg(target_os = "windows")]
         Command::Daemon(args) if args.service => run_windows_service_dispatcher(args),
-        command => {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .context("failed to build tokio runtime")?;
-            runtime.block_on(run_command(command))
-        }
+        command => run_command_on_runtime(command),
     }
+}
+
+fn run_command_on_runtime(command: Command) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let handle = thread::Builder::new()
+            .name("nvpn-runtime".to_string())
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || run_command_with_runtime(command))
+            .context("failed to spawn nvpn runtime thread")?;
+        handle.join().map_err(|panic| {
+            if let Some(message) = panic.downcast_ref::<&str>() {
+                anyhow!("nvpn runtime thread panicked: {message}")
+            } else if let Some(message) = panic.downcast_ref::<String>() {
+                anyhow!("nvpn runtime thread panicked: {message}")
+            } else {
+                anyhow!("nvpn runtime thread panicked")
+            }
+        })?
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        run_command_with_runtime(command)
+    }
+}
+
+fn run_command_with_runtime(command: Command) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("failed to build tokio runtime")?;
+    runtime.block_on(run_command(command))
 }
 
 async fn run_command(command: Command) -> Result<()> {
@@ -1755,6 +1782,22 @@ struct DaemonPeerState {
     endpoint: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     runtime_endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    fips_endpoint_npub: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    fips_transport_addr: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    fips_transport_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fips_srtt_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    fips_packets_sent: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    fips_packets_recv: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    fips_bytes_sent: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    fips_bytes_recv: u64,
     #[serde(default)]
     tx_bytes: u64,
     #[serde(default)]
@@ -1766,6 +1809,10 @@ struct DaemonPeerState {
     reachable: bool,
     last_handshake_at: Option<u64>,
     error: Option<String>,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

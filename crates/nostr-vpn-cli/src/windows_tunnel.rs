@@ -420,7 +420,7 @@ fn apply_processed_datagrams(
 }
 
 #[cfg(target_os = "windows")]
-fn write_tunnel_packets(session: &Arc<Session>, packets: &[Vec<u8>]) -> Result<()> {
+pub(crate) fn write_tunnel_packets(session: &Arc<Session>, packets: &[Vec<u8>]) -> Result<()> {
     for packet in packets {
         let size = u16::try_from(packet.len())
             .map_err(|_| anyhow!("tunnel packet too large for wintun: {}", packet.len()))?;
@@ -446,7 +446,10 @@ fn send_datagrams(socket: &UdpSocket, outgoing: Vec<OutgoingDatagram>) -> Result
 }
 
 #[cfg(target_os = "windows")]
-fn apply_windows_routes(interface_index: u32, route_targets: &[String]) -> Result<Vec<String>> {
+pub(crate) fn apply_windows_routes(
+    interface_index: u32,
+    route_targets: &[String],
+) -> Result<Vec<String>> {
     let mut applied = Vec::new();
     for route_target in route_targets {
         let args = windows_add_route_args(route_target, interface_index)?;
@@ -460,7 +463,7 @@ fn apply_windows_routes(interface_index: u32, route_targets: &[String]) -> Resul
 }
 
 #[cfg(target_os = "windows")]
-fn remove_windows_routes(interface_index: u32, route_targets: &[String]) -> Result<()> {
+pub(crate) fn remove_windows_routes(interface_index: u32, route_targets: &[String]) -> Result<()> {
     let mut first_error = None;
     for route_target in route_targets {
         let args = windows_delete_route_args(route_target, interface_index)?;

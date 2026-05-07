@@ -1804,6 +1804,14 @@ public struct NativeParticipantState {
     public var rxBytes: UInt64
     public var advertisedRoutes: [String]
     public var offersExitNode: Bool
+    public var fipsEndpointNpub: String
+    public var fipsTransportAddr: String
+    public var fipsTransportType: String
+    public var fipsSrttMs: UInt64
+    public var fipsPacketsSent: UInt64
+    public var fipsPacketsRecv: UInt64
+    public var fipsBytesSent: UInt64
+    public var fipsBytesRecv: UInt64
     public var state: String
     public var presenceState: String
     public var statusText: String
@@ -1811,7 +1819,7 @@ public struct NativeParticipantState {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(npub: String, pubkeyHex: String, alias: String, magicDnsAlias: String, magicDnsName: String, tunnelIp: String, isAdmin: Bool, reachable: Bool, txBytes: UInt64, rxBytes: UInt64, advertisedRoutes: [String], offersExitNode: Bool, state: String, presenceState: String, statusText: String, lastSignalText: String) {
+    public init(npub: String, pubkeyHex: String, alias: String, magicDnsAlias: String, magicDnsName: String, tunnelIp: String, isAdmin: Bool, reachable: Bool, txBytes: UInt64, rxBytes: UInt64, advertisedRoutes: [String], offersExitNode: Bool, fipsEndpointNpub: String, fipsTransportAddr: String, fipsTransportType: String, fipsSrttMs: UInt64, fipsPacketsSent: UInt64, fipsPacketsRecv: UInt64, fipsBytesSent: UInt64, fipsBytesRecv: UInt64, state: String, presenceState: String, statusText: String, lastSignalText: String) {
         self.npub = npub
         self.pubkeyHex = pubkeyHex
         self.alias = alias
@@ -1824,6 +1832,14 @@ public struct NativeParticipantState {
         self.rxBytes = rxBytes
         self.advertisedRoutes = advertisedRoutes
         self.offersExitNode = offersExitNode
+        self.fipsEndpointNpub = fipsEndpointNpub
+        self.fipsTransportAddr = fipsTransportAddr
+        self.fipsTransportType = fipsTransportType
+        self.fipsSrttMs = fipsSrttMs
+        self.fipsPacketsSent = fipsPacketsSent
+        self.fipsPacketsRecv = fipsPacketsRecv
+        self.fipsBytesSent = fipsBytesSent
+        self.fipsBytesRecv = fipsBytesRecv
         self.state = state
         self.presenceState = presenceState
         self.statusText = statusText
@@ -1874,6 +1890,30 @@ extension NativeParticipantState: Equatable, Hashable {
         if lhs.offersExitNode != rhs.offersExitNode {
             return false
         }
+        if lhs.fipsEndpointNpub != rhs.fipsEndpointNpub {
+            return false
+        }
+        if lhs.fipsTransportAddr != rhs.fipsTransportAddr {
+            return false
+        }
+        if lhs.fipsTransportType != rhs.fipsTransportType {
+            return false
+        }
+        if lhs.fipsSrttMs != rhs.fipsSrttMs {
+            return false
+        }
+        if lhs.fipsPacketsSent != rhs.fipsPacketsSent {
+            return false
+        }
+        if lhs.fipsPacketsRecv != rhs.fipsPacketsRecv {
+            return false
+        }
+        if lhs.fipsBytesSent != rhs.fipsBytesSent {
+            return false
+        }
+        if lhs.fipsBytesRecv != rhs.fipsBytesRecv {
+            return false
+        }
         if lhs.state != rhs.state {
             return false
         }
@@ -1902,6 +1942,14 @@ extension NativeParticipantState: Equatable, Hashable {
         hasher.combine(rxBytes)
         hasher.combine(advertisedRoutes)
         hasher.combine(offersExitNode)
+        hasher.combine(fipsEndpointNpub)
+        hasher.combine(fipsTransportAddr)
+        hasher.combine(fipsTransportType)
+        hasher.combine(fipsSrttMs)
+        hasher.combine(fipsPacketsSent)
+        hasher.combine(fipsPacketsRecv)
+        hasher.combine(fipsBytesSent)
+        hasher.combine(fipsBytesRecv)
         hasher.combine(state)
         hasher.combine(presenceState)
         hasher.combine(statusText)
@@ -1930,6 +1978,14 @@ public struct FfiConverterTypeNativeParticipantState: FfiConverterRustBuffer {
                 rxBytes: FfiConverterUInt64.read(from: &buf),
                 advertisedRoutes: FfiConverterSequenceString.read(from: &buf),
                 offersExitNode: FfiConverterBool.read(from: &buf),
+                fipsEndpointNpub: FfiConverterString.read(from: &buf),
+                fipsTransportAddr: FfiConverterString.read(from: &buf),
+                fipsTransportType: FfiConverterString.read(from: &buf),
+                fipsSrttMs: FfiConverterUInt64.read(from: &buf),
+                fipsPacketsSent: FfiConverterUInt64.read(from: &buf),
+                fipsPacketsRecv: FfiConverterUInt64.read(from: &buf),
+                fipsBytesSent: FfiConverterUInt64.read(from: &buf),
+                fipsBytesRecv: FfiConverterUInt64.read(from: &buf),
                 state: FfiConverterString.read(from: &buf),
                 presenceState: FfiConverterString.read(from: &buf),
                 statusText: FfiConverterString.read(from: &buf),
@@ -1950,6 +2006,14 @@ public struct FfiConverterTypeNativeParticipantState: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.rxBytes, into: &buf)
         FfiConverterSequenceString.write(value.advertisedRoutes, into: &buf)
         FfiConverterBool.write(value.offersExitNode, into: &buf)
+        FfiConverterString.write(value.fipsEndpointNpub, into: &buf)
+        FfiConverterString.write(value.fipsTransportAddr, into: &buf)
+        FfiConverterString.write(value.fipsTransportType, into: &buf)
+        FfiConverterUInt64.write(value.fipsSrttMs, into: &buf)
+        FfiConverterUInt64.write(value.fipsPacketsSent, into: &buf)
+        FfiConverterUInt64.write(value.fipsPacketsRecv, into: &buf)
+        FfiConverterUInt64.write(value.fipsBytesSent, into: &buf)
+        FfiConverterUInt64.write(value.fipsBytesRecv, into: &buf)
         FfiConverterString.write(value.state, into: &buf)
         FfiConverterString.write(value.presenceState, into: &buf)
         FfiConverterString.write(value.statusText, into: &buf)

@@ -264,6 +264,7 @@ fn fips_endpoint_config(
     config.node.discovery.nostr.enabled = !relays.is_empty();
     config.node.discovery.nostr.advertise = !relays.is_empty() && !peers.is_empty();
     config.node.discovery.nostr.policy = NostrDiscoveryPolicy::ConfiguredOnly;
+    config.node.discovery.nostr.share_local_candidates = true;
     config.node.discovery.nostr.app = scope.to_string();
     if !relays.is_empty() {
         config.node.discovery.nostr.advert_relays = relays.to_vec();
@@ -395,6 +396,7 @@ mod tests {
 
         assert!(config.node.discovery.nostr.enabled);
         assert!(config.node.discovery.nostr.advertise);
+        assert!(config.node.discovery.nostr.share_local_candidates);
         assert_eq!(
             config.node.discovery.nostr.policy,
             NostrDiscoveryPolicy::ConfiguredOnly

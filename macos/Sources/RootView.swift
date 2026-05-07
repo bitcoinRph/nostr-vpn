@@ -15,7 +15,9 @@ struct RootView: View {
     @State private var participantInput = ""
     @State private var participantAliasInput = ""
     @State private var networkNameInput = ""
+    @State private var deviceSearch = ""
     @State private var exitNodeSearch = ""
+    @State private var selectedDevicePubkeyHex: String?
     @State private var networkNameDrafts: [String: String] = [:]
     @State private var participantAliasDrafts: [String: String] = [:]
     @State private var manageDevicesExpanded = false
@@ -94,31 +96,42 @@ struct RootView: View {
             .tag(item)
     }
 
+    @ViewBuilder
     private var detailPane: some View {
+        switch selectedSidebarItem ?? .devices {
+        case .devices:
+            if let activeNetwork {
+                devicesPane(activeNetwork)
+            } else {
+                emptyDevicesPane
+            }
+        case .sharing:
+            pageScroll {
+                pageTitle("Share", "qrcode")
+                if let activeNetwork {
+                    inviteSection(activeNetwork)
+                    lanPairingSection
+                }
+            }
+        case .routing:
+            pageScroll {
+                pageTitle("Routing", "arrow.triangle.branch")
+                if let activeNetwork {
+                    routingSection(activeNetwork)
+                }
+            }
+        case .settings:
+            pageScroll {
+                pageTitle("Settings", "gearshape")
+                settingsSection
+            }
+        }
+    }
+
+    private func pageScroll<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                switch selectedSidebarItem ?? .devices {
-                case .devices:
-                    networkHero
-                    if let activeNetwork {
-                        deviceListSection(activeNetwork)
-                        joinRequestsSection(activeNetwork)
-                    }
-                case .sharing:
-                    pageTitle("Share", "qrcode")
-                    if let activeNetwork {
-                        inviteSection(activeNetwork)
-                        lanPairingSection
-                    }
-                case .routing:
-                    pageTitle("Routing", "arrow.triangle.branch")
-                    if let activeNetwork {
-                        routingSection(activeNetwork)
-                    }
-                case .settings:
-                    pageTitle("Settings", "gearshape")
-                    settingsSection
-                }
+                content()
             }
             .padding(.horizontal, 28)
             .padding(.top, 28)
@@ -191,51 +204,112 @@ struct RootView: View {
         }
     }
 
-    private func deviceListSection(_ network: NativeNetworkState) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                sectionHeader("Devices", systemImage: "desktopcomputer")
-                Spacer()
-                Button {
-                    selectedSidebarItem = .sharing
-                } label: {
-                    Label("Add Device", systemImage: "plus")
-                }
-                .disabled(!network.localIsAdmin && network.inviteInviterNpub.isEmpty)
-            }
+    private func devicesPane(_ network: NativeNetworkState) -> some View {
+        HStack(spacing: 0) {
+            deviceListColumn(network)
+                .frame(minWidth: 290, idealWidth: 330, maxWidth: 360)
+            Divider()
+            deviceDetailColumn(network)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
 
-            if sortedParticipants(network).isEmpty {
-                emptyRow("No devices yet", systemImage: "desktopcomputer")
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(sortedParticipants(network), id: \.pubkeyHex) { participant in
-                        deviceRow(participant, network: network)
+    private var emptyDevicesPane: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Devices")
+                .font(.system(size: 24, weight: .semibold))
+            emptyRow("No network selected", systemImage: "circle.dotted")
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func deviceListColumn(_ network: NativeNetworkState) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Devices")
+                            .font(.system(size: 24, weight: .semibold))
+                        Text(displayName(network))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button {
+                        selectedSidebarItem = .sharing
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .disabled(!network.localIsAdmin && network.inviteInviterNpub.isEmpty)
+                    .help("Add device")
+                    Button {
+                        manager.toggleSession()
+                    } label: {
+                        Image(systemName: state.sessionActive ? "power.circle.fill" : "power.circle")
+                    }
+                    .disabled(manager.actionInFlight || !state.vpnSessionControlSupported)
+                    .help(state.sessionActive ? "Disconnect VPN" : "Connect VPN")
+                }
+                TextField("Search", text: $deviceSearch)
+                    .textFieldStyle(.roundedBorder)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+            .padding(.bottom, 4)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    let participants = visibleParticipants(network)
+                    if participants.isEmpty {
+                        emptyRow("No matching devices", systemImage: "circle.dotted")
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(displayName(network))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                            ForEach(participants, id: \.pubkeyHex) { participant in
+                                deviceListRow(participant, network: network)
+                            }
+                        }
+                    }
+
+                    joinRequestsSection(network)
+
+                    if network.localIsAdmin {
+                        manageDevicesSection(network)
                     }
                 }
-            }
-
-            if network.localIsAdmin {
-                manageDevicesSection(network)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 24)
             }
         }
     }
 
-    private func deviceRow(_ participant: NativeParticipantState, network: NativeNetworkState) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            deviceIcon(participant)
+    private func deviceListRow(_ participant: NativeParticipantState, network: NativeNetworkState) -> some View {
+        let selected = selectedParticipant(in: network)?.pubkeyHex == participant.pubkeyHex
+        return Button {
+            selectedDevicePubkeyHex = participant.pubkeyHex
+        } label: {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
+                HStack(spacing: 7) {
+                    connectivityDot(participant, size: 8)
                     Text(deviceName(participant))
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                    Spacer(minLength: 8)
                     if participant.isAdmin {
-                        badge("Admin", style: .muted)
+                        badge("Admin", style: selected ? .selected : .muted)
                     }
                     if participant.offersExitNode {
-                        badge("Exit", style: .warn)
+                        badge("Exit", style: selected ? .selected : .warn)
                     }
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     if !deviceSubtitle(participant).isEmpty {
                         Text(deviceSubtitle(participant))
                     }
@@ -244,21 +318,114 @@ struct RootView: View {
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(selected ? Color.white.opacity(0.78) : Color.secondary)
                 .lineLimit(1)
             }
-            Spacer()
-            badge(deviceStatusText(participant), style: badgeStyle(for: participant.state))
-            Menu {
-                Button("Copy npub") {
-                    manager.copy(participant.npub, as: .peerNpub, peerNpub: participant.npub)
+            .foregroundStyle(selected ? Color.white : Color.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                selected ? Color.accentColor : Color.clear,
+                in: RoundedRectangle(cornerRadius: 7)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func deviceDetailColumn(_ network: NativeNetworkState) -> some View {
+        ScrollView {
+            if let participant = selectedParticipant(in: network) {
+                VStack(alignment: .leading, spacing: 22) {
+                    deviceDetailHeader(participant, network: network)
+                    deviceAddressesSection(participant)
+                    deviceConnectivitySection(participant)
+                    deviceActionsSection(participant, network: network)
                 }
-                if !participant.tunnelIp.isEmpty {
-                    Button("Copy IP") {
+                .padding(.horizontal, 22)
+                .padding(.top, 26)
+                .padding(.bottom, 30)
+                .frame(maxWidth: 640, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Devices")
+                        .font(.system(size: 24, weight: .semibold))
+                    emptyRow("No devices yet", systemImage: "circle.dotted")
+                }
+                .padding(28)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func deviceDetailHeader(_ participant: NativeParticipantState, network: NativeNetworkState) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(deviceName(participant))
+                    .font(.system(size: 24, weight: .semibold))
+                    .lineLimit(2)
+                HStack(spacing: 7) {
+                    connectivityDot(participant, size: 8)
+                    Text(deviceStatusText(participant))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            deviceMenu(participant, network: network)
+        }
+    }
+
+    private func deviceAddressesSection(_ participant: NativeParticipantState) -> some View {
+        surface {
+            Text("Addresses")
+                .font(.headline)
+            detailValueRow("MagicDNS", deviceMagicDnsName(participant))
+            detailValueRow("VPN IP", cleanIp(participant.tunnelIp))
+            detailValueRow("npub", participant.npub)
+        }
+    }
+
+    private func deviceConnectivitySection(_ participant: NativeParticipantState) -> some View {
+        surface {
+            Text("Connectivity")
+                .font(.headline)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
+                metric("Role", deviceRoleText(participant))
+                metric("State", deviceStatusText(participant))
+                metric("Last signal", participant.lastSignalText.isEmpty ? "-" : participant.lastSignalText)
+                metric("Sent", formatBytes(participant.txBytes))
+                metric("Received", formatBytes(participant.rxBytes))
+            }
+            if !participant.statusText.isEmpty {
+                Text(participant.statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private func deviceActionsSection(_ participant: NativeParticipantState, network: NativeNetworkState) -> some View {
+        surface {
+            Text("Actions")
+                .font(.headline)
+            HStack(spacing: 8) {
+                Button {
+                    manager.copy(participant.npub, as: .peerNpub, peerNpub: participant.npub)
+                } label: {
+                    Label("Copy npub", systemImage: "doc.on.doc")
+                }
+                if !cleanIp(participant.tunnelIp).isEmpty {
+                    Button {
                         manager.copy(cleanIp(participant.tunnelIp), as: .peerNpub, peerNpub: participant.npub)
+                    } label: {
+                        Label("Copy IP", systemImage: "doc.on.doc")
                     }
                 }
-                Divider()
                 Button(participant.isAdmin ? "Remove Admin" : "Make Admin") {
                     manager.toggleAdmin(networkId: network.id, participant: participant)
                 }
@@ -266,28 +433,68 @@ struct RootView: View {
                 Button(role: .destructive) {
                     manager.removeParticipant(networkId: network.id, npub: participant.npub)
                 } label: {
-                    Text("Remove Device")
+                    Label("Remove", systemImage: "trash")
                 }
                 .disabled(!network.localIsAdmin || isSelf(participant) || manager.actionInFlight)
-            } label: {
-                Image(systemName: "ellipsis.circle")
             }
-            .menuStyle(.button)
-            .fixedSize()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private func deviceIcon(_ participant: NativeParticipantState) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(badgeStyle(for: participant.state).background)
-                .frame(width: 38, height: 38)
-            Image(systemName: isSelf(participant) ? "macbook" : "desktopcomputer")
-                .foregroundStyle(badgeStyle(for: participant.state).foreground)
+    private func detailValueRow(_ title: String, _ value: String) -> some View {
+        let displayValue = value.isEmpty ? "-" : value
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(displayValue)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if !value.isEmpty {
+                    Button {
+                        manager.copy(value)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy")
+                }
+            }
         }
+        .padding(.vertical, 3)
+    }
+
+    private func deviceMenu(_ participant: NativeParticipantState, network: NativeNetworkState) -> some View {
+        Menu {
+            Button("Copy npub") {
+                manager.copy(participant.npub, as: .peerNpub, peerNpub: participant.npub)
+            }
+            if !cleanIp(participant.tunnelIp).isEmpty {
+                Button {
+                    manager.copy(cleanIp(participant.tunnelIp), as: .peerNpub, peerNpub: participant.npub)
+                } label: {
+                    Text("Copy IP")
+                }
+            }
+            Divider()
+            Button(participant.isAdmin ? "Remove Admin" : "Make Admin") {
+                manager.toggleAdmin(networkId: network.id, participant: participant)
+            }
+            .disabled(!network.localIsAdmin || manager.actionInFlight)
+            Button(role: .destructive) {
+                manager.removeParticipant(networkId: network.id, npub: participant.npub)
+            } label: {
+                Text("Remove Device")
+            }
+            .disabled(!network.localIsAdmin || isSelf(participant) || manager.actionInFlight)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.button)
+        .fixedSize()
     }
 
     private func manageDevicesSection(_ network: NativeNetworkState) -> some View {
@@ -1005,6 +1212,17 @@ struct RootView: View {
                 participantAliasDrafts[participant.pubkeyHex] = participant.magicDnsAlias
             }
         }
+
+        if let network = activeNetwork {
+            let participants = sortedParticipants(network)
+            if let selectedDevicePubkeyHex,
+               participants.contains(where: { $0.pubkeyHex == selectedDevicePubkeyHex }) {
+                return
+            }
+            selectedDevicePubkeyHex = participants.first?.pubkeyHex
+        } else {
+            selectedDevicePubkeyHex = nil
+        }
     }
 
     private func displayName(_ network: NativeNetworkState) -> String {
@@ -1073,6 +1291,33 @@ struct RootView: View {
         }
     }
 
+    private func visibleParticipants(_ network: NativeNetworkState) -> [NativeParticipantState] {
+        let needle = deviceSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else {
+            return sortedParticipants(network)
+        }
+        return sortedParticipants(network).filter { participant in
+            [
+                deviceName(participant),
+                participant.alias,
+                participant.magicDnsAlias,
+                participant.magicDnsName,
+                participant.npub,
+                participant.tunnelIp,
+                deviceStatusText(participant),
+            ].contains { $0.lowercased().contains(needle) }
+        }
+    }
+
+    private func selectedParticipant(in network: NativeNetworkState) -> NativeParticipantState? {
+        let participants = sortedParticipants(network)
+        if let selectedDevicePubkeyHex,
+           let selected = participants.first(where: { $0.pubkeyHex == selectedDevicePubkeyHex }) {
+            return selected
+        }
+        return participants.first
+    }
+
     private func isSelf(_ participant: NativeParticipantState) -> Bool {
         participant.npub == state.ownNpub || participant.presenceState == "local"
     }
@@ -1100,6 +1345,33 @@ struct RootView: View {
         return ""
     }
 
+    private func deviceMagicDnsName(_ participant: NativeParticipantState) -> String {
+        if !participant.magicDnsName.isEmpty {
+            return participant.magicDnsName
+        }
+        if isSelf(participant), !state.selfMagicDnsName.isEmpty {
+            return state.selfMagicDnsName
+        }
+        if !participant.magicDnsAlias.isEmpty, !state.magicDnsSuffix.isEmpty {
+            return "\(participant.magicDnsAlias).\(state.magicDnsSuffix)"
+        }
+        return ""
+    }
+
+    private func deviceRoleText(_ participant: NativeParticipantState) -> String {
+        var roles: [String] = []
+        if isSelf(participant) {
+            roles.append("This device")
+        }
+        if participant.isAdmin {
+            roles.append("Admin")
+        }
+        if participant.offersExitNode {
+            roles.append("Exit node")
+        }
+        return roles.isEmpty ? "Member" : roles.joined(separator: ", ")
+    }
+
     private func deviceStatusText(_ participant: NativeParticipantState) -> String {
         if isSelf(participant) {
             return "Self"
@@ -1113,6 +1385,23 @@ struct RootView: View {
             return "Offline"
         default:
             return "Unknown"
+        }
+    }
+
+    private func connectivityDot(_ participant: NativeParticipantState, size: CGFloat) -> some View {
+        Circle()
+            .fill(connectivityTint(participant))
+            .frame(width: size, height: size)
+    }
+
+    private func connectivityTint(_ participant: NativeParticipantState) -> Color {
+        switch participant.state {
+        case "local", "online", "present":
+            return .green
+        case "pending":
+            return .orange
+        default:
+            return .secondary
         }
     }
 
@@ -1214,6 +1503,7 @@ enum BadgeStyle {
     case warn
     case bad
     case muted
+    case selected
 
     var foreground: Color {
         switch self {
@@ -1225,6 +1515,8 @@ enum BadgeStyle {
             return .red
         case .muted:
             return .secondary
+        case .selected:
+            return .white
         }
     }
 
@@ -1238,8 +1530,24 @@ enum BadgeStyle {
             return .red.opacity(0.14)
         case .muted:
             return .secondary.opacity(0.12)
+        case .selected:
+            return .white.opacity(0.18)
         }
     }
+}
+
+private func formatBytes(_ bytes: UInt64) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"]
+    var value = Double(bytes)
+    var unitIndex = 0
+    while value >= 1024, unitIndex < units.count - 1 {
+        value /= 1024
+        unitIndex += 1
+    }
+    if unitIndex == 0 {
+        return "\(bytes) B"
+    }
+    return String(format: "%.1f %@", value, units[unitIndex])
 }
 
 private func formatSeconds(_ seconds: UInt64) -> String {

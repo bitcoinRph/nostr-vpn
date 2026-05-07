@@ -62,7 +62,7 @@ pub(crate) struct MacosEndpointBypassRoute {
 
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) const LOCAL_TUNNEL_MTU: &str = "1380";
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows", test))]
 pub(crate) const FIPS_TUNNEL_MTU: &str = "1150";
 
 #[cfg(any(target_os = "linux", test))]

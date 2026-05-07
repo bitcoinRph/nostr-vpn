@@ -143,6 +143,14 @@ struct ParticipantState: Decodable, Identifiable {
     var isAdmin = false
     var reachable = false
     var offersExitNode = false
+    var fipsEndpointNpub = ""
+    var fipsTransportAddr = ""
+    var fipsTransportType = ""
+    var fipsSrttMs: UInt64 = 0
+    var fipsPacketsSent: UInt64 = 0
+    var fipsPacketsRecv: UInt64 = 0
+    var fipsBytesSent: UInt64 = 0
+    var fipsBytesRecv: UInt64 = 0
     var state = ""
     var statusText = ""
     var lastSignalText = ""
@@ -155,7 +163,10 @@ struct ParticipantState: Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case npub, pubkeyHex, alias, magicDnsAlias, magicDnsName, tunnelIp
-        case isAdmin, reachable, offersExitNode, state, statusText, lastSignalText
+        case isAdmin, reachable, offersExitNode
+        case fipsEndpointNpub, fipsTransportAddr, fipsTransportType, fipsSrttMs
+        case fipsPacketsSent, fipsPacketsRecv, fipsBytesSent, fipsBytesRecv
+        case state, statusText, lastSignalText
     }
 
     init() {}
@@ -171,6 +182,14 @@ struct ParticipantState: Decodable, Identifiable {
         isAdmin = container.bool(.isAdmin)
         reachable = container.bool(.reachable)
         offersExitNode = container.bool(.offersExitNode)
+        fipsEndpointNpub = container.string(.fipsEndpointNpub)
+        fipsTransportAddr = container.string(.fipsTransportAddr)
+        fipsTransportType = container.string(.fipsTransportType)
+        fipsSrttMs = container.uint64(.fipsSrttMs)
+        fipsPacketsSent = container.uint64(.fipsPacketsSent)
+        fipsPacketsRecv = container.uint64(.fipsPacketsRecv)
+        fipsBytesSent = container.uint64(.fipsBytesSent)
+        fipsBytesRecv = container.uint64(.fipsBytesRecv)
         state = container.string(.state)
         statusText = container.string(.statusText)
         lastSignalText = container.string(.lastSignalText)

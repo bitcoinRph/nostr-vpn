@@ -25,6 +25,14 @@ struct PeerSnapshot {
     last_signal_seen_at: Option<SystemTime>,
     advertised_routes: Vec<String>,
     offers_exit_node: bool,
+    fips_endpoint_npub: String,
+    fips_transport_addr: String,
+    fips_transport_type: String,
+    fips_srtt_ms: Option<u64>,
+    fips_packets_sent: u64,
+    fips_packets_recv: u64,
+    fips_bytes_sent: u64,
+    fips_bytes_recv: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +114,14 @@ fn peer_snapshots(
                     endpoint: (!peer.endpoint.trim().is_empty()).then(|| peer.endpoint.clone()),
                     tx_bytes: peer.tx_bytes,
                     rx_bytes: peer.rx_bytes,
+                    fips_endpoint_npub: peer.fips_endpoint_npub.clone(),
+                    fips_transport_addr: peer.fips_transport_addr.clone(),
+                    fips_transport_type: peer.fips_transport_type.clone(),
+                    fips_srtt_ms: peer.fips_srtt_ms,
+                    fips_packets_sent: peer.fips_packets_sent,
+                    fips_packets_recv: peer.fips_packets_recv,
+                    fips_bytes_sent: peer.fips_bytes_sent,
+                    fips_bytes_recv: peer.fips_bytes_recv,
                     error: if peer.reachable {
                         None
                     } else {
@@ -277,6 +293,20 @@ fn participant_view(
         rx_bytes: snapshot.map(|value| value.rx_bytes).unwrap_or(0),
         advertised_routes,
         offers_exit_node,
+        fips_endpoint_npub: snapshot
+            .map(|value| value.fips_endpoint_npub.clone())
+            .unwrap_or_default(),
+        fips_transport_addr: snapshot
+            .map(|value| value.fips_transport_addr.clone())
+            .unwrap_or_default(),
+        fips_transport_type: snapshot
+            .map(|value| value.fips_transport_type.clone())
+            .unwrap_or_default(),
+        fips_srtt_ms: snapshot.and_then(|value| value.fips_srtt_ms),
+        fips_packets_sent: snapshot.map(|value| value.fips_packets_sent).unwrap_or(0),
+        fips_packets_recv: snapshot.map(|value| value.fips_packets_recv).unwrap_or(0),
+        fips_bytes_sent: snapshot.map(|value| value.fips_bytes_sent).unwrap_or(0),
+        fips_bytes_recv: snapshot.map(|value| value.fips_bytes_recv).unwrap_or(0),
         state: transport_state_label(transport_status).to_string(),
         presence_state: presence_state_label(presence_status).to_string(),
         status_text: peer_status_line(snapshot, transport_status),
@@ -347,16 +377,34 @@ fn peer_presence_status(
 fn peer_status_line(snapshot: Option<&PeerSnapshot>, status: TransportStatus) -> String {
     match status {
         TransportStatus::Local => "local".to_string(),
-        TransportStatus::Online => match snapshot
-            .and_then(|value| value.last_handshake_at)
-            .and_then(|handshake_at| handshake_at.elapsed().ok())
-            .map(|elapsed| elapsed.as_secs())
-        {
-            Some(age_secs) => format!("online (seen {})", compact_age_text(age_secs)),
+        TransportStatus::Online => match snapshot {
+            Some(snapshot) => {
+                if let Some(link) = fips_link_text(snapshot) {
+                    format!("online via {link}")
+                } else {
+                    match snapshot
+                        .last_handshake_at
+                        .and_then(|handshake_at| handshake_at.elapsed().ok())
+                        .map(|elapsed| elapsed.as_secs())
+                    {
+                        Some(age_secs) => format!("online (seen {})", compact_age_text(age_secs)),
+                        None => "online".to_string(),
+                    }
+                }
+            }
             None => "online".to_string(),
         },
-        TransportStatus::Present => match snapshot.and_then(|value| value.endpoint.as_deref()) {
-            Some(endpoint) if !endpoint.trim().is_empty() => {
+        TransportStatus::Present => match snapshot {
+            Some(snapshot) if fips_link_text(snapshot).is_some() => {
+                format!("fips pending via {}", fips_link_text(snapshot).unwrap())
+            }
+            Some(snapshot)
+                if snapshot
+                    .endpoint
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty()) =>
+            {
+                let endpoint = snapshot.endpoint.as_deref().unwrap_or_default();
                 format!("fips pending via {}", shorten_middle(endpoint, 18, 10))
             }
             _ => "fips presence pending".to_string(),
@@ -488,6 +536,23 @@ fn shorten_middle(value: &str, head: usize, tail: usize) -> String {
             .rev()
             .collect::<String>()
     )
+}
+
+fn fips_link_text(snapshot: &PeerSnapshot) -> Option<String> {
+    let addr = snapshot.fips_transport_addr.trim();
+    if addr.is_empty() {
+        return None;
+    }
+    let transport = if snapshot.fips_transport_type.trim().is_empty() {
+        "fips"
+    } else {
+        snapshot.fips_transport_type.trim()
+    };
+    let mut text = format!("{transport} {}", shorten_middle(addr, 22, 10));
+    if let Some(srtt_ms) = snapshot.fips_srtt_ms {
+        text.push_str(&format!(" ({srtt_ms} ms)"));
+    }
+    Some(text)
 }
 
 fn expected_peer_count(config: &AppConfig) -> usize {
