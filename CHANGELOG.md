@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file.
 
 - Android and iOS now show the active network name outside the device rows, keep VPN on/off in the top bar, and list this device as a normal participant row instead of treating the first peer as a hero.
 - WireGuard-backed exit-node providers now route their own default internet traffic through the WireGuard upstream too, while preserving the WireGuard peer endpoint on the underlay route.
+- Native settings now expose the persisted WireGuard upstream fields used by exit-node providers.
+- macOS no longer reapplies the FIPS utun address and peer routes on every heartbeat when the route set is unchanged.
+- Linux Magic DNS falls back to managed `/etc/hosts` entries for `.nvpn` names when `systemd-resolved`/`resolvectl` is unavailable.
+- New Android and iOS installs seed the editable device name from the phone/tablet instead of falling back to host-derived or generated labels.
 
 ## 4.0.0 - 2026-05-07
 

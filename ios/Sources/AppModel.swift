@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
             .appendingPathComponent("Nostr VPN", isDirectory: true)
         if let supportDir {
             try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+            Self.seedMobileConfig(in: supportDir, deviceName: Self.deviceName())
         }
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
         core = NativeCoreClient(dataDir: supportDir?.path ?? "", appVersion: version)
@@ -148,5 +149,32 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    private static func seedMobileConfig(in supportDir: URL, deviceName: String) {
+        let name = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            return
+        }
+
+        let config = supportDir.appendingPathComponent("config.toml")
+        guard !FileManager.default.fileExists(atPath: config.path) else {
+            return
+        }
+
+        let escaped = name
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        try? "node_name = \"\(escaped)\"\n".write(to: config, atomically: true, encoding: .utf8)
+    }
+
+    private static func deviceName() -> String {
+        let preferred = UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !preferred.isEmpty {
+            return preferred
+        }
+
+        let model = UIDevice.current.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.isEmpty ? "iOS device" : model
     }
 }

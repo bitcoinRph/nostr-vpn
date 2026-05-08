@@ -239,6 +239,47 @@
               <StackPanel>
                 <CheckBox Content="Offer this device as an exit node" IsChecked="{Binding State.AdvertiseExitNode, Mode=OneWay}" Click="AdvertiseExit_Click" />
                 <CheckBox Content="Use WireGuard upstream" IsChecked="{Binding State.WireguardExitEnabled, Mode=OneWay}" Click="WireguardExit_Click" Margin="0,10,0,0" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel Visibility="{Binding Page, Converter={StaticResource PageVisibility}, ConverterParameter=Settings}">
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="This Device" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="110" />
+                    <ColumnDefinition Width="160" />
+                  </Grid.ColumnDefinitions>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                  </Grid.RowDefinitions>
+                  <TextBlock Text="Name" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="1" Text="{Binding NodeName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,8" />
+                  <TextBlock Grid.Column="2" Text="Tunnel IP" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="3" Text="{Binding TunnelIp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
+                  <TextBlock Grid.Row="1" Text="Endpoint" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Endpoint, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0" />
+                  <TextBlock Grid.Row="1" Grid.Column="2" Text="Port" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
+                  <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding ListenPort, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                  <CheckBox Content="Autoconnect" IsChecked="{Binding State.Autoconnect, Mode=OneWay}" Click="Autoconnect_Click" />
+                  <CheckBox Content="Launch on startup" IsChecked="{Binding State.LaunchOnStartup, Mode=OneWay}" Click="LaunchOnStartup_Click" />
+                  <CheckBox Content="Tray on close" IsChecked="{Binding State.CloseToTrayOnClose, Mode=OneWay}" Click="CloseToTray_Click" />
+                </StackPanel>
+                <Button Content="Save" Command="{Binding SaveNodeCommand}" HorizontalAlignment="Left" />
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="WireGuard Upstream" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
+                <CheckBox Content="Use WireGuard upstream" IsChecked="{Binding State.WireguardExitEnabled, Mode=OneWay}" Click="WireguardExit_Click" />
                 <Grid Margin="0,12,0,0">
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="110" />
@@ -277,40 +318,6 @@
                   </StackPanel>
                 </Grid>
                 <Button Content="Save WireGuard" Command="{Binding SaveWireGuardExitCommand}" HorizontalAlignment="Left" Margin="0,12,0,0" />
-              </StackPanel>
-            </Border>
-          </StackPanel>
-
-          <StackPanel Visibility="{Binding Page, Converter={StaticResource PageVisibility}, ConverterParameter=Settings}">
-            <Border Style="{StaticResource Card}">
-              <StackPanel>
-                <TextBlock Text="This Device" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
-                <Grid>
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="110" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="110" />
-                    <ColumnDefinition Width="160" />
-                  </Grid.ColumnDefinitions>
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                  </Grid.RowDefinitions>
-                  <TextBlock Text="Name" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
-                  <TextBox Grid.Column="1" Text="{Binding NodeName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,8" />
-                  <TextBlock Grid.Column="2" Text="Tunnel IP" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
-                  <TextBox Grid.Column="3" Text="{Binding TunnelIp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
-                  <TextBlock Grid.Row="1" Text="Endpoint" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
-                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Endpoint, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0" />
-                  <TextBlock Grid.Row="1" Grid.Column="2" Text="Port" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
-                  <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding ListenPort, UpdateSourceTrigger=PropertyChanged}" />
-                </Grid>
-                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                  <CheckBox Content="Autoconnect" IsChecked="{Binding State.Autoconnect, Mode=OneWay}" Click="Autoconnect_Click" />
-                  <CheckBox Content="Launch on startup" IsChecked="{Binding State.LaunchOnStartup, Mode=OneWay}" Click="LaunchOnStartup_Click" />
-                  <CheckBox Content="Tray on close" IsChecked="{Binding State.CloseToTrayOnClose, Mode=OneWay}" Click="CloseToTray_Click" />
-                </StackPanel>
-                <Button Content="Save" Command="{Binding SaveNodeCommand}" HorizontalAlignment="Left" />
               </StackPanel>
             </Border>
 

@@ -166,6 +166,13 @@ resolve_magic_dns() {
     "dig +short @127.0.0.1 -p 1053 '$name' A | tail -n1" | tr -d '\r'
 }
 
+resolve_system_magic_dns() {
+  local node="$1"
+  local name="$2"
+  "${COMPOSE[@]}" exec -T "$node" sh -lc \
+    "getent ahostsv4 '$name' | awk '{ print \$1; exit }'" | tr -d '\r'
+}
+
 send_udp_payload() {
   local source_node="$1"
   local target_ip="$2"
@@ -271,9 +278,20 @@ CHARLIE_STATUS="$("${COMPOSE[@]}" exec -T node-c nvpn status --json --discover-s
 
 BOB_TUNNEL_IP="$(resolve_magic_dns node-a bob.nvpn)"
 ALICE_TUNNEL_IP="$(resolve_magic_dns node-b alice.nvpn)"
+BOB_SYSTEM_TUNNEL_IP="$(resolve_system_magic_dns node-a bob.nvpn)"
+ALICE_SYSTEM_TUNNEL_IP="$(resolve_system_magic_dns node-b alice.nvpn)"
 
 if [[ -z "$BOB_TUNNEL_IP" || -z "$ALICE_TUNNEL_IP" ]]; then
   echo "fips routed udp e2e failed: magic dns did not resolve alice.nvpn/bob.nvpn" >&2
+  exit 1
+fi
+
+if [[ "$BOB_SYSTEM_TUNNEL_IP" != "$BOB_TUNNEL_IP" || "$ALICE_SYSTEM_TUNNEL_IP" != "$ALICE_TUNNEL_IP" ]]; then
+  echo "fips routed udp e2e failed: Linux system resolver did not resolve MagicDNS names" >&2
+  echo "node-a dig bob.nvpn:    $BOB_TUNNEL_IP" >&2
+  echo "node-a getent bob.nvpn: $BOB_SYSTEM_TUNNEL_IP" >&2
+  echo "node-b dig alice.nvpn:    $ALICE_TUNNEL_IP" >&2
+  echo "node-b getent alice.nvpn: $ALICE_SYSTEM_TUNNEL_IP" >&2
   exit 1
 fi
 
@@ -309,6 +327,8 @@ echo "$CHARLIE_STATUS"
 echo "--- Magic DNS ---"
 echo "node-a bob.nvpn -> $BOB_TUNNEL_IP"
 echo "node-b alice.nvpn -> $ALICE_TUNNEL_IP"
+echo "node-a getent bob.nvpn -> $BOB_SYSTEM_TUNNEL_IP"
+echo "node-b getent alice.nvpn -> $ALICE_SYSTEM_TUNNEL_IP"
 echo "--- Routes ---"
 echo "$ALICE_ROUTE"
 echo "$BOB_ROUTE"

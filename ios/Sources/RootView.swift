@@ -251,6 +251,7 @@ private struct SettingsPage: View {
         ScrollView {
             LazyVStack(spacing: 14) {
                 DeviceSettingsCard(model: model)
+                WireGuardSettingsCard(model: model)
                 NetworksCard(model: model)
                 DiagnosticsCard(state: model.state)
             }
@@ -444,6 +445,110 @@ private struct DeviceSettingsCard: View {
             endpoint = model.state.endpoint
             port = String(model.state.listenPort)
         }
+    }
+}
+
+private struct WireGuardSettingsCard: View {
+    @ObservedObject var model: AppModel
+    @State private var iface = ""
+    @State private var address = ""
+    @State private var privateKey = ""
+    @State private var peerPublicKey = ""
+    @State private var peerPresharedKey = ""
+    @State private var endpoint = ""
+    @State private var allowedIps = ""
+    @State private var dns = ""
+    @State private var mtu = ""
+    @State private var keepalive = ""
+
+    var body: some View {
+        AppCard {
+            Text("WireGuard Upstream")
+                .font(.headline)
+            Toggle("Enabled", isOn: Binding(
+                get: { model.state.wireguardExitEnabled },
+                set: { value in
+                    model.dispatch(NativeActions.updateSettings(["wireguardExitEnabled": value]), status: "Saving")
+                }
+            ))
+            TextField("Interface", text: $iface)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            TextField("Address", text: $address)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            TextField("Endpoint", text: $endpoint)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            TextField("Allowed IPs", text: $allowedIps)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            TextField("Peer Key", text: $peerPublicKey)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            SecureField("Private Key", text: $privateKey)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            SecureField("Preshared Key", text: $peerPresharedKey)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            TextField("DNS", text: $dns)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("MTU", text: $mtu)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Keepalive", text: $keepalive)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Button("Save") {
+                var patch: [String: Any] = [
+                    "wireguardExitInterface": iface,
+                    "wireguardExitAddress": address,
+                    "wireguardExitPrivateKey": privateKey,
+                    "wireguardExitPeerPublicKey": peerPublicKey,
+                    "wireguardExitPeerPresharedKey": peerPresharedKey,
+                    "wireguardExitEndpoint": endpoint,
+                    "wireguardExitAllowedIps": allowedIps,
+                    "wireguardExitDns": dns,
+                ]
+                if let parsedMtu = Int(mtu) {
+                    patch["wireguardExitMtu"] = parsedMtu
+                }
+                if let parsedKeepalive = Int(keepalive) {
+                    patch["wireguardExitPersistentKeepaliveSecs"] = parsedKeepalive
+                }
+                model.dispatch(NativeActions.updateSettings(patch), status: "Saving")
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .onAppear(perform: sync)
+        .onChange(of: model.state.rev) { _, _ in
+            sync()
+        }
+    }
+
+    private func sync() {
+        iface = model.state.wireguardExitInterface
+        address = model.state.wireguardExitAddress
+        privateKey = model.state.wireguardExitPrivateKey
+        peerPublicKey = model.state.wireguardExitPeerPublicKey
+        peerPresharedKey = model.state.wireguardExitPeerPresharedKey
+        endpoint = model.state.wireguardExitEndpoint
+        allowedIps = model.state.wireguardExitAllowedIps
+        dns = model.state.wireguardExitDns
+        mtu = String(model.state.wireguardExitMtu)
+        keepalive = String(model.state.wireguardExitPersistentKeepaliveSecs)
     }
 }
 

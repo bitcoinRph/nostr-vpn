@@ -25,6 +25,18 @@ struct AppState: Decodable {
     var exitNode = ""
     var advertiseExitNode = false
     var advertisedRoutes: [String] = []
+    var wireguardExitEnabled = false
+    var wireguardExitConfigured = false
+    var wireguardExitInterface = ""
+    var wireguardExitAddress = ""
+    var wireguardExitPrivateKey = ""
+    var wireguardExitPeerPublicKey = ""
+    var wireguardExitPeerPresharedKey = ""
+    var wireguardExitEndpoint = ""
+    var wireguardExitAllowedIps = ""
+    var wireguardExitDns = ""
+    var wireguardExitMtu: Int = 0
+    var wireguardExitPersistentKeepaliveSecs: Int = 0
     var magicDnsSuffix = ""
     var magicDnsStatus = ""
     var autoconnect = false
@@ -44,7 +56,12 @@ struct AppState: Decodable {
         case runtimeStatusDetail, vpnEnabled, vpnActive, vpnStatus, daemonRunning
         case ownNpub, nodeName, selfMagicDnsName, tunnelIp, endpoint, listenPort, activeNetworkInvite
         case connectedPeerCount, expectedPeerCount, meshReady, exitNode, advertiseExitNode
-        case advertisedRoutes, magicDnsSuffix, magicDnsStatus, autoconnect
+        case advertisedRoutes
+        case wireguardExitEnabled, wireguardExitConfigured, wireguardExitInterface, wireguardExitAddress
+        case wireguardExitPrivateKey, wireguardExitPeerPublicKey, wireguardExitPeerPresharedKey
+        case wireguardExitEndpoint, wireguardExitAllowedIps, wireguardExitDns
+        case wireguardExitMtu, wireguardExitPersistentKeepaliveSecs
+        case magicDnsSuffix, magicDnsStatus, autoconnect
         case lanPairingActive, lanPairingRemainingSecs, configPath
         case networks, lanPeers, health
     }
@@ -77,6 +94,18 @@ struct AppState: Decodable {
         exitNode = container.string(.exitNode)
         advertiseExitNode = container.bool(.advertiseExitNode)
         advertisedRoutes = container.array(.advertisedRoutes)
+        wireguardExitEnabled = container.bool(.wireguardExitEnabled)
+        wireguardExitConfigured = container.bool(.wireguardExitConfigured)
+        wireguardExitInterface = container.string(.wireguardExitInterface)
+        wireguardExitAddress = container.string(.wireguardExitAddress)
+        wireguardExitPrivateKey = container.string(.wireguardExitPrivateKey)
+        wireguardExitPeerPublicKey = container.string(.wireguardExitPeerPublicKey)
+        wireguardExitPeerPresharedKey = container.string(.wireguardExitPeerPresharedKey)
+        wireguardExitEndpoint = container.string(.wireguardExitEndpoint)
+        wireguardExitAllowedIps = container.string(.wireguardExitAllowedIps)
+        wireguardExitDns = container.string(.wireguardExitDns)
+        wireguardExitMtu = container.int(.wireguardExitMtu)
+        wireguardExitPersistentKeepaliveSecs = container.int(.wireguardExitPersistentKeepaliveSecs)
         magicDnsSuffix = container.string(.magicDnsSuffix)
         magicDnsStatus = container.string(.magicDnsStatus)
         autoconnect = container.bool(.autoconnect)

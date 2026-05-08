@@ -1481,23 +1481,6 @@ fn build_exit_nodes_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) 
             },
         },
     );
-    setting_entry(app, &offer, "Interface", "wireguard_exit_interface");
-    setting_entry(app, &offer, "Address", "wireguard_exit_address");
-    setting_entry(app, &offer, "Endpoint", "wireguard_exit_endpoint");
-    setting_entry(app, &offer, "Peer Key", "wireguard_exit_peer_public_key");
-    setting_entry(app, &offer, "Private Key", "wireguard_exit_private_key");
-    setting_entry(app, &offer, "Preshared Key", "wireguard_exit_peer_preshared_key");
-    setting_entry(app, &offer, "Allowed IPs", "wireguard_exit_allowed_ips");
-    setting_entry(app, &offer, "DNS", "wireguard_exit_dns");
-    setting_entry(app, &offer, "MTU", "wireguard_exit_mtu");
-    setting_entry(app, &offer, "Keepalive", "wireguard_exit_keepalive");
-    let save_wg = icon_text_button("Save WireGuard", "");
-    save_wg.set_halign(gtk::Align::Start);
-    {
-        let app = app.clone();
-        save_wg.connect_clicked(move |_| save_wireguard_exit_settings(&app));
-    }
-    offer.append(&save_wg);
     page.append(&offer);
 }
 
@@ -1578,6 +1561,8 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     }
     device.append(&save);
     page.append(&device);
+
+    build_wireguard_settings_card(app, page, state);
 
     let network = card();
     let network_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -2136,6 +2121,46 @@ fn save_wireguard_exit_settings(app: &AppRef) {
             },
         },
     );
+}
+
+fn build_wireguard_settings_card(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
+    let card = card();
+    section_header(&card, "WireGuard Upstream", "");
+    switch_row(
+        app,
+        &card,
+        "Use WireGuard upstream",
+        state.wireguard_exit_enabled,
+        |enabled| NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                wireguard_exit_enabled: Some(enabled),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+    setting_entry(app, &card, "Interface", "wireguard_exit_interface");
+    setting_entry(app, &card, "Address", "wireguard_exit_address");
+    setting_entry(app, &card, "Endpoint", "wireguard_exit_endpoint");
+    setting_entry(app, &card, "Peer Key", "wireguard_exit_peer_public_key");
+    setting_entry(app, &card, "Private Key", "wireguard_exit_private_key");
+    setting_entry(
+        app,
+        &card,
+        "Preshared Key",
+        "wireguard_exit_peer_preshared_key",
+    );
+    setting_entry(app, &card, "Allowed IPs", "wireguard_exit_allowed_ips");
+    setting_entry(app, &card, "DNS", "wireguard_exit_dns");
+    setting_entry(app, &card, "MTU", "wireguard_exit_mtu");
+    setting_entry(app, &card, "Keepalive", "wireguard_exit_keepalive");
+    let save_wg = icon_text_button("Save WireGuard", "");
+    save_wg.set_halign(gtk::Align::Start);
+    {
+        let app = app.clone();
+        save_wg.connect_clicked(move |_| save_wireguard_exit_settings(&app));
+    }
+    card.append(&save_wg);
+    page.append(&card);
 }
 
 fn saved_network_row(

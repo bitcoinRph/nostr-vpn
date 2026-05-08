@@ -684,61 +684,6 @@ struct RootView: View {
                     set: { manager.setWireGuardExitEnabled($0) }
                 ))
                 .disabled(manager.actionInFlight)
-
-                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
-                    GridRow {
-                        label("Interface")
-                        TextField("Interface", text: $wireguardExitInterface)
-                        label("Address")
-                        TextField("Address", text: $wireguardExitAddress)
-                    }
-                    GridRow {
-                        label("Endpoint")
-                        TextField("Endpoint", text: $wireguardExitEndpoint)
-                        label("Allowed IPs")
-                        TextField("Allowed IPs", text: $wireguardExitAllowedIps)
-                    }
-                    GridRow {
-                        label("Peer Key")
-                        TextField("Peer Key", text: $wireguardExitPeerPublicKey)
-                    }
-                    GridRow {
-                        label("Private Key")
-                        SecureField("Private Key", text: $wireguardExitPrivateKey)
-                    }
-                    GridRow {
-                        label("Preshared")
-                        SecureField("Preshared", text: $wireguardExitPeerPresharedKey)
-                    }
-                    GridRow {
-                        label("DNS")
-                        TextField("DNS", text: $wireguardExitDns)
-                        label("MTU")
-                        TextField("MTU", text: $wireguardExitMtu)
-                    }
-                    GridRow {
-                        label("Keepalive")
-                        TextField("Keepalive", text: $wireguardExitKeepalive)
-                    }
-                }
-
-                Button {
-                    manager.saveWireGuardExitSettings(
-                        interface: wireguardExitInterface,
-                        address: wireguardExitAddress,
-                        privateKey: wireguardExitPrivateKey,
-                        peerPublicKey: wireguardExitPeerPublicKey,
-                        peerPresharedKey: wireguardExitPeerPresharedKey,
-                        endpoint: wireguardExitEndpoint,
-                        allowedIps: wireguardExitAllowedIps,
-                        dns: wireguardExitDns,
-                        mtu: wireguardExitMtu,
-                        keepalive: wireguardExitKeepalive
-                    )
-                } label: {
-                    Label("Save WireGuard", systemImage: "checkmark")
-                }
-                .disabled(manager.actionInFlight)
             }
         }
     }
@@ -775,6 +720,7 @@ struct RootView: View {
     private var settingsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             deviceSettings
+            wireGuardExitSettings
             networkSettings
             systemSettings
 
@@ -830,6 +776,73 @@ struct RootView: View {
                 )
             } label: {
                 Label("Save", systemImage: "checkmark")
+            }
+            .disabled(manager.actionInFlight)
+        }
+    }
+
+    private var wireGuardExitSettings: some View {
+        surface {
+            sectionHeader("WireGuard Upstream", systemImage: "network")
+
+            Toggle("Use WireGuard upstream", isOn: Binding(
+                get: { state.wireguardExitEnabled },
+                set: { manager.setWireGuardExitEnabled($0) }
+            ))
+            .disabled(manager.actionInFlight)
+
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
+                GridRow {
+                    label("Interface")
+                    TextField("Interface", text: $wireguardExitInterface)
+                    label("Address")
+                    TextField("Address", text: $wireguardExitAddress)
+                }
+                GridRow {
+                    label("Endpoint")
+                    TextField("Endpoint", text: $wireguardExitEndpoint)
+                    label("Allowed IPs")
+                    TextField("Allowed IPs", text: $wireguardExitAllowedIps)
+                }
+                GridRow {
+                    label("Peer Key")
+                    TextField("Peer Key", text: $wireguardExitPeerPublicKey)
+                }
+                GridRow {
+                    label("Private Key")
+                    SecureField("Private Key", text: $wireguardExitPrivateKey)
+                }
+                GridRow {
+                    label("Preshared")
+                    SecureField("Preshared", text: $wireguardExitPeerPresharedKey)
+                }
+                GridRow {
+                    label("DNS")
+                    TextField("DNS", text: $wireguardExitDns)
+                    label("MTU")
+                    TextField("MTU", text: $wireguardExitMtu)
+                }
+                GridRow {
+                    label("Keepalive")
+                    TextField("Keepalive", text: $wireguardExitKeepalive)
+                }
+            }
+
+            Button {
+                manager.saveWireGuardExitSettings(
+                    interface: wireguardExitInterface,
+                    address: wireguardExitAddress,
+                    privateKey: wireguardExitPrivateKey,
+                    peerPublicKey: wireguardExitPeerPublicKey,
+                    peerPresharedKey: wireguardExitPeerPresharedKey,
+                    endpoint: wireguardExitEndpoint,
+                    allowedIps: wireguardExitAllowedIps,
+                    dns: wireguardExitDns,
+                    mtu: wireguardExitMtu,
+                    keepalive: wireguardExitKeepalive
+                )
+            } label: {
+                Label("Save WireGuard", systemImage: "checkmark")
             }
             .disabled(manager.actionInFlight)
         }

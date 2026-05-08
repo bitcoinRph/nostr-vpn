@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::fs;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 use std::io::ErrorKind;
@@ -31,6 +31,7 @@ pub struct MagicDnsResolverConfig {
     pub suffix: String,
     pub nameserver: Ipv4Addr,
     pub port: u16,
+    pub records: HashMap<String, Ipv4Addr>,
 }
 
 pub struct MagicDnsServer {
@@ -221,7 +222,7 @@ pub fn install_system_resolver(config: &MagicDnsResolverConfig) -> Result<()> {
 
     #[cfg(target_os = "linux")]
     {
-        install_linux_resolver(&suffix, config.nameserver, config.port)
+        install_linux_resolver(&suffix, config.nameserver, config.port, &config.records)
     }
 
     #[cfg(target_os = "windows")]
@@ -334,22 +335,57 @@ fn macos_resolver_path(suffix: &str) -> PathBuf {
 }
 
 #[cfg(target_os = "linux")]
-fn install_linux_resolver(suffix: &str, nameserver: Ipv4Addr, port: u16) -> Result<()> {
+const LINUX_HOSTS_BEGIN: &str = "# BEGIN nostr-vpn MagicDNS";
+#[cfg(target_os = "linux")]
+const LINUX_HOSTS_END: &str = "# END nostr-vpn MagicDNS";
+#[cfg(target_os = "linux")]
+const LINUX_HOSTS_PATH: &str = "/etc/hosts";
+
+#[cfg(target_os = "linux")]
+fn install_linux_resolver(
+    suffix: &str,
+    nameserver: Ipv4Addr,
+    port: u16,
+    records: &HashMap<String, Ipv4Addr>,
+) -> Result<()> {
     let resolver = if port == 53 {
         nameserver.to_string()
     } else {
         format!("{nameserver}:{port}")
     };
 
-    run_linux_resolvectl(&["dns", "lo", &resolver])?;
-    run_linux_resolvectl(&["domain", "lo", &format!("~{suffix}")])?;
-    let _ = run_linux_resolvectl(&["flush-caches"]);
-    Ok(())
+    let resolved_install = (|| -> Result<()> {
+        run_linux_resolvectl(&["dns", "lo", &resolver])?;
+        run_linux_resolvectl(&["domain", "lo", &format!("~{suffix}")])?;
+        let _ = run_linux_resolvectl(&["flush-caches"]);
+        Ok(())
+    })();
+
+    match resolved_install {
+        Ok(()) => {
+            let _ = uninstall_linux_hosts_fallback();
+            Ok(())
+        }
+        Err(resolved_error) => install_linux_hosts_fallback(suffix, records).with_context(|| {
+            format!("systemd-resolved setup failed ({resolved_error}) and hosts fallback failed")
+        }),
+    }
 }
 
 #[cfg(target_os = "linux")]
 fn uninstall_linux_resolver(_suffix: &str) -> Result<()> {
-    run_linux_resolvectl(&["revert", "lo"])
+    let resolved_uninstall = run_linux_resolvectl(&["revert", "lo"]);
+    let hosts_uninstall = uninstall_linux_hosts_fallback();
+
+    match (resolved_uninstall, hosts_uninstall) {
+        (Ok(()), Ok(_)) => Ok(()),
+        (Err(_), Ok(true)) => Ok(()),
+        (Err(resolved_error), Ok(false)) => Err(resolved_error),
+        (Ok(()), Err(hosts_error)) => Err(hosts_error),
+        (Err(resolved_error), Err(hosts_error)) => Err(anyhow!(
+            "resolvectl cleanup failed ({resolved_error}); hosts cleanup failed ({hosts_error})"
+        )),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -379,6 +415,101 @@ fn run_linux_resolvectl(args: &[&str]) -> Result<()> {
         stderr.trim()
     };
     Err(anyhow!("resolvectl {} failed: {details}", args.join(" ")))
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_hosts_fallback(suffix: &str, records: &HashMap<String, Ipv4Addr>) -> Result<()> {
+    let suffix = suffix.trim().trim_matches('.').to_ascii_lowercase();
+    let mut entries = records
+        .iter()
+        .filter_map(|(name, ip)| {
+            let name = name.trim().trim_matches('.').to_ascii_lowercase();
+            if name.ends_with(&format!(".{suffix}")) {
+                Some((name, *ip))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    entries.dedup_by(|left, right| left.0 == right.0);
+
+    if entries.is_empty() {
+        return Err(anyhow!(
+            "no .{suffix} MagicDNS records available for hosts fallback"
+        ));
+    }
+
+    let current = read_linux_hosts_file()?;
+    let mut next = remove_linux_hosts_magic_dns_block(&current);
+    if !next.ends_with('\n') && !next.is_empty() {
+        next.push('\n');
+    }
+    next.push_str(LINUX_HOSTS_BEGIN);
+    next.push('\n');
+    next.push_str("# Managed by nostr-vpn. Changes inside this block will be overwritten.\n");
+    for (name, ip) in entries {
+        next.push_str(&format!("{ip}\t{name}\n"));
+    }
+    next.push_str(LINUX_HOSTS_END);
+    next.push('\n');
+
+    write_linux_hosts_file(&next)
+}
+
+#[cfg(target_os = "linux")]
+fn uninstall_linux_hosts_fallback() -> Result<bool> {
+    let current = read_linux_hosts_file()?;
+    let next = remove_linux_hosts_magic_dns_block(&current);
+    if next == current {
+        return Ok(false);
+    }
+    write_linux_hosts_file(&next)?;
+    Ok(true)
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_hosts_file() -> Result<String> {
+    match fs::read_to_string(LINUX_HOSTS_PATH) {
+        Ok(contents) => Ok(contents),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(String::new()),
+        Err(error) if error.kind() == ErrorKind::PermissionDenied => Err(anyhow!(
+            "permission denied reading {LINUX_HOSTS_PATH}; run with admin privileges"
+        )),
+        Err(error) => Err(anyhow!("failed to read {LINUX_HOSTS_PATH}: {error}")),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn write_linux_hosts_file(contents: &str) -> Result<()> {
+    fs::write(LINUX_HOSTS_PATH, contents).map_err(|error| {
+        if error.kind() == ErrorKind::PermissionDenied {
+            anyhow!("permission denied writing {LINUX_HOSTS_PATH}; run with admin privileges")
+        } else {
+            anyhow!("failed to write {LINUX_HOSTS_PATH}: {error}")
+        }
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn remove_linux_hosts_magic_dns_block(contents: &str) -> String {
+    let mut out = String::new();
+    let mut in_block = false;
+    for line in contents.lines() {
+        if line.trim() == LINUX_HOSTS_BEGIN {
+            in_block = true;
+            continue;
+        }
+        if line.trim() == LINUX_HOSTS_END {
+            in_block = false;
+            continue;
+        }
+        if !in_block {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 #[cfg(any(target_os = "windows", test))]

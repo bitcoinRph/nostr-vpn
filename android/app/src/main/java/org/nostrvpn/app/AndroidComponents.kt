@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -25,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +39,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
@@ -57,13 +60,13 @@ internal fun ParticipantRow(state: AppState, participant: ParticipantState) {
             Dot(selected = if (isSelf) state.vpnActive else participant.reachable)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        participant.displayName(state),
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                Text(
+                    participant.displayName(state),
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (isSelf) Pill("Self", Color(0xFFECFDF5), Ok)
                     if (participant.isAdmin) Pill("Admin", Color(0xFFF5F3FF), Accent)
                     if (participant.offersExitNode) Pill("Exit", Color(0xFFFFF7ED), Color(0xFFA16207))
@@ -186,6 +189,79 @@ internal fun DeviceSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit)
                     "endpoint" to endpoint,
                     "tunnelIp" to tunnelIp,
                     "listenPort" to port.toIntOrNull(),
+                ),
+            )
+        }) {
+            Text("Save")
+        }
+    }
+}
+
+@Composable
+internal fun WireGuardSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit) {
+    var iface by remember(state.wireguardExitInterface) { mutableStateOf(state.wireguardExitInterface) }
+    var address by remember(state.wireguardExitAddress) { mutableStateOf(state.wireguardExitAddress) }
+    var privateKey by remember(state.wireguardExitPrivateKey) { mutableStateOf(state.wireguardExitPrivateKey) }
+    var peerPublicKey by remember(state.wireguardExitPeerPublicKey) { mutableStateOf(state.wireguardExitPeerPublicKey) }
+    var peerPresharedKey by remember(state.wireguardExitPeerPresharedKey) { mutableStateOf(state.wireguardExitPeerPresharedKey) }
+    var endpoint by remember(state.wireguardExitEndpoint) { mutableStateOf(state.wireguardExitEndpoint) }
+    var allowedIps by remember(state.wireguardExitAllowedIps) { mutableStateOf(state.wireguardExitAllowedIps) }
+    var dns by remember(state.wireguardExitDns) { mutableStateOf(state.wireguardExitDns) }
+    var mtu by remember(state.wireguardExitMtu) { mutableStateOf(state.wireguardExitMtu.toString()) }
+    var keepalive by remember(state.wireguardExitPersistentKeepaliveSecs) {
+        mutableStateOf(state.wireguardExitPersistentKeepaliveSecs.toString())
+    }
+
+    AppCard {
+        Text("WireGuard Upstream", style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Enabled", modifier = Modifier.weight(1f))
+            Switch(
+                checked = state.wireguardExitEnabled,
+                onCheckedChange = { enabled ->
+                    dispatch(NativeActions.updateSettings("wireguardExitEnabled" to enabled))
+                },
+            )
+        }
+        OutlinedTextField(iface, { iface = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Interface") })
+        OutlinedTextField(address, { address = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Address") })
+        OutlinedTextField(endpoint, { endpoint = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Endpoint") })
+        OutlinedTextField(allowedIps, { allowedIps = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Allowed IPs") })
+        OutlinedTextField(peerPublicKey, { peerPublicKey = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Peer Key") })
+        OutlinedTextField(
+            privateKey,
+            { privateKey = it },
+            Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Private Key") },
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        OutlinedTextField(
+            peerPresharedKey,
+            { peerPresharedKey = it },
+            Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Preshared Key") },
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        OutlinedTextField(dns, { dns = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("DNS") })
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(mtu, { mtu = it }, Modifier.weight(1f), singleLine = true, label = { Text("MTU") })
+            OutlinedTextField(keepalive, { keepalive = it }, Modifier.weight(1f), singleLine = true, label = { Text("Keepalive") })
+        }
+        Button(onClick = {
+            dispatch(
+                NativeActions.updateSettings(
+                    "wireguardExitInterface" to iface,
+                    "wireguardExitAddress" to address,
+                    "wireguardExitPrivateKey" to privateKey,
+                    "wireguardExitPeerPublicKey" to peerPublicKey,
+                    "wireguardExitPeerPresharedKey" to peerPresharedKey,
+                    "wireguardExitEndpoint" to endpoint,
+                    "wireguardExitAllowedIps" to allowedIps,
+                    "wireguardExitDns" to dns,
+                    "wireguardExitMtu" to mtu.toIntOrNull(),
+                    "wireguardExitPersistentKeepaliveSecs" to keepalive.toIntOrNull(),
                 ),
             )
         }) {
@@ -331,8 +407,8 @@ internal fun CopyButton(value: String) {
     TextButton(enabled = value.isNotBlank(), onClick = {
         val clipboard = context.getSystemService(ClipboardManager::class.java)
         clipboard.setPrimaryClip(ClipData.newPlainText("Nostr VPN", value))
-    }) {
-        Text("Copy")
+    }, modifier = Modifier.widthIn(min = 64.dp)) {
+        Text("Copy", maxLines = 1, softWrap = false)
     }
 }
 
@@ -360,6 +436,8 @@ internal fun Pill(text: String, background: Color, foreground: Color) {
         text = text,
         color = foreground,
         style = MaterialTheme.typography.labelSmall,
+        maxLines = 1,
+        softWrap = false,
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(background)

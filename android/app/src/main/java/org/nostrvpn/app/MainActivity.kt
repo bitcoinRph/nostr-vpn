@@ -19,6 +19,7 @@ import org.json.JSONObject
 import org.nostrvpn.app.core.AppCoreClient
 import org.nostrvpn.app.core.NativeActions
 import org.nostrvpn.app.vpn.NostrVpnService
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     private var deepLink by mutableStateOf<String?>(null)
@@ -28,7 +29,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         deepLink = intent?.dataString
         debugAction = intent?.getStringExtra(EXTRA_DEBUG_ACTION)
-        val core = AppCoreClient(filesDir.resolve("app-core").absolutePath, BuildConfig.VERSION_NAME)
+        val dataDir = filesDir.resolve("app-core")
+        seedMobileConfig(dataDir, androidDeviceName())
+        val core = AppCoreClient(dataDir.absolutePath, BuildConfig.VERSION_NAME)
 
         setContent {
             var state by remember { mutableStateOf(core.state()) }
@@ -146,6 +149,39 @@ class MainActivity : ComponentActivity() {
             startService(intent)
         }
     }
+
+    private fun seedMobileConfig(dataDir: File, deviceName: String) {
+        val name = deviceName.trim()
+        if (name.isEmpty()) return
+        val config = dataDir.resolve("config.toml")
+        if (config.exists()) return
+
+        runCatching {
+            dataDir.mkdirs()
+            config.writeText("node_name = \"${tomlString(name)}\"\n")
+        }
+    }
+
+    private fun androidDeviceName(): String {
+        val manufacturer = Build.MANUFACTURER.orEmpty().trim()
+        val model = Build.MODEL.orEmpty().trim()
+        val prefix = titlecaseAscii(manufacturer)
+        return when {
+            model.isEmpty() -> prefix
+            prefix.isEmpty() -> model
+            model.startsWith(manufacturer, ignoreCase = true) -> model
+            else -> "$prefix $model"
+        }.ifBlank { "Android device" }
+    }
+
+    private fun titlecaseAscii(value: String): String =
+        when {
+            value.isEmpty() -> ""
+            else -> value.take(1).uppercase() + value.drop(1)
+        }
+
+    private fun tomlString(value: String): String =
+        value.replace("\\", "\\\\").replace("\"", "\\\"")
 
     companion object {
         const val EXTRA_DEBUG_ACTION = "org.nostrvpn.app.DEBUG_ACTION"

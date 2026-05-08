@@ -426,6 +426,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
     dispatch: (JSONObject) -> Unit,
 ) {
     item { DeviceSettingsCard(state, dispatch) }
+    item { WireGuardSettingsCard(state, dispatch) }
     item { NetworksCard(state, network, dispatch) }
     item { DiagnosticsCard(state) }
 }

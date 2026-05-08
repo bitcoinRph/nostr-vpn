@@ -1896,6 +1896,61 @@ mod tests {
         assert_eq!(state.vpn_status, "VPN on");
     }
 
+    #[test]
+    fn settings_patch_persists_wireguard_exit_config() {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-wireguard-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        runtime.mobile_runtime = true;
+        runtime.config_path = dir.join("config.toml");
+
+        runtime.dispatch(NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                wireguard_exit_enabled: Some(true),
+                wireguard_exit_interface: Some("custom-wg".to_string()),
+                wireguard_exit_address: Some("10.200.0.2/32".to_string()),
+                wireguard_exit_private_key: Some("private".to_string()),
+                wireguard_exit_peer_public_key: Some("peer".to_string()),
+                wireguard_exit_peer_preshared_key: Some("psk".to_string()),
+                wireguard_exit_endpoint: Some("198.51.100.20:51830".to_string()),
+                wireguard_exit_allowed_ips: Some("0.0.0.0/0".to_string()),
+                wireguard_exit_dns: Some("9.9.9.9".to_string()),
+                wireguard_exit_mtu: Some(1380),
+                wireguard_exit_persistent_keepalive_secs: Some(20),
+                ..SettingsPatch::default()
+            },
+        });
+
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
+        assert!(saved.wireguard_exit.enabled);
+        assert_eq!(saved.wireguard_exit.interface, "custom-wg");
+        assert_eq!(saved.wireguard_exit.address, "10.200.0.2/32");
+        assert_eq!(saved.wireguard_exit.private_key, "private");
+        assert_eq!(saved.wireguard_exit.peer_public_key, "peer");
+        assert_eq!(saved.wireguard_exit.peer_preshared_key, "psk");
+        assert_eq!(saved.wireguard_exit.endpoint, "198.51.100.20:51830");
+        assert_eq!(saved.wireguard_exit.allowed_ips, vec!["0.0.0.0/0"]);
+        assert_eq!(saved.wireguard_exit.dns, vec!["9.9.9.9"]);
+        assert_eq!(saved.wireguard_exit.mtu, 1380);
+        assert_eq!(saved.wireguard_exit.persistent_keepalive_secs, 20);
+
+        let state = runtime.state();
+        assert!(state.wireguard_exit_enabled);
+        assert!(state.wireguard_exit_configured);
+        assert_eq!(state.wireguard_exit_interface, "custom-wg");
+        assert_eq!(state.wireguard_exit_allowed_ips, "0.0.0.0/0");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[cfg(unix)]
     #[test]
     fn connect_vpn_resumes_running_daemon_without_elevated_start() {

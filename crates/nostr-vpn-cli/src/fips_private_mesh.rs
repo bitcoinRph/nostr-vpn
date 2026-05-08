@@ -1165,12 +1165,19 @@ impl FipsPrivateTunnelRuntime {
 
     pub(crate) async fn refresh_peer_dependent_routes(&mut self) -> Result<()> {
         #[cfg(target_os = "linux")]
-        if !crate::route_targets_require_endpoint_bypass(&self.config.route_targets) {
-            return Ok(());
+        {
+            if !crate::route_targets_require_endpoint_bypass(&self.config.route_targets) {
+                return Ok(());
+            }
+
+            let config = self.config.clone();
+            return self.apply_interface_config(&config).await;
         }
 
-        let config = self.config.clone();
-        self.apply_interface_config(&config).await
+        #[cfg(target_os = "macos")]
+        {
+            Ok(())
+        }
     }
 
     pub(crate) async fn ping_peers(&self, network_id: &str, now: u64) -> Result<usize> {

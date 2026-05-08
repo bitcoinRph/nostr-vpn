@@ -1453,7 +1453,7 @@ impl ConnectMagicDnsRuntime {
                 );
                 match MagicDnsServer::start(
                     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
-                    records,
+                    records.clone(),
                 ) {
                     Ok(server) => server,
                     Err(error) => {
@@ -1497,6 +1497,7 @@ impl ConnectMagicDnsRuntime {
             suffix: suffix.clone(),
             nameserver,
             port: local_addr.port(),
+            records,
         };
 
         match install_system_resolver(&resolver_config) {
