@@ -37,6 +37,10 @@ public sealed class NativeAppState
     public string NetworkId { get; set; } = "";
     public string ActiveNetworkInvite { get; set; } = "";
     public string ExitNode { get; set; } = "";
+    public bool ExitNodeLeakProtection { get; set; }
+    public bool ExitNodeActive { get; set; }
+    public bool ExitNodeBlocked { get; set; }
+    public string ExitNodeStatusText { get; set; } = "";
     public bool AdvertiseExitNode { get; set; }
     public List<string> AdvertisedRoutes { get; set; } = [];
     public List<string> EffectiveAdvertisedRoutes { get; set; } = [];
@@ -52,6 +56,7 @@ public sealed class NativeAppState
     public string WireguardExitDns { get; set; } = "";
     public ushort WireguardExitMtu { get; set; }
     public ushort WireguardExitPersistentKeepaliveSecs { get; set; }
+    public string WireguardExitConfig { get; set; } = "";
     public string MagicDnsSuffix { get; set; } = "";
     public string MagicDnsStatus { get; set; } = "";
     public bool Autoconnect { get; set; }
@@ -113,6 +118,31 @@ public sealed class NativeParticipantState
     public string MeshState { get; set; } = "";
     public string StatusText { get; set; } = "";
     public string LastSeenText { get; set; } = "";
+    public bool IsFipsDirect => Reachable
+        && !string.Equals(State, "local", StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrWhiteSpace(FipsTransportAddr);
+    public bool IsFipsRouted => Reachable
+        && !string.Equals(State, "local", StringComparison.OrdinalIgnoreCase)
+        && string.IsNullOrWhiteSpace(FipsTransportAddr);
+    public string FipsPathText
+    {
+        get
+        {
+            if (string.Equals(State, "local", StringComparison.OrdinalIgnoreCase))
+            {
+                return "This device";
+            }
+            if (IsFipsDirect)
+            {
+                return FipsSrttMs > 0 ? $"Direct FIPS {FipsSrttMs} ms" : "Direct FIPS";
+            }
+            if (IsFipsRouted)
+            {
+                return "FIPS routed";
+            }
+            return "Offline";
+        }
+    }
 }
 
 public sealed class NativeOutboundJoinRequestState

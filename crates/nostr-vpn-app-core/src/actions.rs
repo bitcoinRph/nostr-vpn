@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::state::SettingsPatch;
 
 #[derive(uniffi::Enum, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 #[serde(
     tag = "type",
     rename_all = "snake_case",
@@ -108,18 +109,25 @@ mod tests {
 
     #[test]
     fn update_settings_action_round_trips() {
-        let encoded = r#"{"type":"update_settings","patch":{"nodeName":"office","listenPort":51821,"advertiseExitNode":true,"wireguardExitEnabled":true,"wireguardExitEndpoint":"198.51.100.20:51830"}}"#;
+        let encoded = r#"{"type":"update_settings","patch":{"nodeName":"office","listenPort":51821,"exitNodeLeakProtection":true,"advertiseExitNode":true,"wireguardExitEnabled":true,"wireguardExitEndpoint":"198.51.100.20:51830","wireguardExitConfig":"[Interface]\nPrivateKey = client\nAddress = 10.0.0.2/32\n\n[Peer]\nPublicKey = peer\nAllowedIPs = 0.0.0.0/0\nEndpoint = vpn.example.test:51820"}}"#;
 
         let action = serde_json::from_str::<NativeAppAction>(encoded).expect("parse action");
         match action {
             NativeAppAction::UpdateSettings { patch } => {
                 assert_eq!(patch.node_name.as_deref(), Some("office"));
                 assert_eq!(patch.listen_port, Some(51821));
+                assert_eq!(patch.exit_node_leak_protection, Some(true));
                 assert_eq!(patch.advertise_exit_node, Some(true));
                 assert_eq!(patch.wireguard_exit_enabled, Some(true));
                 assert_eq!(
                     patch.wireguard_exit_endpoint.as_deref(),
                     Some("198.51.100.20:51830")
+                );
+                assert!(
+                    patch
+                        .wireguard_exit_config
+                        .as_deref()
+                        .is_some_and(|config| config.contains("[Interface]"))
                 );
             }
             other => panic!("unexpected action: {other:?}"),

@@ -59,11 +59,13 @@ pub(crate) fn apply_linux_wireguard_exit_upstream(
     config: &WireGuardExitConfig,
     source_cidr: &str,
     previous_runtime: Option<&crate::LinuxWireGuardExitRuntime>,
+    previous_default_route_hint: Option<&str>,
 ) -> Result<crate::LinuxWireGuardExitRuntime> {
     let iface = validate_linux_wireguard_exit_config(config)?;
     let created_interface = ensure_linux_wireguard_link(&iface)?;
     let previous_default_route = previous_runtime
         .and_then(|runtime| runtime.previous_default_route.clone())
+        .or_else(|| previous_default_route_hint.map(ToOwned::to_owned))
         .or_else(|| {
             crate::linux_default_route()
                 .ok()

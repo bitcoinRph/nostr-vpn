@@ -1194,7 +1194,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "fips-core"
 version = "0.3.0-dev"
-source = "git+https://github.com/mmalmi/fips.git?rev=86f2e2f0c2c8b65f5e48d19107c1f9096a9f2fca#86f2e2f0c2c8b65f5e48d19107c1f9096a9f2fca"
+source = "git+https://github.com/mmalmi/fips.git?rev=46dbc3b90bde6eb72a232990718ec6c3647f7f48#46dbc3b90bde6eb72a232990718ec6c3647f7f48"
 dependencies = [
  "bluer",
  "chacha20poly1305",
@@ -1228,7 +1228,7 @@ dependencies = [
 [[package]]
 name = "fips-endpoint"
 version = "0.3.0-dev"
-source = "git+https://github.com/mmalmi/fips.git?rev=86f2e2f0c2c8b65f5e48d19107c1f9096a9f2fca#86f2e2f0c2c8b65f5e48d19107c1f9096a9f2fca"
+source = "git+https://github.com/mmalmi/fips.git?rev=46dbc3b90bde6eb72a232990718ec6c3647f7f48#46dbc3b90bde6eb72a232990718ec6c3647f7f48"
 dependencies = [
  "fips-core",
 ]
@@ -1236,7 +1236,7 @@ dependencies = [
 [[package]]
 name = "fips-identity"
 version = "0.3.0-dev"
-source = "git+https://github.com/mmalmi/fips.git?rev=86f2e2f0c2c8b65f5e48d19107c1f9096a9f2fca#86f2e2f0c2c8b65f5e48d19107c1f9096a9f2fca"
+source = "git+https://github.com/mmalmi/fips.git?rev=46dbc3b90bde6eb72a232990718ec6c3647f7f48#46dbc3b90bde6eb72a232990718ec6c3647f7f48"
 dependencies = [
  "bech32",
  "hex",
@@ -2673,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "nostr-vpn-app-core"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2693,7 +2693,7 @@ dependencies = [
 
 [[package]]
 name = "nostr-vpn-core"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2714,7 +2714,7 @@ dependencies = [
 
 [[package]]
 name = "nostr-vpn-linux"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "gio",
  "glib",

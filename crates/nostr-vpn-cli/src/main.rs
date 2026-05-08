@@ -44,6 +44,7 @@ use clap::{Args, Parser, Subcommand};
 use nostr_vpn_core::config::{
     AppConfig, derive_mesh_tunnel_ip, exit_node_default_routes, maybe_autoconfigure_node,
     normalize_advertised_route, normalize_nostr_pubkey, normalize_runtime_network_id,
+    parse_wireguard_exit_config,
 };
 use nostr_vpn_core::control::PeerAnnouncement;
 use nostr_vpn_core::data_plane::MeshPeerStatus;
@@ -186,6 +187,7 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Command {
     /// Initialize a local config file (keys are generated automatically).
     Init {
@@ -447,6 +449,8 @@ struct SetArgs {
     participants: Vec<String>,
     #[arg(long)]
     exit_node: Option<String>,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    exit_node_leak_protection: Option<bool>,
     #[arg(long)]
     advertise_routes: Option<String>,
     #[arg(long, num_args = 0..=1, default_missing_value = "true")]
@@ -473,6 +477,10 @@ struct SetArgs {
     wireguard_exit_mtu: Option<u16>,
     #[arg(long)]
     wireguard_exit_keepalive: Option<u16>,
+    #[arg(long)]
+    wireguard_exit_config: Option<String>,
+    #[arg(long)]
+    wireguard_exit_config_file: Option<PathBuf>,
     #[arg(long)]
     autoconnect: Option<bool>,
     #[arg(long, num_args = 0..=1, default_missing_value = "true")]
@@ -781,6 +789,7 @@ async fn run_command(command: Command) -> Result<()> {
                         } else {
                             Some(app.exit_node.clone())
                         },
+                        "exit_node_leak_protection": app.exit_node_leak_protection,
                         "advertise_exit_node": app.node.advertise_exit_node,
                         "advertised_routes": app.node.advertised_routes,
                         "effective_advertised_routes": runtime_effective_advertised_routes(&app),
@@ -813,6 +822,10 @@ async fn run_command(command: Command) -> Result<()> {
                 } else {
                     println!("exit_node: {}", app.exit_node);
                 }
+                println!(
+                    "exit_node_leak_protection: {}",
+                    app.exit_node_leak_protection
+                );
                 println!("advertise_exit_node: {}", app.node.advertise_exit_node);
                 println!(
                     "wireguard_exit: {}",
@@ -894,6 +907,9 @@ async fn run_command(command: Command) -> Result<()> {
             if let Some(value) = args.exit_node {
                 app.exit_node = parse_exit_node_arg(&value)?.unwrap_or_default();
             }
+            if let Some(value) = args.exit_node_leak_protection {
+                app.exit_node_leak_protection = value;
+            }
             if let Some(value) = args.advertise_routes {
                 app.node.advertised_routes = parse_advertised_routes_arg(&value)?;
             }
@@ -902,6 +918,26 @@ async fn run_command(command: Command) -> Result<()> {
             }
             if let Some(value) = args.wireguard_exit_enabled {
                 app.wireguard_exit.enabled = value;
+            }
+            if args.wireguard_exit_config.is_some() && args.wireguard_exit_config_file.is_some() {
+                return Err(anyhow!(
+                    "use either --wireguard-exit-config or --wireguard-exit-config-file, not both"
+                ));
+            }
+            if let Some(value) = args.wireguard_exit_config {
+                let enabled = app.wireguard_exit.enabled;
+                let mut parsed = parse_wireguard_exit_config(&value)?;
+                parsed.enabled = enabled;
+                app.wireguard_exit = parsed;
+            }
+            if let Some(path) = args.wireguard_exit_config_file {
+                let value = fs::read_to_string(&path).with_context(|| {
+                    format!("failed to read WireGuard config {}", path.display())
+                })?;
+                let enabled = app.wireguard_exit.enabled;
+                let mut parsed = parse_wireguard_exit_config(&value)?;
+                parsed.enabled = enabled;
+                app.wireguard_exit = parsed;
             }
             if let Some(value) = args.wireguard_exit_interface {
                 app.wireguard_exit.interface = value;

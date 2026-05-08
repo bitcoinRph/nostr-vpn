@@ -51,16 +51,7 @@ struct Drafts {
     magic_dns_suffix: String,
     advertised_routes: String,
     exit_search: String,
-    wireguard_exit_interface: String,
-    wireguard_exit_address: String,
-    wireguard_exit_private_key: String,
-    wireguard_exit_peer_public_key: String,
-    wireguard_exit_peer_preshared_key: String,
-    wireguard_exit_endpoint: String,
-    wireguard_exit_allowed_ips: String,
-    wireguard_exit_dns: String,
-    wireguard_exit_mtu: String,
-    wireguard_exit_keepalive: String,
+    wireguard_exit_config: String,
 }
 
 impl Drafts {
@@ -71,17 +62,7 @@ impl Drafts {
         self.listen_port = state.listen_port.to_string();
         self.magic_dns_suffix = state.magic_dns_suffix.clone();
         self.advertised_routes = state.advertised_routes.join(", ");
-        self.wireguard_exit_interface = state.wireguard_exit_interface.clone();
-        self.wireguard_exit_address = state.wireguard_exit_address.clone();
-        self.wireguard_exit_private_key = state.wireguard_exit_private_key.clone();
-        self.wireguard_exit_peer_public_key = state.wireguard_exit_peer_public_key.clone();
-        self.wireguard_exit_peer_preshared_key = state.wireguard_exit_peer_preshared_key.clone();
-        self.wireguard_exit_endpoint = state.wireguard_exit_endpoint.clone();
-        self.wireguard_exit_allowed_ips = state.wireguard_exit_allowed_ips.clone();
-        self.wireguard_exit_dns = state.wireguard_exit_dns.clone();
-        self.wireguard_exit_mtu = state.wireguard_exit_mtu.to_string();
-        self.wireguard_exit_keepalive =
-            state.wireguard_exit_persistent_keepalive_secs.to_string();
+        self.wireguard_exit_config = state.wireguard_exit_config.clone();
         if let Some(network) = active_network(state) {
             self.network_name = display_network_name(network);
             self.mesh_id = network.network_id.clone();
@@ -98,6 +79,7 @@ struct AppModel {
     window: adw::ApplicationWindow,
     page: Page,
     sidebar: gtk::Box,
+    update_bar: gtk::Box,
     content: gtk::Box,
     drafts: Drafts,
     notice: String,
@@ -110,24 +92,32 @@ struct AppModel {
 }
 
 impl AppModel {
-    fn new(window: adw::ApplicationWindow, sidebar: gtk::Box, content: gtk::Box) -> Self {
+    fn new(
+        window: adw::ApplicationWindow,
+        sidebar: gtk::Box,
+        update_bar: gtk::Box,
+        content: gtk::Box,
+    ) -> Self {
         let core = FfiApp::new(default_data_dir(), env!("CARGO_PKG_VERSION").to_string());
         let state = core.state();
         let mut drafts = Drafts::default();
         drafts.sync_from_state(&state);
         let tray = tray::TrayRuntime::start(&state);
         let (update_sender, update_receiver) = mpsc::channel();
+        let mut update = updater::UpdateState::default();
+        update.auto_install = load_auto_install_updates();
         Self {
             core,
             state,
             window,
             page: Page::Devices,
             sidebar,
+            update_bar,
             content,
             drafts,
             notice: String::new(),
             tray,
-            update: updater::UpdateState::default(),
+            update,
             update_sender,
             update_receiver,
             allow_close: false,
@@ -322,20 +312,30 @@ fn build_ui(app: &adw::Application, runtime: &AppRuntime, present: bool) {
     content.set_vexpand(true);
     content.add_css_class("nvpn-content");
 
+    let update_bar = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    update_bar.add_css_class("nvpn-update-bar-host");
+
     let shell = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     shell.set_hexpand(true);
     shell.set_vexpand(true);
     shell.append(&sidebar);
     shell.append(&content);
 
+    let main = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    main.set_hexpand(true);
+    main.set_vexpand(true);
+    main.append(&update_bar);
+    main.append(&shell);
+
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
-    toolbar.set_content(Some(&shell));
+    toolbar.set_content(Some(&main));
     window.set_content(Some(&toolbar));
 
     let model = Rc::new(RefCell::new(AppModel::new(
         window.clone(),
         sidebar.clone(),
+        update_bar.clone(),
         content.clone(),
     )));
     *runtime.model.borrow_mut() = Some(model.clone());
@@ -517,6 +517,7 @@ fn drain_update_events(app: &AppRef) {
         return;
     }
 
+    let mut auto_download = false;
     {
         let mut model = app.borrow_mut();
         for event in events {
@@ -537,6 +538,8 @@ fn drain_update_events(app: &AppRef) {
                                         check.tag
                                     )
                                 };
+                                auto_download =
+                                    model.update.auto_install && model.update.asset.is_some();
                             } else if manual {
                                 model.update.status = "Up to date".to_string();
                             } else {
@@ -572,7 +575,11 @@ fn drain_update_events(app: &AppRef) {
         }
     }
 
-    render(app);
+    if auto_download {
+        download_update(app);
+    } else {
+        render(app);
+    }
 }
 
 fn show_window(app: &AppRef) {
@@ -697,10 +704,11 @@ fn set_page(app: &AppRef, page: Page) {
 }
 
 fn render(app: &AppRef) {
-    let (sidebar, content, state, page) = {
+    let (sidebar, update_bar, content, state, page) = {
         let model = app.borrow();
         (
             model.sidebar.clone(),
+            model.update_bar.clone(),
             model.content.clone(),
             model.state.clone(),
             model.page,
@@ -708,8 +716,10 @@ fn render(app: &AppRef) {
     };
 
     clear_box(&sidebar);
+    clear_box(&update_bar);
     clear_box(&content);
     build_sidebar(app, &sidebar, &state, page);
+    build_update_stripe(app, &update_bar, &state);
 
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
@@ -734,6 +744,69 @@ fn render(app: &AppRef) {
 
     scroll.set_child(Some(&page_box));
     content.append(&scroll);
+}
+
+fn build_update_stripe(app: &AppRef, parent: &gtk::Box, state: &NativeAppState) {
+    let update = app.borrow().update.clone();
+    if !update.available {
+        return;
+    }
+
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row.add_css_class("nvpn-update-stripe");
+    row.set_valign(gtk::Align::Center);
+
+    let title = gtk::Label::new(Some(&update_stripe_text(&update.version, &state.app_version)));
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    row.append(&title);
+
+    let auto_install = gtk::CheckButton::with_label("Install automatically");
+    auto_install.set_active(update.auto_install);
+    {
+        let app = app.clone();
+        auto_install.connect_toggled(move |button| {
+            let enabled = button.is_active();
+            {
+                let mut model = app.borrow_mut();
+                model.update.auto_install = enabled;
+            }
+            save_auto_install_updates(enabled);
+            if enabled {
+                download_update(&app);
+            }
+        });
+    }
+    row.append(&auto_install);
+
+    let install = icon_text_button(
+        if update.downloading {
+            "Downloading"
+        } else {
+            "Install"
+        },
+        "folder-download-symbolic",
+    );
+    install.set_sensitive(
+        update.available && update.asset.is_some() && !update.checking && !update.downloading,
+    );
+    {
+        let app = app.clone();
+        install.connect_clicked(move |_| download_update(&app));
+    }
+    row.append(&install);
+
+    parent.append(&row);
+}
+
+fn update_stripe_text(version: &str, current: &str) -> String {
+    let current = current.trim();
+    if current.is_empty() {
+        format!("Update available: {version}")
+    } else {
+        format!("Update available: {version} (you're on {current})")
+    }
 }
 
 fn build_sidebar(app: &AppRef, sidebar: &gtk::Box, state: &NativeAppState, page: Page) {
@@ -1061,7 +1134,9 @@ fn build_network_hero(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     top.set_valign(gtk::Align::Center);
 
     let status = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    status.add_css_class(if state.mesh_ready {
+    status.add_css_class(if state.exit_node_blocked {
+        "nvpn-status-blocked"
+    } else if state.mesh_ready {
         "nvpn-status-ready"
     } else if state.vpn_active {
         "nvpn-status-active"
@@ -1122,6 +1197,11 @@ fn build_network_hero(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     if service_repair_recommended(state) {
         badges.append(&badge("Repair", "warn"));
     }
+    if state.exit_node_blocked {
+        badges.append(&badge("Internet blocked", "bad"));
+    } else if state.exit_node_active && !state.exit_node_status_text.trim().is_empty() {
+        badges.append(&badge(&state.exit_node_status_text, "ok"));
+    }
     text.append(&badges);
     top.append(&text);
 
@@ -1181,8 +1261,17 @@ fn build_network_hero(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     if !clean_ip(&state.tunnel_ip).is_empty() {
         identity.append(&badge(&clean_ip(&state.tunnel_ip), "muted"));
     }
-    if !state.exit_node.is_empty() {
-        identity.append(&badge("Exit selected", "warn"));
+    if !state.exit_node_status_text.trim().is_empty() {
+        identity.append(&badge(
+            &state.exit_node_status_text,
+            if state.exit_node_blocked {
+                "bad"
+            } else if state.exit_node_active {
+                "ok"
+            } else {
+                "warn"
+            },
+        ));
     }
     hero.append(&identity);
 
@@ -1472,16 +1561,17 @@ fn build_exit_nodes_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) 
     switch_row(
         app,
         &offer,
-        "Use WireGuard upstream",
-        state.wireguard_exit_enabled,
+        "Block internet if exit node disconnects",
+        state.exit_node_leak_protection,
         |enabled| NativeAppAction::UpdateSettings {
             patch: SettingsPatch {
-                wireguard_exit_enabled: Some(enabled),
+                exit_node_leak_protection: Some(enabled),
                 ..SettingsPatch::default()
             },
         },
     );
     page.append(&offer);
+    build_wireguard_settings_card(app, page, state);
 }
 
 fn route_choice(
@@ -1561,8 +1651,6 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     }
     device.append(&save);
     page.append(&device);
-
-    build_wireguard_settings_card(app, page, state);
 
     let network = card();
     let network_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -2022,30 +2110,10 @@ fn setting_entry(app: &AppRef, parent: &gtk::Box, title: &str, key: &'static str
             "tunnel_ip" => model.drafts.tunnel_ip.clone(),
             "listen_port" => model.drafts.listen_port.clone(),
             "magic_dns_suffix" => model.drafts.magic_dns_suffix.clone(),
-            "wireguard_exit_interface" => model.drafts.wireguard_exit_interface.clone(),
-            "wireguard_exit_address" => model.drafts.wireguard_exit_address.clone(),
-            "wireguard_exit_private_key" => model.drafts.wireguard_exit_private_key.clone(),
-            "wireguard_exit_peer_public_key" => {
-                model.drafts.wireguard_exit_peer_public_key.clone()
-            }
-            "wireguard_exit_peer_preshared_key" => {
-                model.drafts.wireguard_exit_peer_preshared_key.clone()
-            }
-            "wireguard_exit_endpoint" => model.drafts.wireguard_exit_endpoint.clone(),
-            "wireguard_exit_allowed_ips" => model.drafts.wireguard_exit_allowed_ips.clone(),
-            "wireguard_exit_dns" => model.drafts.wireguard_exit_dns.clone(),
-            "wireguard_exit_mtu" => model.drafts.wireguard_exit_mtu.clone(),
-            "wireguard_exit_keepalive" => model.drafts.wireguard_exit_keepalive.clone(),
             _ => String::new(),
         }
     };
     let input = entry(title, &current);
-    if matches!(
-        key,
-        "wireguard_exit_private_key" | "wireguard_exit_peer_preshared_key"
-    ) {
-        input.set_visibility(false);
-    }
     {
         let app = app.clone();
         input.connect_changed(move |entry| {
@@ -2057,20 +2125,6 @@ fn setting_entry(app: &AppRef, parent: &gtk::Box, title: &str, key: &'static str
                 "tunnel_ip" => model.drafts.tunnel_ip = value,
                 "listen_port" => model.drafts.listen_port = value,
                 "magic_dns_suffix" => model.drafts.magic_dns_suffix = value,
-                "wireguard_exit_interface" => model.drafts.wireguard_exit_interface = value,
-                "wireguard_exit_address" => model.drafts.wireguard_exit_address = value,
-                "wireguard_exit_private_key" => model.drafts.wireguard_exit_private_key = value,
-                "wireguard_exit_peer_public_key" => {
-                    model.drafts.wireguard_exit_peer_public_key = value;
-                }
-                "wireguard_exit_peer_preshared_key" => {
-                    model.drafts.wireguard_exit_peer_preshared_key = value;
-                }
-                "wireguard_exit_endpoint" => model.drafts.wireguard_exit_endpoint = value,
-                "wireguard_exit_allowed_ips" => model.drafts.wireguard_exit_allowed_ips = value,
-                "wireguard_exit_dns" => model.drafts.wireguard_exit_dns = value,
-                "wireguard_exit_mtu" => model.drafts.wireguard_exit_mtu = value,
-                "wireguard_exit_keepalive" => model.drafts.wireguard_exit_keepalive = value,
                 _ => {}
             }
         });
@@ -2098,25 +2152,12 @@ fn save_device_settings(app: &AppRef) {
 }
 
 fn save_wireguard_exit_settings(app: &AppRef) {
-    let drafts = app.borrow().drafts.clone();
-    let mtu = drafts.wireguard_exit_mtu.trim().parse::<u16>().ok();
-    let keepalive = drafts.wireguard_exit_keepalive.trim().parse::<u16>().ok();
+    let config = app.borrow().drafts.wireguard_exit_config.clone();
     dispatch(
         app,
         NativeAppAction::UpdateSettings {
             patch: SettingsPatch {
-                wireguard_exit_interface: Some(drafts.wireguard_exit_interface),
-                wireguard_exit_address: Some(drafts.wireguard_exit_address),
-                wireguard_exit_private_key: Some(drafts.wireguard_exit_private_key),
-                wireguard_exit_peer_public_key: Some(drafts.wireguard_exit_peer_public_key),
-                wireguard_exit_peer_preshared_key: Some(
-                    drafts.wireguard_exit_peer_preshared_key,
-                ),
-                wireguard_exit_endpoint: Some(drafts.wireguard_exit_endpoint),
-                wireguard_exit_allowed_ips: Some(drafts.wireguard_exit_allowed_ips),
-                wireguard_exit_dns: Some(drafts.wireguard_exit_dns),
-                wireguard_exit_mtu: mtu,
-                wireguard_exit_persistent_keepalive_secs: keepalive,
+                wireguard_exit_config: Some(config),
                 ..SettingsPatch::default()
             },
         },
@@ -2126,6 +2167,13 @@ fn save_wireguard_exit_settings(app: &AppRef) {
 fn build_wireguard_settings_card(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     let card = card();
     section_header(&card, "WireGuard Upstream", "");
+    let note = gtk::Label::new(Some(
+        "Paste a WireGuard config from an upstream VPN provider such as Mullvad or Proton VPN.",
+    ));
+    note.add_css_class("muted");
+    note.set_wrap(true);
+    note.set_xalign(0.0);
+    card.append(&note);
     switch_row(
         app,
         &card,
@@ -2138,21 +2186,26 @@ fn build_wireguard_settings_card(app: &AppRef, page: &gtk::Box, state: &NativeAp
             },
         },
     );
-    setting_entry(app, &card, "Interface", "wireguard_exit_interface");
-    setting_entry(app, &card, "Address", "wireguard_exit_address");
-    setting_entry(app, &card, "Endpoint", "wireguard_exit_endpoint");
-    setting_entry(app, &card, "Peer Key", "wireguard_exit_peer_public_key");
-    setting_entry(app, &card, "Private Key", "wireguard_exit_private_key");
-    setting_entry(
-        app,
-        &card,
-        "Preshared Key",
-        "wireguard_exit_peer_preshared_key",
-    );
-    setting_entry(app, &card, "Allowed IPs", "wireguard_exit_allowed_ips");
-    setting_entry(app, &card, "DNS", "wireguard_exit_dns");
-    setting_entry(app, &card, "MTU", "wireguard_exit_mtu");
-    setting_entry(app, &card, "Keepalive", "wireguard_exit_keepalive");
+    let scroller = gtk::ScrolledWindow::new();
+    scroller.set_min_content_height(220);
+    scroller.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
+    scroller.set_hexpand(true);
+
+    let config = gtk::TextView::new();
+    config.set_monospace(true);
+    config.set_wrap_mode(gtk::WrapMode::None);
+    config.buffer()
+        .set_text(&app.borrow().drafts.wireguard_exit_config);
+    {
+        let app = app.clone();
+        config.buffer().connect_changed(move |buffer| {
+            let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), true);
+            app.borrow_mut().drafts.wireguard_exit_config = text.to_string();
+        });
+    }
+    scroller.set_child(Some(&config));
+    card.append(&scroller);
+
     let save_wg = icon_text_button("Save WireGuard", "");
     save_wg.set_halign(gtk::Align::Start);
     {
@@ -2262,6 +2315,9 @@ fn device_row(
     if participant.offers_exit_node {
         name_row.append(&badge("Exit", "warn"));
     }
+    if fips_path_kind(participant) == FipsPathKind::Routed {
+        name_row.append(&badge("Routed", "muted"));
+    }
     text.append(&name_row);
 
     let subtitle = gtk::Label::new(Some(&device_subtitle(participant)));
@@ -2276,6 +2332,12 @@ fn device_row(
         &device_status_text(participant),
         if participant.reachable { "ok" } else { "muted" },
     ));
+    if matches!(
+        fips_path_kind(participant),
+        FipsPathKind::Direct | FipsPathKind::Routed
+    ) {
+        row.append(&badge(&fips_path_text(participant), "muted"));
+    }
 
     let copy = gtk::Button::from_icon_name("edit-copy-symbolic");
     copy.set_tooltip_text(Some("Copy npub"));
@@ -2606,6 +2668,41 @@ fn device_status_text(participant: &NativeParticipantState) -> String {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FipsPathKind {
+    Local,
+    Direct,
+    Routed,
+    Offline,
+}
+
+fn fips_path_kind(participant: &NativeParticipantState) -> FipsPathKind {
+    if participant.state == "local" {
+        FipsPathKind::Local
+    } else if participant.reachable && !participant.fips_transport_addr.trim().is_empty() {
+        FipsPathKind::Direct
+    } else if participant.reachable {
+        FipsPathKind::Routed
+    } else {
+        FipsPathKind::Offline
+    }
+}
+
+fn fips_path_text(participant: &NativeParticipantState) -> String {
+    match fips_path_kind(participant) {
+        FipsPathKind::Local => "This device".to_string(),
+        FipsPathKind::Direct => {
+            if participant.fips_srtt_ms > 0 {
+                format!("Direct FIPS {} ms", participant.fips_srtt_ms)
+            } else {
+                "Direct FIPS".to_string()
+            }
+        }
+        FipsPathKind::Routed => "FIPS routed".to_string(),
+        FipsPathKind::Offline => "Offline".to_string(),
+    }
+}
+
 fn exit_node_candidates(network: &NativeNetworkState) -> Vec<NativeParticipantState> {
     let mut candidates = network.participants.clone();
     candidates.sort_by_key(device_name);
@@ -2635,6 +2732,29 @@ fn hero_subtitle(state: &NativeAppState) -> String {
 
 fn clean_ip(value: &str) -> String {
     value.split('/').next().unwrap_or(value).trim().to_string()
+}
+
+fn load_auto_install_updates() -> bool {
+    std::fs::read_to_string(update_preferences_path())
+        .map(|value| value.lines().any(|line| line.trim() == "auto_install=true"))
+        .unwrap_or(false)
+}
+
+fn save_auto_install_updates(enabled: bool) {
+    let path = update_preferences_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let value = if enabled {
+        "auto_install=true\n"
+    } else {
+        "auto_install=false\n"
+    };
+    let _ = std::fs::write(path, value);
+}
+
+fn update_preferences_path() -> PathBuf {
+    PathBuf::from(default_data_dir()).join("desktop-updates.conf")
 }
 
 fn short_text(value: &str, keep: usize) -> String {
@@ -2816,6 +2936,12 @@ const CSS: &str = r#"
     box-shadow: inset 0 0 0 1px alpha(@window_fg_color, 0.08);
 }
 
+.nvpn-update-stripe {
+    padding: 10px 16px;
+    background: alpha(#3584e4, 0.12);
+    box-shadow: inset 0 -1px 0 alpha(@window_fg_color, 0.08);
+}
+
 .nvpn-hero {
     padding: 20px;
 }
@@ -2823,6 +2949,7 @@ const CSS: &str = r#"
 .nvpn-status-ready,
 .nvpn-status-active,
 .nvpn-status-off,
+.nvpn-status-blocked,
 .nvpn-peer-online,
 .nvpn-peer-offline {
     min-width: 14px;
@@ -2846,6 +2973,12 @@ const CSS: &str = r#"
     min-width: 48px;
     min-height: 48px;
     background: alpha(@window_fg_color, 0.22);
+}
+
+.nvpn-status-blocked {
+    min-width: 48px;
+    min-height: 48px;
+    background: #dc2626;
 }
 
 .nvpn-peer-online {

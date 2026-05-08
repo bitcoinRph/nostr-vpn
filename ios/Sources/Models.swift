@@ -23,6 +23,10 @@ struct AppState: Decodable {
     var expectedPeerCount: UInt64 = 0
     var meshReady = false
     var exitNode = ""
+    var exitNodeLeakProtection = false
+    var exitNodeActive = false
+    var exitNodeBlocked = false
+    var exitNodeStatusText = ""
     var advertiseExitNode = false
     var advertisedRoutes: [String] = []
     var wireguardExitEnabled = false
@@ -37,6 +41,7 @@ struct AppState: Decodable {
     var wireguardExitDns = ""
     var wireguardExitMtu: Int = 0
     var wireguardExitPersistentKeepaliveSecs: Int = 0
+    var wireguardExitConfig = ""
     var magicDnsSuffix = ""
     var magicDnsStatus = ""
     var autoconnect = false
@@ -55,12 +60,13 @@ struct AppState: Decodable {
         case rev, error, appVersion, platform, mobile, vpnControlSupported
         case runtimeStatusDetail, vpnEnabled, vpnActive, vpnStatus, daemonRunning
         case ownNpub, nodeName, selfMagicDnsName, tunnelIp, endpoint, listenPort, activeNetworkInvite
-        case connectedPeerCount, expectedPeerCount, meshReady, exitNode, advertiseExitNode
+        case connectedPeerCount, expectedPeerCount, meshReady, exitNode, exitNodeLeakProtection
+        case exitNodeActive, exitNodeBlocked, exitNodeStatusText, advertiseExitNode
         case advertisedRoutes
         case wireguardExitEnabled, wireguardExitConfigured, wireguardExitInterface, wireguardExitAddress
         case wireguardExitPrivateKey, wireguardExitPeerPublicKey, wireguardExitPeerPresharedKey
         case wireguardExitEndpoint, wireguardExitAllowedIps, wireguardExitDns
-        case wireguardExitMtu, wireguardExitPersistentKeepaliveSecs
+        case wireguardExitMtu, wireguardExitPersistentKeepaliveSecs, wireguardExitConfig
         case magicDnsSuffix, magicDnsStatus, autoconnect
         case lanPairingActive, lanPairingRemainingSecs, configPath
         case networks, lanPeers, health
@@ -92,6 +98,10 @@ struct AppState: Decodable {
         expectedPeerCount = container.uint64(.expectedPeerCount)
         meshReady = container.bool(.meshReady)
         exitNode = container.string(.exitNode)
+        exitNodeLeakProtection = container.bool(.exitNodeLeakProtection)
+        exitNodeActive = container.bool(.exitNodeActive)
+        exitNodeBlocked = container.bool(.exitNodeBlocked)
+        exitNodeStatusText = container.string(.exitNodeStatusText)
         advertiseExitNode = container.bool(.advertiseExitNode)
         advertisedRoutes = container.array(.advertisedRoutes)
         wireguardExitEnabled = container.bool(.wireguardExitEnabled)
@@ -106,6 +116,7 @@ struct AppState: Decodable {
         wireguardExitDns = container.string(.wireguardExitDns)
         wireguardExitMtu = container.int(.wireguardExitMtu)
         wireguardExitPersistentKeepaliveSecs = container.int(.wireguardExitPersistentKeepaliveSecs)
+        wireguardExitConfig = container.string(.wireguardExitConfig)
         magicDnsSuffix = container.string(.magicDnsSuffix)
         magicDnsStatus = container.string(.magicDnsStatus)
         autoconnect = container.bool(.autoconnect)

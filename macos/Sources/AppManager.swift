@@ -76,6 +76,10 @@ final class AppManager: ObservableObject {
         state.vpnEnabled
     }
 
+    var updateInstallEnabled: Bool {
+        updateAvailable && updateAssetUrl != nil && !updateChecking && !updateInstalling
+    }
+
     func start() {
         drainStartupUrls()
         if autoCheckUpdates && !startupUpdateCheckDone {
@@ -276,6 +280,10 @@ final class AppManager: ObservableObject {
         dispatch(.updateSettings(patch: settingsPatch(wireguardExitEnabled: enabled)), status: "Saving WireGuard")
     }
 
+    func saveWireGuardExitConfig(_ config: String) {
+        dispatch(.updateSettings(patch: settingsPatch(wireguardExitConfig: config)), status: "Saving WireGuard")
+    }
+
     func saveWireGuardExitSettings(
         interface: String,
         address: String,
@@ -325,6 +333,10 @@ final class AppManager: ObservableObject {
 
     func setExitNode(_ npub: String) {
         dispatch(.updateSettings(patch: settingsPatch(exitNode: npub)), status: "Saving exit node")
+    }
+
+    func setExitNodeLeakProtection(_ enabled: Bool) {
+        dispatch(.updateSettings(patch: settingsPatch(exitNodeLeakProtection: enabled)), status: "Saving exit protection")
     }
 
     func addParticipant(networkId: String, npub: String, alias: String? = nil) {
@@ -974,6 +986,7 @@ func settingsPatch(
     tunnelIp: String? = nil,
     listenPort: UInt16? = nil,
     exitNode: String? = nil,
+    exitNodeLeakProtection: Bool? = nil,
     advertiseExitNode: Bool? = nil,
     advertisedRoutes: String? = nil,
     wireguardExitEnabled: Bool? = nil,
@@ -987,6 +1000,7 @@ func settingsPatch(
     wireguardExitDns: String? = nil,
     wireguardExitMtu: UInt16? = nil,
     wireguardExitPersistentKeepaliveSecs: UInt16? = nil,
+    wireguardExitConfig: String? = nil,
     magicDnsSuffix: String? = nil,
     autoconnect: Bool? = nil,
     launchOnStartup: Bool? = nil,
@@ -998,6 +1012,7 @@ func settingsPatch(
         tunnelIp: tunnelIp,
         listenPort: listenPort,
         exitNode: exitNode,
+        exitNodeLeakProtection: exitNodeLeakProtection,
         advertiseExitNode: advertiseExitNode,
         advertisedRoutes: advertisedRoutes,
         wireguardExitEnabled: wireguardExitEnabled,
@@ -1011,6 +1026,7 @@ func settingsPatch(
         wireguardExitDns: wireguardExitDns,
         wireguardExitMtu: wireguardExitMtu,
         wireguardExitPersistentKeepaliveSecs: wireguardExitPersistentKeepaliveSecs,
+        wireguardExitConfig: wireguardExitConfig,
         magicDnsSuffix: magicDnsSuffix,
         autoconnect: autoconnect,
         launchOnStartup: launchOnStartup,

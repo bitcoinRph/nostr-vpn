@@ -11,7 +11,8 @@ use anyhow::{Context, Result, anyhow};
 use nostr_vpn_core::config::{
     AppConfig, NetworkConfig, PendingInboundJoinRequest, PendingOutboundJoinRequest,
     derive_mesh_tunnel_ip, maybe_autoconfigure_node, normalize_advertised_route,
-    normalize_nostr_pubkey, normalize_runtime_network_id,
+    normalize_nostr_pubkey, normalize_runtime_network_id, parse_wireguard_exit_config,
+    wireguard_exit_config_text,
 };
 use nostr_vpn_core::diagnostics::ProbeStatus;
 use serde::Deserialize;
@@ -156,6 +157,13 @@ struct CliServiceStatusResponse {
     binary_version: String,
 }
 
+#[derive(Debug, Clone, Default)]
+struct ExitNodeUiStatus {
+    active: bool,
+    blocked: bool,
+    text: String,
+}
+
 impl NativeAppRuntime {
     fn new(data_dir: &str, app_version: String) -> Result<Self> {
         let config_path = native_config_path(data_dir);
@@ -273,6 +281,8 @@ impl NativeAppRuntime {
         let port_mapping = daemon_state
             .map(|state| native_port_mapping_status(&state.port_mapping))
             .unwrap_or_default();
+        let exit_node_status =
+            self.exit_node_ui_status(vpn_enabled, vpn_active, daemon_state, active_network);
 
         NativeAppState {
             rev: self.rev,
@@ -324,6 +334,10 @@ impl NativeAppRuntime {
             } else {
                 to_npub(&self.config.exit_node)
             },
+            exit_node_leak_protection: self.config.exit_node_leak_protection,
+            exit_node_active: exit_node_status.active,
+            exit_node_blocked: exit_node_status.blocked,
+            exit_node_status_text: exit_node_status.text,
             advertise_exit_node: self.config.node.advertise_exit_node,
             advertised_routes: self.config.node.advertised_routes.clone(),
             effective_advertised_routes: self.config.effective_advertised_routes(),
@@ -346,6 +360,7 @@ impl NativeAppRuntime {
                 .config
                 .wireguard_exit
                 .persistent_keepalive_secs,
+            wireguard_exit_config: wireguard_exit_config_text(&self.config.wireguard_exit),
             magic_dns_suffix: self.config.magic_dns_suffix.clone(),
             magic_dns_status: self.magic_dns_status(),
             autoconnect: self.config.autoconnect,
@@ -762,6 +777,9 @@ impl NativeAppRuntime {
                 normalize_nostr_pubkey(&value)?
             };
         }
+        if let Some(value) = patch.exit_node_leak_protection {
+            self.config.exit_node_leak_protection = value;
+        }
         if let Some(value) = patch.advertise_exit_node {
             self.config.node.advertise_exit_node = value;
         }
@@ -800,6 +818,12 @@ impl NativeAppRuntime {
         }
         if let Some(value) = patch.wireguard_exit_persistent_keepalive_secs {
             self.config.wireguard_exit.persistent_keepalive_secs = value;
+        }
+        if let Some(value) = patch.wireguard_exit_config {
+            let enabled = self.config.wireguard_exit.enabled;
+            let mut parsed = parse_wireguard_exit_config(&value)?;
+            parsed.enabled = enabled;
+            self.config.wireguard_exit = parsed;
         }
         if let Some(value) = patch.magic_dns_suffix {
             self.config.magic_dns_suffix = value.trim().trim_matches('.').to_ascii_lowercase();
@@ -991,6 +1015,65 @@ impl NativeAppRuntime {
             .iter()
             .map(|network| self.network_state(network, own_pubkey_hex, vpn_active))
             .collect()
+    }
+
+    fn exit_node_ui_status(
+        &self,
+        vpn_enabled: bool,
+        vpn_active: bool,
+        daemon_state: Option<&DaemonRuntimeState>,
+        active_network: &NetworkConfig,
+    ) -> ExitNodeUiStatus {
+        let selected_exit_node = self.config.exit_node.trim();
+        if !selected_exit_node.is_empty() {
+            let name = exit_node_display_name(&self.config, active_network, selected_exit_node);
+            let selected_peer = daemon_state.and_then(|state| {
+                state
+                    .peers
+                    .iter()
+                    .find(|peer| peer.participant_pubkey == selected_exit_node)
+            });
+            let selected_exit_active = vpn_active
+                && selected_peer.is_some_and(|peer| {
+                    peer.reachable && peer_offers_exit_node(&peer.advertised_routes)
+                });
+            let blocked =
+                self.config.exit_node_leak_protection && vpn_enabled && !selected_exit_active;
+            let text = if blocked {
+                format!("Internet blocked: waiting for {name}")
+            } else if selected_exit_active {
+                format!("Exit: {name}")
+            } else {
+                format!("Exit pending: {name}")
+            };
+            return ExitNodeUiStatus {
+                active: selected_exit_active,
+                blocked,
+                text,
+            };
+        }
+
+        let wireguard_exit_selected =
+            self.config.node.advertise_exit_node && self.config.wireguard_exit.enabled;
+        if wireguard_exit_selected {
+            let wireguard_exit_active = vpn_active && self.config.wireguard_exit.configured();
+            let blocked =
+                self.config.exit_node_leak_protection && vpn_enabled && !wireguard_exit_active;
+            let text = if blocked {
+                "Internet blocked: waiting for WireGuard exit".to_string()
+            } else if wireguard_exit_active {
+                "Exit: WireGuard upstream".to_string()
+            } else {
+                "Exit pending: WireGuard upstream".to_string()
+            };
+            return ExitNodeUiStatus {
+                active: wireguard_exit_active,
+                blocked,
+                text,
+            };
+        }
+
+        ExitNodeUiStatus::default()
     }
 
     fn network_state(
@@ -1713,6 +1796,33 @@ fn non_empty(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+fn exit_node_display_name(
+    config: &AppConfig,
+    active_network: &NetworkConfig,
+    pubkey_hex: &str,
+) -> String {
+    if let Some(name) = config
+        .magic_dns_name_for_participant(pubkey_hex)
+        .and_then(|value| non_empty(&value))
+    {
+        return name;
+    }
+    if let Some(name) = config
+        .peer_alias(pubkey_hex)
+        .and_then(|value| non_empty(&value))
+    {
+        return name;
+    }
+    if active_network
+        .admins
+        .iter()
+        .any(|admin| admin == pubkey_hex)
+    {
+        return "admin".to_string();
+    }
+    short_pubkey(pubkey_hex)
+}
+
 #[cfg(target_os = "macos")]
 fn macos_service_action_shell_command(nvpn_bin: &Path, args: &[&str]) -> String {
     std::iter::once(shell_quote(&nvpn_bin.display().to_string()))
@@ -1790,6 +1900,94 @@ mod tests {
                 && !participant.reachable
                 && participant.state == "off"
         }));
+    }
+
+    #[test]
+    fn native_state_flags_blocked_exit_node_when_protection_is_enabled() {
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        let own_pubkey = runtime
+            .config
+            .own_nostr_pubkey_hex()
+            .expect("generated config should have own pubkey");
+        let exit_pubkey = "26525c442dd039de4e728b41ee8d7f717b267ab25b7c219d53a3249e1c9174cc";
+        runtime.startup_error = None;
+        runtime.daemon_running = true;
+        runtime.vpn_enabled = true;
+        runtime.vpn_active = true;
+        runtime.config.exit_node = exit_pubkey.to_string();
+        runtime.config.exit_node_leak_protection = true;
+        runtime.config.networks[0].admins = vec![own_pubkey];
+        runtime.config.networks[0].participants = vec![exit_pubkey.to_string()];
+        runtime
+            .config
+            .set_peer_alias(exit_pubkey, "lab-exit")
+            .unwrap();
+        runtime.daemon_state = Some(DaemonRuntimeState {
+            vpn_enabled: true,
+            vpn_active: true,
+            expected_peer_count: 1,
+            connected_peer_count: 0,
+            mesh_ready: true,
+            peers: vec![DaemonPeerState {
+                participant_pubkey: exit_pubkey.to_string(),
+                advertised_routes: vec!["0.0.0.0/0".to_string()],
+                reachable: false,
+                error: Some("fips link pending".to_string()),
+                ..DaemonPeerState::default()
+            }],
+            ..DaemonRuntimeState::default()
+        });
+
+        let state = runtime.state();
+        assert!(state.exit_node_blocked);
+        assert!(!state.exit_node_active);
+        assert_eq!(
+            state.exit_node_status_text,
+            "Internet blocked: waiting for lab-exit.nvpn"
+        );
+    }
+
+    #[test]
+    fn native_state_reports_active_exit_node_when_selected_peer_is_reachable() {
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        let own_pubkey = runtime
+            .config
+            .own_nostr_pubkey_hex()
+            .expect("generated config should have own pubkey");
+        let exit_pubkey = "26525c442dd039de4e728b41ee8d7f717b267ab25b7c219d53a3249e1c9174cc";
+        runtime.startup_error = None;
+        runtime.daemon_running = true;
+        runtime.vpn_enabled = true;
+        runtime.vpn_active = true;
+        runtime.config.exit_node = exit_pubkey.to_string();
+        runtime.config.exit_node_leak_protection = true;
+        runtime.config.networks[0].admins = vec![own_pubkey];
+        runtime.config.networks[0].participants = vec![exit_pubkey.to_string()];
+        runtime
+            .config
+            .set_peer_alias(exit_pubkey, "lab-exit")
+            .unwrap();
+        runtime.daemon_state = Some(DaemonRuntimeState {
+            vpn_enabled: true,
+            vpn_active: true,
+            expected_peer_count: 1,
+            connected_peer_count: 1,
+            mesh_ready: true,
+            peers: vec![DaemonPeerState {
+                participant_pubkey: exit_pubkey.to_string(),
+                advertised_routes: vec!["0.0.0.0/0".to_string()],
+                reachable: true,
+                ..DaemonPeerState::default()
+            }],
+            ..DaemonRuntimeState::default()
+        });
+
+        let state = runtime.state();
+        assert!(!state.exit_node_blocked);
+        assert!(state.exit_node_active);
+        assert_eq!(state.exit_node_status_text, "Exit: lab-exit.nvpn");
     }
 
     #[test]
@@ -1978,6 +2176,7 @@ mod tests {
                 wireguard_exit_dns: Some("9.9.9.9".to_string()),
                 wireguard_exit_mtu: Some(1380),
                 wireguard_exit_persistent_keepalive_secs: Some(20),
+                exit_node_leak_protection: Some(true),
                 ..SettingsPatch::default()
             },
         });
@@ -1995,12 +2194,74 @@ mod tests {
         assert_eq!(saved.wireguard_exit.dns, vec!["9.9.9.9"]);
         assert_eq!(saved.wireguard_exit.mtu, 1380);
         assert_eq!(saved.wireguard_exit.persistent_keepalive_secs, 20);
+        assert!(saved.exit_node_leak_protection);
 
         let state = runtime.state();
+        assert!(state.exit_node_leak_protection);
         assert!(state.wireguard_exit_enabled);
         assert!(state.wireguard_exit_configured);
         assert_eq!(state.wireguard_exit_interface, "custom-wg");
         assert_eq!(state.wireguard_exit_allowed_ips, "0.0.0.0/0");
+        assert!(state.wireguard_exit_config.contains("[Interface]"));
+        assert!(state.wireguard_exit_config.contains("[Peer]"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn settings_patch_imports_wireguard_exit_config_block() {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-wireguard-import-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        runtime.mobile_runtime = true;
+        runtime.config_path = dir.join("config.toml");
+        runtime.config.wireguard_exit.enabled = true;
+
+        runtime.dispatch(NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                wireguard_exit_config: Some(
+                    r"
+                    [Interface]
+                    PrivateKey = client-private
+                    Address = 10.64.70.195/32
+                    DNS = 10.64.0.1
+                    MTU = 1380
+
+                    [Peer]
+                    PublicKey = provider-public
+                    AllowedIPs = 0.0.0.0/0
+                    Endpoint = vpn.example.test:51820
+                    PersistentKeepalive = 20
+                    "
+                    .to_string(),
+                ),
+                ..SettingsPatch::default()
+            },
+        });
+
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
+        assert!(saved.wireguard_exit.enabled);
+        assert_eq!(saved.wireguard_exit.address, "10.64.70.195/32");
+        assert_eq!(saved.wireguard_exit.private_key, "client-private");
+        assert_eq!(saved.wireguard_exit.peer_public_key, "provider-public");
+        assert_eq!(saved.wireguard_exit.endpoint, "vpn.example.test:51820");
+        assert_eq!(saved.wireguard_exit.mtu, 1380);
+        assert_eq!(saved.wireguard_exit.persistent_keepalive_secs, 20);
+
+        let state = runtime.state();
+        assert!(
+            state
+                .wireguard_exit_config
+                .contains("Endpoint = vpn.example.test:51820")
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

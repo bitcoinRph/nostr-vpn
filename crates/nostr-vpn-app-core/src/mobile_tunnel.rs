@@ -273,11 +273,26 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
     config.node.discovery.nostr.share_local_candidates = mobile.share_local_candidates;
     config.node.discovery.nostr.app = format!("{FIPS_NOSTR_DISCOVERY_APP}:{scope}");
     if !mobile.nostr_relays.is_empty() {
-        config.node.discovery.nostr.advert_relays = mobile.nostr_relays.clone();
-        config.node.discovery.nostr.dm_relays = mobile.nostr_relays.clone();
+        config
+            .node
+            .discovery
+            .nostr
+            .advert_relays
+            .clone_from(&mobile.nostr_relays);
+        config
+            .node
+            .discovery
+            .nostr
+            .dm_relays
+            .clone_from(&mobile.nostr_relays);
     }
     if !mobile.stun_servers.is_empty() {
-        config.node.discovery.nostr.stun_servers = mobile.stun_servers.clone();
+        config
+            .node
+            .discovery
+            .nostr
+            .stun_servers
+            .clone_from(&mobile.stun_servers);
     }
     config.transports.udp = TransportInstances::Single(UdpConfig {
         bind_addr: Some("0.0.0.0:0".to_string()),

@@ -16,6 +16,10 @@ struct StatusMenuView: View {
     var body: some View {
         Button("Open Nostr VPN", action: openMainWindow)
         Divider()
+        if !state.exitNodeStatusText.isEmpty {
+            Button(state.exitNodeStatusText) {}
+                .disabled(true)
+        }
         Button(state.vpnEnabled ? "Turn VPN Off" : "Turn VPN On") {
             manager.toggleVpn()
         }

@@ -416,8 +416,18 @@ private fun androidx.compose.foundation.lazy.LazyListScope.exitNodesPage(
                 )
                 Text("Offer exit node")
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = state.exitNodeLeakProtection,
+                    onCheckedChange = { enabled ->
+                        dispatch(NativeActions.updateSettings("exitNodeLeakProtection" to enabled))
+                    },
+                )
+                Text("Block internet if exit node disconnects")
+            }
         }
     }
+    item { WireGuardSettingsCard(state, dispatch) }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
@@ -426,7 +436,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
     dispatch: (JSONObject) -> Unit,
 ) {
     item { DeviceSettingsCard(state, dispatch) }
-    item { WireGuardSettingsCard(state, dispatch) }
     item { NetworksCard(state, network, dispatch) }
     item { DiagnosticsCard(state) }
 }

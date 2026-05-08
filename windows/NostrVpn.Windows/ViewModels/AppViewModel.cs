@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using NostrVpn.Windows.Core;
@@ -41,21 +42,20 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     private string _listenPort = "";
     private string _magicDnsSuffix = "";
     private string _advertisedRoutes = "";
-    private string _wireguardExitInterface = "";
-    private string _wireguardExitAddress = "";
-    private string _wireguardExitPrivateKey = "";
-    private string _wireguardExitPeerPublicKey = "";
-    private string _wireguardExitPeerPresharedKey = "";
-    private string _wireguardExitEndpoint = "";
-    private string _wireguardExitAllowedIps = "";
-    private string _wireguardExitDns = "";
-    private string _wireguardExitMtu = "";
-    private string _wireguardExitKeepalive = "";
+    private string _wireguardExitConfig = "";
     private string _updateStatus = "";
+    private Uri? _updateAssetUrl;
     private bool _updateChecking;
+    private bool _updateInstalling;
     private bool _updateAvailable;
+    private bool _autoInstallUpdates;
     private string _updateVersion = "";
     private QrMatrix _inviteQr = new();
+    private static readonly Brush HeaderOffBrush = new SolidColorBrush(Color.FromRgb(240, 232, 255));
+    private static readonly Brush HeaderOkBrush = new SolidColorBrush(Color.FromRgb(18, 161, 80));
+    private static readonly Brush HeaderWarnBrush = new SolidColorBrush(Color.FromRgb(217, 119, 6));
+    private static readonly Brush HeaderDangerBrush = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+    private static readonly Brush TextSecondaryBrush = new SolidColorBrush(Color.FromRgb(104, 113, 124));
 
     public AppViewModel()
     {
@@ -64,6 +64,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "Nostr VPN");
         _core = new AppCoreClient(dataDir, version);
+        _autoInstallUpdates = LoadAutoInstallUpdates();
         ApplyState(_core.State(), syncDrafts: true);
 
         ShowDevicesCommand = new RelayCommand(_ => Page = AppPage.Devices);
@@ -90,13 +91,15 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         EnableServiceCommand = new AsyncRelayCommand(_ => DispatchAsync(NativeActions.EnableSystemService(), "Enabling service"), _ => !ActionInFlight && State.ServiceEnablementSupported);
         DisableServiceCommand = new AsyncRelayCommand(_ => DispatchAsync(NativeActions.DisableSystemService(), "Disabling service"), _ => !ActionInFlight && State.ServiceEnablementSupported);
         InstallCliCommand = new AsyncRelayCommand(_ => DispatchAsync(NativeActions.InstallCli(), "Installing CLI"), _ => !ActionInFlight && State.CliInstallSupported);
-        CheckUpdatesCommand = new AsyncRelayCommand(_ => CheckUpdatesAsync(), _ => !UpdateChecking);
+        CheckUpdatesCommand = new AsyncRelayCommand(_ => CheckUpdatesAsync(), _ => !UpdateChecking && !UpdateInstalling);
+        InstallUpdateCommand = new AsyncRelayCommand(_ => InstallUpdateAsync(), _ => UpdateInstallEnabled);
 
         StartupService.RegisterDeepLinkProtocol();
 
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _refreshTimer.Tick += async (_, _) => await RefreshAsync();
         _refreshTimer.Start();
+        _ = CheckUpdatesAsync(manual: false);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -179,33 +182,58 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public string ListenPort { get => _listenPort; set => SetField(ref _listenPort, value); }
     public string MagicDnsSuffix { get => _magicDnsSuffix; set => SetField(ref _magicDnsSuffix, value); }
     public string AdvertisedRoutes { get => _advertisedRoutes; set => SetField(ref _advertisedRoutes, value); }
-    public string WireguardExitInterface { get => _wireguardExitInterface; set => SetField(ref _wireguardExitInterface, value); }
-    public string WireguardExitAddress { get => _wireguardExitAddress; set => SetField(ref _wireguardExitAddress, value); }
-    public string WireguardExitPrivateKey { get => _wireguardExitPrivateKey; set => SetField(ref _wireguardExitPrivateKey, value); }
-    public string WireguardExitPeerPublicKey { get => _wireguardExitPeerPublicKey; set => SetField(ref _wireguardExitPeerPublicKey, value); }
-    public string WireguardExitPeerPresharedKey { get => _wireguardExitPeerPresharedKey; set => SetField(ref _wireguardExitPeerPresharedKey, value); }
-    public string WireguardExitEndpoint { get => _wireguardExitEndpoint; set => SetField(ref _wireguardExitEndpoint, value); }
-    public string WireguardExitAllowedIps { get => _wireguardExitAllowedIps; set => SetField(ref _wireguardExitAllowedIps, value); }
-    public string WireguardExitDns { get => _wireguardExitDns; set => SetField(ref _wireguardExitDns, value); }
-    public string WireguardExitMtu { get => _wireguardExitMtu; set => SetField(ref _wireguardExitMtu, value); }
-    public string WireguardExitKeepalive { get => _wireguardExitKeepalive; set => SetField(ref _wireguardExitKeepalive, value); }
+    public string WireguardExitConfig { get => _wireguardExitConfig; set => SetField(ref _wireguardExitConfig, value); }
 
     public bool UpdateChecking
     {
         get => _updateChecking;
-        private set => SetField(ref _updateChecking, value);
+        private set
+        {
+            if (SetField(ref _updateChecking, value))
+            {
+                OnPropertyChanged(nameof(UpdateInstallEnabled));
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
+
+    public bool UpdateInstalling
+    {
+        get => _updateInstalling;
+        private set
+        {
+            if (SetField(ref _updateInstalling, value))
+            {
+                OnPropertyChanged(nameof(UpdateInstallEnabled));
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
     }
 
     public bool UpdateAvailable
     {
         get => _updateAvailable;
-        private set => SetField(ref _updateAvailable, value);
+        private set
+        {
+            if (SetField(ref _updateAvailable, value))
+            {
+                OnPropertyChanged(nameof(UpdateStripeText));
+                OnPropertyChanged(nameof(UpdateInstallEnabled));
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
     }
 
     public string UpdateVersion
     {
         get => _updateVersion;
-        private set => SetField(ref _updateVersion, value);
+        private set
+        {
+            if (SetField(ref _updateVersion, value))
+            {
+                OnPropertyChanged(nameof(UpdateStripeText));
+            }
+        }
     }
 
     public string UpdateStatus
@@ -213,6 +241,29 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         get => _updateStatus;
         private set => SetField(ref _updateStatus, value);
     }
+
+    public bool AutoInstallUpdates
+    {
+        get => _autoInstallUpdates;
+        set
+        {
+            if (!SetField(ref _autoInstallUpdates, value))
+            {
+                return;
+            }
+            SaveAutoInstallUpdates(value);
+            if (value && UpdateInstallEnabled)
+            {
+                _ = InstallUpdateAsync();
+            }
+        }
+    }
+
+    public bool UpdateInstallEnabled => UpdateAvailable && _updateAssetUrl is not null && !UpdateChecking && !UpdateInstalling;
+
+    public string UpdateStripeText => string.IsNullOrWhiteSpace(State.AppVersion)
+        ? $"Update available: {UpdateVersion}"
+        : $"Update available: {UpdateVersion} (you're on {State.AppVersion})";
 
     public QrMatrix InviteQr
     {
@@ -225,7 +276,35 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public string ActiveNetworkName => DisplayNetworkName(ActiveNetwork);
     public string HeroSubtitle => $"{State.ConnectedPeerCount} of {State.ExpectedPeerCount} connected";
     public string VpnButtonText => State.VpnEnabled ? "On" : "Off";
-    public string VpnStatusText => string.IsNullOrWhiteSpace(State.Error) ? State.VpnStatus : State.Error;
+    public string VpnStatusText
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(State.Error))
+            {
+                return State.Error;
+            }
+            if (State.ExitNodeBlocked)
+            {
+                return string.IsNullOrWhiteSpace(State.ExitNodeStatusText)
+                    ? "Internet blocked"
+                    : State.ExitNodeStatusText;
+            }
+            if (State.ExitNodeActive && !string.IsNullOrWhiteSpace(State.ExitNodeStatusText))
+            {
+                return State.ExitNodeStatusText;
+            }
+            return State.VpnStatus;
+        }
+    }
+    public Brush HeaderStatusBrush => State.ExitNodeBlocked
+        ? HeaderDangerBrush
+        : State.ExitNodeActive || State.VpnActive
+            ? HeaderOkBrush
+            : State.VpnEnabled
+                ? HeaderWarnBrush
+                : HeaderOffBrush;
+    public Brush VpnStatusBrush => State.ExitNodeBlocked ? HeaderDangerBrush : TextSecondaryBrush;
     public string ThisDeviceCopyValue => !string.IsNullOrWhiteSpace(State.OwnNpub) ? State.OwnNpub : State.TunnelIp;
     public string LanPairingText => State.LanPairingActive ? $"{State.LanPairingRemainingSecs}s" : "Pair nearby";
     public string ServiceSummary => State.ServiceInstalled ? "Service installed" : "Service missing";
@@ -275,6 +354,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public ICommand DisableServiceCommand { get; }
     public ICommand InstallCliCommand { get; }
     public ICommand CheckUpdatesCommand { get; }
+    public ICommand InstallUpdateCommand { get; }
 
     public async Task RefreshAsync()
     {
@@ -305,6 +385,13 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         return DispatchAsync(
             NativeActions.UpdateSettings(new SettingsPatch { AdvertiseExitNode = enabled }),
             "Saving routing");
+    }
+
+    public Task SetExitNodeLeakProtectionAsync(bool enabled)
+    {
+        return DispatchAsync(
+            NativeActions.UpdateSettings(new SettingsPatch { ExitNodeLeakProtection = enabled }),
+            "Saving route protection");
     }
 
     public Task SetWireGuardExitEnabledAsync(bool enabled)
@@ -437,19 +524,66 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         Notice = "Copied";
     }
 
-    public async Task CheckUpdatesAsync()
+    public async Task CheckUpdatesAsync(bool manual = true)
     {
         UpdateChecking = true;
-        UpdateStatus = "Checking for updates";
+        if (manual)
+        {
+            UpdateStatus = "Checking for updates";
+        }
         try
         {
             var result = await _updateService.CheckAsync(State.AppVersion);
             UpdateAvailable = result.Available;
             UpdateVersion = result.Tag;
-            UpdateStatus = result.Message;
-            if (result.Available && result.AssetUrl is not null && !UpdateService.SkipOpen)
+            _updateAssetUrl = result.Available ? result.AssetUrl : null;
+            OnPropertyChanged(nameof(UpdateInstallEnabled));
+            CommandManager.InvalidateRequerySuggested();
+            if (result.Available)
             {
-                _ = Process.Start(new ProcessStartInfo(result.AssetUrl.ToString()) { UseShellExecute = true });
+                UpdateStatus = result.Message;
+                if (AutoInstallUpdates && result.AssetUrl is not null)
+                {
+                    await InstallUpdateAsync();
+                }
+            }
+            else if (manual)
+            {
+                UpdateStatus = result.Message;
+            }
+            else
+            {
+                UpdateStatus = "";
+            }
+        }
+        catch (Exception error)
+        {
+            if (manual)
+            {
+                UpdateStatus = error.Message;
+            }
+        }
+        finally
+        {
+            UpdateChecking = false;
+        }
+    }
+
+    private async Task InstallUpdateAsync()
+    {
+        if (_updateAssetUrl is null || UpdateInstalling)
+        {
+            return;
+        }
+        UpdateInstalling = true;
+        UpdateStatus = $"Downloading {UpdateVersion}";
+        try
+        {
+            var path = await _updateService.DownloadAsync(_updateAssetUrl);
+            UpdateStatus = $"Downloaded {Path.GetFileName(path)}";
+            if (!UpdateService.SkipOpen)
+            {
+                _ = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
             }
         }
         catch (Exception error)
@@ -458,7 +592,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         }
         finally
         {
-            UpdateChecking = false;
+            UpdateInstalling = false;
         }
     }
 
@@ -560,20 +694,9 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
 
     private Task SaveWireGuardExitAsync()
     {
-        ushort? mtu = ushort.TryParse(WireguardExitMtu.Trim(), out var parsedMtu) ? parsedMtu : null;
-        ushort? keepalive = ushort.TryParse(WireguardExitKeepalive.Trim(), out var parsedKeepalive) ? parsedKeepalive : null;
         return DispatchAsync(NativeActions.UpdateSettings(new SettingsPatch
         {
-            WireguardExitInterface = WireguardExitInterface,
-            WireguardExitAddress = WireguardExitAddress,
-            WireguardExitPrivateKey = WireguardExitPrivateKey,
-            WireguardExitPeerPublicKey = WireguardExitPeerPublicKey,
-            WireguardExitPeerPresharedKey = WireguardExitPeerPresharedKey,
-            WireguardExitEndpoint = WireguardExitEndpoint,
-            WireguardExitAllowedIps = WireguardExitAllowedIps,
-            WireguardExitDns = WireguardExitDns,
-            WireguardExitMtu = mtu,
-            WireguardExitPersistentKeepaliveSecs = keepalive,
+            WireguardExitConfig = WireguardExitConfig,
         }), "Saving WireGuard");
     }
 
@@ -596,16 +719,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         TunnelIp = state.TunnelIp;
         ListenPort = state.ListenPort.ToString();
         MagicDnsSuffix = state.MagicDnsSuffix;
-        WireguardExitInterface = state.WireguardExitInterface;
-        WireguardExitAddress = state.WireguardExitAddress;
-        WireguardExitPrivateKey = state.WireguardExitPrivateKey;
-        WireguardExitPeerPublicKey = state.WireguardExitPeerPublicKey;
-        WireguardExitPeerPresharedKey = state.WireguardExitPeerPresharedKey;
-        WireguardExitEndpoint = state.WireguardExitEndpoint;
-        WireguardExitAllowedIps = state.WireguardExitAllowedIps;
-        WireguardExitDns = state.WireguardExitDns;
-        WireguardExitMtu = state.WireguardExitMtu.ToString();
-        WireguardExitKeepalive = state.WireguardExitPersistentKeepaliveSecs.ToString();
+        WireguardExitConfig = state.WireguardExitConfig;
         NetworkNameDraft = active?.Name ?? "";
         NetworkMeshIdDraft = active?.NetworkId ?? "";
     }
@@ -627,6 +741,9 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(HeroSubtitle));
         OnPropertyChanged(nameof(VpnButtonText));
         OnPropertyChanged(nameof(VpnStatusText));
+        OnPropertyChanged(nameof(HeaderStatusBrush));
+        OnPropertyChanged(nameof(VpnStatusBrush));
+        OnPropertyChanged(nameof(UpdateStripeText));
         OnPropertyChanged(nameof(ThisDeviceCopyValue));
         OnPropertyChanged(nameof(LanPairingText));
         OnPropertyChanged(nameof(ServiceSummary));
@@ -648,6 +765,18 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             return first;
         }
         return string.IsNullOrWhiteSpace(second) ? fallback : second;
+    }
+
+    private static bool LoadAutoInstallUpdates()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Nostr VPN");
+        return key?.GetValue("AutoInstallUpdates") is int value && value != 0;
+    }
+
+    private static void SaveAutoInstallUpdates(bool enabled)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(@"Software\Nostr VPN");
+        key?.SetValue("AutoInstallUpdates", enabled ? 1 : 0, RegistryValueKind.DWord);
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = "")

@@ -39,7 +39,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
@@ -70,6 +69,7 @@ internal fun ParticipantRow(state: AppState, participant: ParticipantState) {
                     if (isSelf) Pill("This device", Color(0xFFECFDF5), Ok)
                     if (participant.isAdmin) Pill("Admin", Color(0xFFF5F3FF), Accent)
                     if (participant.offersExitNode) Pill("Exit", Color(0xFFFFF7ED), Color(0xFFA16207))
+                    if (participant.isFipsRouted(state)) Pill("Routed", Color(0xFFF1F5F9), Muted)
                 }
                 Text(participant.subtitle(isSelf), color = Muted, maxLines = 1)
                 Text(participant.statusLabel(state), color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -199,21 +199,15 @@ internal fun DeviceSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit)
 
 @Composable
 internal fun WireGuardSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit) {
-    var iface by remember(state.wireguardExitInterface) { mutableStateOf(state.wireguardExitInterface) }
-    var address by remember(state.wireguardExitAddress) { mutableStateOf(state.wireguardExitAddress) }
-    var privateKey by remember(state.wireguardExitPrivateKey) { mutableStateOf(state.wireguardExitPrivateKey) }
-    var peerPublicKey by remember(state.wireguardExitPeerPublicKey) { mutableStateOf(state.wireguardExitPeerPublicKey) }
-    var peerPresharedKey by remember(state.wireguardExitPeerPresharedKey) { mutableStateOf(state.wireguardExitPeerPresharedKey) }
-    var endpoint by remember(state.wireguardExitEndpoint) { mutableStateOf(state.wireguardExitEndpoint) }
-    var allowedIps by remember(state.wireguardExitAllowedIps) { mutableStateOf(state.wireguardExitAllowedIps) }
-    var dns by remember(state.wireguardExitDns) { mutableStateOf(state.wireguardExitDns) }
-    var mtu by remember(state.wireguardExitMtu) { mutableStateOf(state.wireguardExitMtu.toString()) }
-    var keepalive by remember(state.wireguardExitPersistentKeepaliveSecs) {
-        mutableStateOf(state.wireguardExitPersistentKeepaliveSecs.toString())
-    }
+    var config by remember(state.wireguardExitConfig) { mutableStateOf(state.wireguardExitConfig) }
 
     AppCard {
         Text("WireGuard Upstream", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Paste a WireGuard config from an upstream VPN provider such as Mullvad or Proton VPN.",
+            color = Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Enabled", modifier = Modifier.weight(1f))
             Switch(
@@ -223,45 +217,17 @@ internal fun WireGuardSettingsCard(state: AppState, dispatch: (JSONObject) -> Un
                 },
             )
         }
-        OutlinedTextField(iface, { iface = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Interface") })
-        OutlinedTextField(address, { address = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Address") })
-        OutlinedTextField(endpoint, { endpoint = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Endpoint") })
-        OutlinedTextField(allowedIps, { allowedIps = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Allowed IPs") })
-        OutlinedTextField(peerPublicKey, { peerPublicKey = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Peer Key") })
         OutlinedTextField(
-            privateKey,
-            { privateKey = it },
+            config,
+            { config = it },
             Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("Private Key") },
-            visualTransformation = PasswordVisualTransformation(),
+            minLines = 8,
+            label = { Text("Config") },
         )
-        OutlinedTextField(
-            peerPresharedKey,
-            { peerPresharedKey = it },
-            Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("Preshared Key") },
-            visualTransformation = PasswordVisualTransformation(),
-        )
-        OutlinedTextField(dns, { dns = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("DNS") })
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(mtu, { mtu = it }, Modifier.weight(1f), singleLine = true, label = { Text("MTU") })
-            OutlinedTextField(keepalive, { keepalive = it }, Modifier.weight(1f), singleLine = true, label = { Text("Keepalive") })
-        }
         Button(onClick = {
             dispatch(
                 NativeActions.updateSettings(
-                    "wireguardExitInterface" to iface,
-                    "wireguardExitAddress" to address,
-                    "wireguardExitPrivateKey" to privateKey,
-                    "wireguardExitPeerPublicKey" to peerPublicKey,
-                    "wireguardExitPeerPresharedKey" to peerPresharedKey,
-                    "wireguardExitEndpoint" to endpoint,
-                    "wireguardExitAllowedIps" to allowedIps,
-                    "wireguardExitDns" to dns,
-                    "wireguardExitMtu" to mtu.toIntOrNull(),
-                    "wireguardExitPersistentKeepaliveSecs" to keepalive.toIntOrNull(),
+                    "wireguardExitConfig" to config,
                 ),
             )
         }) {
@@ -479,6 +445,9 @@ private fun ParticipantState.statusLabel(appState: AppState): String {
         else -> "Unknown"
     }
 }
+
+private fun ParticipantState.isFipsRouted(state: AppState): Boolean =
+    !isSelf(state) && reachable && fipsTransportAddr.isBlank()
 
 private fun String.shortNpub(): String {
     if (isBlank()) return "Device"

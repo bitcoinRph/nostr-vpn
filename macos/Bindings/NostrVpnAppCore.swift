@@ -697,6 +697,10 @@ public struct NativeAppState {
     public var networkId: String
     public var activeNetworkInvite: String
     public var exitNode: String
+    public var exitNodeLeakProtection: Bool
+    public var exitNodeActive: Bool
+    public var exitNodeBlocked: Bool
+    public var exitNodeStatusText: String
     public var advertiseExitNode: Bool
     public var advertisedRoutes: [String]
     public var effectiveAdvertisedRoutes: [String]
@@ -712,6 +716,7 @@ public struct NativeAppState {
     public var wireguardExitDns: String
     public var wireguardExitMtu: UInt16
     public var wireguardExitPersistentKeepaliveSecs: UInt16
+    public var wireguardExitConfig: String
     public var magicDnsSuffix: String
     public var magicDnsStatus: String
     public var autoconnect: Bool
@@ -730,7 +735,7 @@ public struct NativeAppState {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(rev: UInt64, platform: String, mobile: Bool, vpnControlSupported: Bool, cliInstallSupported: Bool, startupSettingsSupported: Bool, trayBehaviorSupported: Bool, runtimeStatusDetail: String, appVersion: String, configPath: String, error: String, cliInstalled: Bool, serviceSupported: Bool, serviceEnablementSupported: Bool, serviceInstalled: Bool, serviceDisabled: Bool, serviceRunning: Bool, serviceStatusDetail: String, daemonRunning: Bool, vpnEnabled: Bool, vpnActive: Bool, vpnStatus: String, daemonBinaryVersion: String, serviceBinaryVersion: String, ownNpub: String, ownPubkeyHex: String, nodeId: String, nodeName: String, selfMagicDnsName: String, endpoint: String, tunnelIp: String, listenPort: UInt32, networkId: String, activeNetworkInvite: String, exitNode: String, advertiseExitNode: Bool, advertisedRoutes: [String], effectiveAdvertisedRoutes: [String], wireguardExitEnabled: Bool, wireguardExitConfigured: Bool, wireguardExitInterface: String, wireguardExitAddress: String, wireguardExitPrivateKey: String, wireguardExitPeerPublicKey: String, wireguardExitPeerPresharedKey: String, wireguardExitEndpoint: String, wireguardExitAllowedIps: String, wireguardExitDns: String, wireguardExitMtu: UInt16, wireguardExitPersistentKeepaliveSecs: UInt16, magicDnsSuffix: String, magicDnsStatus: String, autoconnect: Bool, lanPairingActive: Bool, lanPairingRemainingSecs: UInt64, launchOnStartup: Bool, closeToTrayOnClose: Bool, connectedPeerCount: UInt64, expectedPeerCount: UInt64, meshReady: Bool, health: [NativeHealthIssue], network: NativeNetworkSummary, portMapping: NativePortMappingStatus, networks: [NativeNetworkState], lanPeers: [NativeLanPeerState]) {
+    public init(rev: UInt64, platform: String, mobile: Bool, vpnControlSupported: Bool, cliInstallSupported: Bool, startupSettingsSupported: Bool, trayBehaviorSupported: Bool, runtimeStatusDetail: String, appVersion: String, configPath: String, error: String, cliInstalled: Bool, serviceSupported: Bool, serviceEnablementSupported: Bool, serviceInstalled: Bool, serviceDisabled: Bool, serviceRunning: Bool, serviceStatusDetail: String, daemonRunning: Bool, vpnEnabled: Bool, vpnActive: Bool, vpnStatus: String, daemonBinaryVersion: String, serviceBinaryVersion: String, ownNpub: String, ownPubkeyHex: String, nodeId: String, nodeName: String, selfMagicDnsName: String, endpoint: String, tunnelIp: String, listenPort: UInt32, networkId: String, activeNetworkInvite: String, exitNode: String, exitNodeLeakProtection: Bool, exitNodeActive: Bool, exitNodeBlocked: Bool, exitNodeStatusText: String, advertiseExitNode: Bool, advertisedRoutes: [String], effectiveAdvertisedRoutes: [String], wireguardExitEnabled: Bool, wireguardExitConfigured: Bool, wireguardExitInterface: String, wireguardExitAddress: String, wireguardExitPrivateKey: String, wireguardExitPeerPublicKey: String, wireguardExitPeerPresharedKey: String, wireguardExitEndpoint: String, wireguardExitAllowedIps: String, wireguardExitDns: String, wireguardExitMtu: UInt16, wireguardExitPersistentKeepaliveSecs: UInt16, wireguardExitConfig: String, magicDnsSuffix: String, magicDnsStatus: String, autoconnect: Bool, lanPairingActive: Bool, lanPairingRemainingSecs: UInt64, launchOnStartup: Bool, closeToTrayOnClose: Bool, connectedPeerCount: UInt64, expectedPeerCount: UInt64, meshReady: Bool, health: [NativeHealthIssue], network: NativeNetworkSummary, portMapping: NativePortMappingStatus, networks: [NativeNetworkState], lanPeers: [NativeLanPeerState]) {
         self.rev = rev
         self.platform = platform
         self.mobile = mobile
@@ -766,6 +771,10 @@ public struct NativeAppState {
         self.networkId = networkId
         self.activeNetworkInvite = activeNetworkInvite
         self.exitNode = exitNode
+        self.exitNodeLeakProtection = exitNodeLeakProtection
+        self.exitNodeActive = exitNodeActive
+        self.exitNodeBlocked = exitNodeBlocked
+        self.exitNodeStatusText = exitNodeStatusText
         self.advertiseExitNode = advertiseExitNode
         self.advertisedRoutes = advertisedRoutes
         self.effectiveAdvertisedRoutes = effectiveAdvertisedRoutes
@@ -781,6 +790,7 @@ public struct NativeAppState {
         self.wireguardExitDns = wireguardExitDns
         self.wireguardExitMtu = wireguardExitMtu
         self.wireguardExitPersistentKeepaliveSecs = wireguardExitPersistentKeepaliveSecs
+        self.wireguardExitConfig = wireguardExitConfig
         self.magicDnsSuffix = magicDnsSuffix
         self.magicDnsStatus = magicDnsStatus
         self.autoconnect = autoconnect
@@ -911,6 +921,18 @@ extension NativeAppState: Equatable, Hashable {
         if lhs.exitNode != rhs.exitNode {
             return false
         }
+        if lhs.exitNodeLeakProtection != rhs.exitNodeLeakProtection {
+            return false
+        }
+        if lhs.exitNodeActive != rhs.exitNodeActive {
+            return false
+        }
+        if lhs.exitNodeBlocked != rhs.exitNodeBlocked {
+            return false
+        }
+        if lhs.exitNodeStatusText != rhs.exitNodeStatusText {
+            return false
+        }
         if lhs.advertiseExitNode != rhs.advertiseExitNode {
             return false
         }
@@ -954,6 +976,9 @@ extension NativeAppState: Equatable, Hashable {
             return false
         }
         if lhs.wireguardExitPersistentKeepaliveSecs != rhs.wireguardExitPersistentKeepaliveSecs {
+            return false
+        }
+        if lhs.wireguardExitConfig != rhs.wireguardExitConfig {
             return false
         }
         if lhs.magicDnsSuffix != rhs.magicDnsSuffix {
@@ -1040,6 +1065,10 @@ extension NativeAppState: Equatable, Hashable {
         hasher.combine(networkId)
         hasher.combine(activeNetworkInvite)
         hasher.combine(exitNode)
+        hasher.combine(exitNodeLeakProtection)
+        hasher.combine(exitNodeActive)
+        hasher.combine(exitNodeBlocked)
+        hasher.combine(exitNodeStatusText)
         hasher.combine(advertiseExitNode)
         hasher.combine(advertisedRoutes)
         hasher.combine(effectiveAdvertisedRoutes)
@@ -1055,6 +1084,7 @@ extension NativeAppState: Equatable, Hashable {
         hasher.combine(wireguardExitDns)
         hasher.combine(wireguardExitMtu)
         hasher.combine(wireguardExitPersistentKeepaliveSecs)
+        hasher.combine(wireguardExitConfig)
         hasher.combine(magicDnsSuffix)
         hasher.combine(magicDnsStatus)
         hasher.combine(autoconnect)
@@ -1117,6 +1147,10 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
                 networkId: FfiConverterString.read(from: &buf),
                 activeNetworkInvite: FfiConverterString.read(from: &buf),
                 exitNode: FfiConverterString.read(from: &buf),
+                exitNodeLeakProtection: FfiConverterBool.read(from: &buf),
+                exitNodeActive: FfiConverterBool.read(from: &buf),
+                exitNodeBlocked: FfiConverterBool.read(from: &buf),
+                exitNodeStatusText: FfiConverterString.read(from: &buf),
                 advertiseExitNode: FfiConverterBool.read(from: &buf),
                 advertisedRoutes: FfiConverterSequenceString.read(from: &buf),
                 effectiveAdvertisedRoutes: FfiConverterSequenceString.read(from: &buf),
@@ -1132,6 +1166,7 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
                 wireguardExitDns: FfiConverterString.read(from: &buf),
                 wireguardExitMtu: FfiConverterUInt16.read(from: &buf),
                 wireguardExitPersistentKeepaliveSecs: FfiConverterUInt16.read(from: &buf),
+                wireguardExitConfig: FfiConverterString.read(from: &buf),
                 magicDnsSuffix: FfiConverterString.read(from: &buf),
                 magicDnsStatus: FfiConverterString.read(from: &buf),
                 autoconnect: FfiConverterBool.read(from: &buf),
@@ -1186,6 +1221,10 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
         FfiConverterString.write(value.networkId, into: &buf)
         FfiConverterString.write(value.activeNetworkInvite, into: &buf)
         FfiConverterString.write(value.exitNode, into: &buf)
+        FfiConverterBool.write(value.exitNodeLeakProtection, into: &buf)
+        FfiConverterBool.write(value.exitNodeActive, into: &buf)
+        FfiConverterBool.write(value.exitNodeBlocked, into: &buf)
+        FfiConverterString.write(value.exitNodeStatusText, into: &buf)
         FfiConverterBool.write(value.advertiseExitNode, into: &buf)
         FfiConverterSequenceString.write(value.advertisedRoutes, into: &buf)
         FfiConverterSequenceString.write(value.effectiveAdvertisedRoutes, into: &buf)
@@ -1201,6 +1240,7 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
         FfiConverterString.write(value.wireguardExitDns, into: &buf)
         FfiConverterUInt16.write(value.wireguardExitMtu, into: &buf)
         FfiConverterUInt16.write(value.wireguardExitPersistentKeepaliveSecs, into: &buf)
+        FfiConverterString.write(value.wireguardExitConfig, into: &buf)
         FfiConverterString.write(value.magicDnsSuffix, into: &buf)
         FfiConverterString.write(value.magicDnsStatus, into: &buf)
         FfiConverterBool.write(value.autoconnect, into: &buf)
@@ -2413,6 +2453,7 @@ public struct SettingsPatch {
     public var tunnelIp: String?
     public var listenPort: UInt16?
     public var exitNode: String?
+    public var exitNodeLeakProtection: Bool?
     public var advertiseExitNode: Bool?
     public var advertisedRoutes: String?
     public var wireguardExitEnabled: Bool?
@@ -2426,6 +2467,7 @@ public struct SettingsPatch {
     public var wireguardExitDns: String?
     public var wireguardExitMtu: UInt16?
     public var wireguardExitPersistentKeepaliveSecs: UInt16?
+    public var wireguardExitConfig: String?
     public var magicDnsSuffix: String?
     public var autoconnect: Bool?
     public var launchOnStartup: Bool?
@@ -2433,12 +2475,13 @@ public struct SettingsPatch {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(nodeName: String?, endpoint: String?, tunnelIp: String?, listenPort: UInt16?, exitNode: String?, advertiseExitNode: Bool?, advertisedRoutes: String?, wireguardExitEnabled: Bool?, wireguardExitInterface: String?, wireguardExitAddress: String?, wireguardExitPrivateKey: String?, wireguardExitPeerPublicKey: String?, wireguardExitPeerPresharedKey: String?, wireguardExitEndpoint: String?, wireguardExitAllowedIps: String?, wireguardExitDns: String?, wireguardExitMtu: UInt16?, wireguardExitPersistentKeepaliveSecs: UInt16?, magicDnsSuffix: String?, autoconnect: Bool?, launchOnStartup: Bool?, closeToTrayOnClose: Bool?) {
+    public init(nodeName: String?, endpoint: String?, tunnelIp: String?, listenPort: UInt16?, exitNode: String?, exitNodeLeakProtection: Bool?, advertiseExitNode: Bool?, advertisedRoutes: String?, wireguardExitEnabled: Bool?, wireguardExitInterface: String?, wireguardExitAddress: String?, wireguardExitPrivateKey: String?, wireguardExitPeerPublicKey: String?, wireguardExitPeerPresharedKey: String?, wireguardExitEndpoint: String?, wireguardExitAllowedIps: String?, wireguardExitDns: String?, wireguardExitMtu: UInt16?, wireguardExitPersistentKeepaliveSecs: UInt16?, wireguardExitConfig: String?, magicDnsSuffix: String?, autoconnect: Bool?, launchOnStartup: Bool?, closeToTrayOnClose: Bool?) {
         self.nodeName = nodeName
         self.endpoint = endpoint
         self.tunnelIp = tunnelIp
         self.listenPort = listenPort
         self.exitNode = exitNode
+        self.exitNodeLeakProtection = exitNodeLeakProtection
         self.advertiseExitNode = advertiseExitNode
         self.advertisedRoutes = advertisedRoutes
         self.wireguardExitEnabled = wireguardExitEnabled
@@ -2452,6 +2495,7 @@ public struct SettingsPatch {
         self.wireguardExitDns = wireguardExitDns
         self.wireguardExitMtu = wireguardExitMtu
         self.wireguardExitPersistentKeepaliveSecs = wireguardExitPersistentKeepaliveSecs
+        self.wireguardExitConfig = wireguardExitConfig
         self.magicDnsSuffix = magicDnsSuffix
         self.autoconnect = autoconnect
         self.launchOnStartup = launchOnStartup
@@ -2479,6 +2523,9 @@ extension SettingsPatch: Equatable, Hashable {
             return false
         }
         if lhs.exitNode != rhs.exitNode {
+            return false
+        }
+        if lhs.exitNodeLeakProtection != rhs.exitNodeLeakProtection {
             return false
         }
         if lhs.advertiseExitNode != rhs.advertiseExitNode {
@@ -2520,6 +2567,9 @@ extension SettingsPatch: Equatable, Hashable {
         if lhs.wireguardExitPersistentKeepaliveSecs != rhs.wireguardExitPersistentKeepaliveSecs {
             return false
         }
+        if lhs.wireguardExitConfig != rhs.wireguardExitConfig {
+            return false
+        }
         if lhs.magicDnsSuffix != rhs.magicDnsSuffix {
             return false
         }
@@ -2541,6 +2591,7 @@ extension SettingsPatch: Equatable, Hashable {
         hasher.combine(tunnelIp)
         hasher.combine(listenPort)
         hasher.combine(exitNode)
+        hasher.combine(exitNodeLeakProtection)
         hasher.combine(advertiseExitNode)
         hasher.combine(advertisedRoutes)
         hasher.combine(wireguardExitEnabled)
@@ -2554,6 +2605,7 @@ extension SettingsPatch: Equatable, Hashable {
         hasher.combine(wireguardExitDns)
         hasher.combine(wireguardExitMtu)
         hasher.combine(wireguardExitPersistentKeepaliveSecs)
+        hasher.combine(wireguardExitConfig)
         hasher.combine(magicDnsSuffix)
         hasher.combine(autoconnect)
         hasher.combine(launchOnStartup)
@@ -2575,6 +2627,7 @@ public struct FfiConverterTypeSettingsPatch: FfiConverterRustBuffer {
                 tunnelIp: FfiConverterOptionString.read(from: &buf),
                 listenPort: FfiConverterOptionUInt16.read(from: &buf),
                 exitNode: FfiConverterOptionString.read(from: &buf),
+                exitNodeLeakProtection: FfiConverterOptionBool.read(from: &buf),
                 advertiseExitNode: FfiConverterOptionBool.read(from: &buf),
                 advertisedRoutes: FfiConverterOptionString.read(from: &buf),
                 wireguardExitEnabled: FfiConverterOptionBool.read(from: &buf),
@@ -2588,6 +2641,7 @@ public struct FfiConverterTypeSettingsPatch: FfiConverterRustBuffer {
                 wireguardExitDns: FfiConverterOptionString.read(from: &buf),
                 wireguardExitMtu: FfiConverterOptionUInt16.read(from: &buf),
                 wireguardExitPersistentKeepaliveSecs: FfiConverterOptionUInt16.read(from: &buf),
+                wireguardExitConfig: FfiConverterOptionString.read(from: &buf),
                 magicDnsSuffix: FfiConverterOptionString.read(from: &buf),
                 autoconnect: FfiConverterOptionBool.read(from: &buf),
                 launchOnStartup: FfiConverterOptionBool.read(from: &buf),
@@ -2601,6 +2655,7 @@ public struct FfiConverterTypeSettingsPatch: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.tunnelIp, into: &buf)
         FfiConverterOptionUInt16.write(value.listenPort, into: &buf)
         FfiConverterOptionString.write(value.exitNode, into: &buf)
+        FfiConverterOptionBool.write(value.exitNodeLeakProtection, into: &buf)
         FfiConverterOptionBool.write(value.advertiseExitNode, into: &buf)
         FfiConverterOptionString.write(value.advertisedRoutes, into: &buf)
         FfiConverterOptionBool.write(value.wireguardExitEnabled, into: &buf)
@@ -2614,6 +2669,7 @@ public struct FfiConverterTypeSettingsPatch: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.wireguardExitDns, into: &buf)
         FfiConverterOptionUInt16.write(value.wireguardExitMtu, into: &buf)
         FfiConverterOptionUInt16.write(value.wireguardExitPersistentKeepaliveSecs, into: &buf)
+        FfiConverterOptionString.write(value.wireguardExitConfig, into: &buf)
         FfiConverterOptionString.write(value.magicDnsSuffix, into: &buf)
         FfiConverterOptionBool.write(value.autoconnect, into: &buf)
         FfiConverterOptionBool.write(value.launchOnStartup, into: &buf)

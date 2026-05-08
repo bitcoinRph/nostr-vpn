@@ -36,6 +36,7 @@ public sealed class SettingsPatch
     public string? TunnelIp { get; set; }
     public ushort? ListenPort { get; set; }
     public string? ExitNode { get; set; }
+    public bool? ExitNodeLeakProtection { get; set; }
     public bool? AdvertiseExitNode { get; set; }
     public string? AdvertisedRoutes { get; set; }
     public bool? WireguardExitEnabled { get; set; }
@@ -49,6 +50,7 @@ public sealed class SettingsPatch
     public string? WireguardExitDns { get; set; }
     public ushort? WireguardExitMtu { get; set; }
     public ushort? WireguardExitPersistentKeepaliveSecs { get; set; }
+    public string? WireguardExitConfig { get; set; }
     public string? MagicDnsSuffix { get; set; }
     public bool? Autoconnect { get; set; }
     public bool? LaunchOnStartup { get; set; }

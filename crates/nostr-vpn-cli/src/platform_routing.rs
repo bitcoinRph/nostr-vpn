@@ -158,12 +158,44 @@ fn linux_default_route_for_family(
 
 #[cfg(target_os = "linux")]
 pub(crate) fn restore_linux_default_route(route: &str) -> Result<()> {
+    restore_linux_default_route_for_family("-4", route)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn restore_linux_default_ipv6_route(route: &str) -> Result<()> {
+    restore_linux_default_route_for_family("-6", route)
+}
+
+#[cfg(target_os = "linux")]
+fn restore_linux_default_route_for_family(family_flag: &str, route: &str) -> Result<()> {
     let mut command = ProcessCommand::new("ip");
-    command.arg("-4").arg("route").arg("replace");
+    command.arg(family_flag).arg("route").arg("replace");
     for token in route.split_whitespace() {
         command.arg(token);
     }
     run_checked(&mut command)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn delete_linux_default_route() -> Result<()> {
+    run_checked(
+        ProcessCommand::new("ip")
+            .arg("-4")
+            .arg("route")
+            .arg("del")
+            .arg("default"),
+    )
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn delete_linux_default_ipv6_route() -> Result<()> {
+    run_checked(
+        ProcessCommand::new("ip")
+            .arg("-6")
+            .arg("route")
+            .arg("del")
+            .arg("default"),
+    )
 }
 
 #[cfg(target_os = "linux")]

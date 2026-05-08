@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use glib::variant::ToVariant;
-use image::GenericImageView;
+use image::{GenericImageView, Rgba, RgbaImage};
 use nostr_vpn_app_core::{NativeAppState, NativeNetworkState, NativeParticipantState};
 
 const SNI_BUS_NAME_PREFIX: &str = "org.kde.StatusNotifierItem";
@@ -130,8 +130,6 @@ impl TrayRuntime {
         let state = Rc::new(RefCell::new(state.clone()));
         let menu_revision = Rc::new(RefCell::new(1));
         let last_error = Rc::new(RefCell::new(None));
-        let icon = tray_icon();
-
         let mut runtime = Self {
             state: state.clone(),
             receiver,
@@ -177,7 +175,6 @@ impl TrayRuntime {
             &connection,
             &sni_info,
             state.clone(),
-            icon.clone(),
             sender.clone(),
         )
         .map_err(|error| {
@@ -245,6 +242,7 @@ impl TrayRuntime {
                 "NewStatus",
                 Some(&(sni_status(state),).to_variant()),
             );
+            let _ = connection.emit_signal(None, SNI_OBJECT_PATH, SNI_INTERFACE, "NewIcon", None);
             let _ =
                 connection.emit_signal(None, SNI_OBJECT_PATH, SNI_INTERFACE, "NewToolTip", None);
             let _ = connection.emit_signal(
@@ -290,7 +288,6 @@ fn register_sni_object(
     connection: &gio::DBusConnection,
     interface_info: &gio::DBusInterfaceInfo,
     state: Rc<RefCell<NativeAppState>>,
-    icon: glib::Variant,
     sender: Sender<TrayCommand>,
 ) -> Result<gio::RegistrationId, glib::Error> {
     connection
@@ -313,6 +310,7 @@ fn register_sni_object(
         .property(
             move |_connection, _sender_name, _path, _interface, property| {
                 let state = state.borrow();
+                let icon = tray_icon(state.exit_node_blocked);
                 match property {
                     "Category" => "ApplicationStatus".to_variant(),
                     "Id" => "to.iris.nvpn".to_variant(),
@@ -422,6 +420,7 @@ fn build_menu(state: &NativeAppState) -> MenuNode {
     let mut children = vec![
         item(1, "Open Nostr VPN", true, TrayCommand::ShowWindow),
         separator(2),
+        label_node(10, &tray_status(state), false),
         item(
             3,
             if state.vpn_enabled {
@@ -542,6 +541,17 @@ fn separator(id: i32) -> MenuNode {
     }
 }
 
+fn label_node(id: i32, label: &str, enabled: bool) -> MenuNode {
+    MenuNode {
+        id,
+        label: label.to_string(),
+        enabled,
+        separator: false,
+        command: None,
+        children: Vec::new(),
+    }
+}
+
 fn menu_node_layout(node: &MenuNode) -> glib::Variant {
     let child_variants = node
         .children
@@ -637,6 +647,9 @@ fn participant_menu_title(participant: &NativeParticipantState) -> String {
 }
 
 fn tray_status(state: &NativeAppState) -> String {
+    if !state.exit_node_status_text.trim().is_empty() {
+        return state.exit_node_status_text.clone();
+    }
     if state.vpn_active {
         format!(
             "{} of {} devices connected",
@@ -650,6 +663,9 @@ fn tray_status(state: &NativeAppState) -> String {
 }
 
 fn sni_status(state: &NativeAppState) -> &'static str {
+    if state.exit_node_blocked {
+        return "NeedsAttention";
+    }
     if state.vpn_enabled {
         "Active"
     } else {
@@ -657,23 +673,26 @@ fn sni_status(state: &NativeAppState) -> &'static str {
     }
 }
 
-fn tray_icon() -> glib::Variant {
+fn tray_icon(blocked: bool) -> glib::Variant {
     let icon_type = glib::VariantTy::new("(iiay)").expect("icon pixmap type");
     glib::Variant::array_from_iter_with_type(
         icon_type,
         [
-            tray_icon_pixmap(include_bytes!("../resources/nostr-vpn-tray-24.png")),
-            tray_icon_pixmap(include_bytes!("../resources/nostr-vpn-tray-48.png")),
+            tray_icon_pixmap(include_bytes!("../resources/nostr-vpn-tray-24.png"), blocked),
+            tray_icon_pixmap(include_bytes!("../resources/nostr-vpn-tray-48.png"), blocked),
         ],
     )
 }
 
-fn tray_icon_pixmap(bytes: &[u8]) -> glib::Variant {
-    let image = image::load_from_memory_with_format(
+fn tray_icon_pixmap(bytes: &[u8], blocked: bool) -> glib::Variant {
+    let mut image = image::load_from_memory_with_format(
         bytes,
         image::ImageFormat::Png,
     )
     .expect("bundled tray icon is a valid PNG");
+    if blocked {
+        draw_blocked_dot(&mut image);
+    }
     let (width, height) = image.dimensions();
     let mut data = image.into_rgba8().into_vec();
     for pixel in data.chunks_exact_mut(4) {
@@ -685,6 +704,45 @@ fn tray_icon_pixmap(bytes: &[u8]) -> glib::Variant {
         data.to_variant(),
     ]);
     icon
+}
+
+fn draw_blocked_dot(image: &mut image::DynamicImage) {
+    let mut rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let radius = (width.min(height) / 5).max(3);
+    let center_x = width.saturating_sub(radius + 1);
+    let center_y = radius + 1;
+    draw_filled_circle(
+        &mut rgba,
+        center_x,
+        center_y,
+        radius,
+        Rgba([220, 38, 38, 255]),
+    );
+    *image = image::DynamicImage::ImageRgba8(rgba);
+}
+
+fn draw_filled_circle(
+    image: &mut RgbaImage,
+    center_x: u32,
+    center_y: u32,
+    radius: u32,
+    color: Rgba<u8>,
+) {
+    let radius_squared = i64::from(radius) * i64::from(radius);
+    let min_x = center_x.saturating_sub(radius);
+    let max_x = (center_x + radius).min(image.width().saturating_sub(1));
+    let min_y = center_y.saturating_sub(radius);
+    let max_y = (center_y + radius).min(image.height().saturating_sub(1));
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let dx = i64::from(x) - i64::from(center_x);
+            let dy = i64::from(y) - i64::from(center_y);
+            if dx * dx + dy * dy <= radius_squared {
+                image.put_pixel(x, y, color);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

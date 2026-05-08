@@ -4,8 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.1 - 2026-05-08
+
+### Added
+
+- Exit-node leak protection can block internet access while a selected/enabled exit node is not active, with native status shown in app headers, trays, and menus.
+
+### Changed
+
+- WireGuard upstream setup now lives under Exit Nodes and accepts a pasted full WireGuard config block.
+- Device rows now distinguish direct FIPS paths from routed FIPS paths on desktop and mobile.
+
 ### Fixed
 
+- Desktop update stripes now restore the auto-install checkbox.
 - Android and iOS now show the active network name outside the device rows, keep VPN on/off in the top bar, and list this device as a normal participant row instead of treating the first peer as a hero.
 - WireGuard-backed exit-node providers now route their own default internet traffic through the WireGuard upstream too, while preserving the WireGuard peer endpoint on the underlay route.
 - Native settings now expose the persisted WireGuard upstream fields used by exit-node providers.

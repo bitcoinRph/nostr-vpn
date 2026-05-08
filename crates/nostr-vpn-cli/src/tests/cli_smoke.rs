@@ -77,6 +77,11 @@ fn clap_set_supports_route_advertisement_flags() {
             .any(|argument| argument.get_long() == Some("exit-node")),
         "missing --exit-node on set command"
     );
+    assert!(
+        set.get_arguments()
+            .any(|argument| argument.get_long() == Some("exit-node-leak-protection")),
+        "missing --exit-node-leak-protection on set command"
+    );
 }
 
 #[test]
@@ -93,6 +98,8 @@ fn clap_set_supports_wireguard_exit_flags() {
         "wireguard-exit-peer-public-key",
         "wireguard-exit-endpoint",
         "wireguard-exit-allowed-ips",
+        "wireguard-exit-config",
+        "wireguard-exit-config-file",
     ] {
         assert!(
             set.get_arguments()

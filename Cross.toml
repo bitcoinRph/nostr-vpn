@@ -1,0 +1,5 @@
+[build.env]
+passthrough = [
+  "BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_musl",
+  "BINDGEN_EXTRA_CLANG_ARGS_x86_64_unknown_linux_musl",
+]

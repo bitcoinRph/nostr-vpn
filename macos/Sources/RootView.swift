@@ -10,16 +10,7 @@ struct RootView: View {
     @State private var tunnelIp = ""
     @State private var listenPort = ""
     @State private var magicDnsSuffix = ""
-    @State private var wireguardExitInterface = ""
-    @State private var wireguardExitAddress = ""
-    @State private var wireguardExitPrivateKey = ""
-    @State private var wireguardExitPeerPublicKey = ""
-    @State private var wireguardExitPeerPresharedKey = ""
-    @State private var wireguardExitEndpoint = ""
-    @State private var wireguardExitAllowedIps = ""
-    @State private var wireguardExitDns = ""
-    @State private var wireguardExitMtu = ""
-    @State private var wireguardExitKeepalive = ""
+    @State private var wireguardExitConfig = ""
     @State private var participantInput = ""
     @State private var participantAliasInput = ""
     @State private var networkNameInput = ""
@@ -46,6 +37,9 @@ struct RootView: View {
     var body: some View {
         VStack(spacing: 0) {
             headerBar
+            if manager.updateAvailable {
+                updateStripe
+            }
             Divider()
             HStack(spacing: 0) {
                 sidebar
@@ -79,6 +73,38 @@ struct RootView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
+    private var updateStripe: some View {
+        HStack(spacing: 12) {
+            Text(updateStripeText)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 12)
+            Toggle("Install automatically", isOn: $manager.autoInstallUpdates)
+                .toggleStyle(.checkbox)
+                .font(.callout)
+            Button {
+                manager.installUpdate()
+            } label: {
+                Text(manager.updateInstalling ? "Installing" : "Install")
+            }
+            .disabled(!manager.updateInstallEnabled)
+        }
+        .padding(.leading, 104)
+        .padding(.trailing, 18)
+        .frame(minHeight: 42)
+        .background(Color.accentColor.opacity(0.12))
+    }
+
+    private var updateStripeText: String {
+        let current = state.appVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        if current.isEmpty {
+            return "Update available: \(manager.updateVersion)"
+        }
+        return "Update available: \(manager.updateVersion) (you're on \(current))"
+    }
+
     private var headerIdentity: some View {
         Text(activeNetwork.map(displayName) ?? "Nostr VPN")
             .font(.caption.weight(.semibold))
@@ -89,12 +115,17 @@ struct RootView: View {
 
     private var headerVpnControl: some View {
         HStack(spacing: 10) {
+            if headerStatusDotVisible {
+                Circle()
+                    .fill(headerStatusColor)
+                    .frame(width: 7, height: 7)
+            }
             Text(headerVpnStatusText)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(headerStatusTextColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(width: 96, alignment: .trailing)
+                .frame(width: 150, alignment: .trailing)
             headerVpnSwitch
         }
         .help(manager.vpnSwitchEnabled ? "Turn VPN off" : "Turn VPN on")
@@ -302,6 +333,9 @@ struct RootView: View {
                     if participant.offersExitNode {
                         badge("Exit", style: selected ? .selected : .warn)
                     }
+                    if isFipsRouted(participant) {
+                        badge("Routed", style: selected ? .selected : .muted)
+                    }
                 }
                 HStack(spacing: 6) {
                     if !deviceSubtitle(participant).isEmpty {
@@ -364,7 +398,7 @@ struct RootView: View {
                     Text(deviceName(participant))
                         .font(.system(size: 24, weight: .semibold))
                         .lineLimit(2)
-                    if isSelf(participant) || participant.isAdmin || participant.offersExitNode {
+                    if isSelf(participant) || participant.isAdmin || participant.offersExitNode || participant.reachable {
                         HStack(spacing: 6) {
                             if isSelf(participant) {
                                 badge("This device", style: .ok)
@@ -374,6 +408,11 @@ struct RootView: View {
                             }
                             if participant.offersExitNode {
                                 badge("Exit", style: .warn)
+                            }
+                            if isDirectFipsPeer(participant) {
+                                badge("Direct FIPS", style: .ok)
+                            } else if isFipsRouted(participant) {
+                                badge("FIPS routed", style: .muted)
                             }
                         }
                     }
@@ -446,6 +485,7 @@ struct RootView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
                 metric("Role", deviceRoleText(participant))
                 metric("State", deviceStatusText(participant))
+                metric("FIPS path", fipsPathText(participant))
                 metric("Last seen", participant.lastSeenText.isEmpty ? "-" : participant.lastSeenText)
                 metric("Sent", formatBytes(participant.txBytes))
                 metric("Received", formatBytes(participant.rxBytes))
@@ -674,14 +714,13 @@ struct RootView: View {
                 ))
                 .disabled(manager.actionInFlight)
 
-                Divider()
-
-                Toggle("Use WireGuard upstream", isOn: Binding(
-                    get: { state.wireguardExitEnabled },
-                    set: { manager.setWireGuardExitEnabled($0) }
+                Toggle("Block internet if exit node disconnects", isOn: Binding(
+                    get: { state.exitNodeLeakProtection },
+                    set: { manager.setExitNodeLeakProtection($0) }
                 ))
                 .disabled(manager.actionInFlight)
             }
+            wireGuardExitSettings
         }
     }
 
@@ -717,7 +756,6 @@ struct RootView: View {
     private var settingsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             deviceSettings
-            wireGuardExitSettings
             networkSettings
             systemSettings
 
@@ -781,6 +819,9 @@ struct RootView: View {
     private var wireGuardExitSettings: some View {
         surface {
             sectionHeader("WireGuard Upstream", systemImage: "network")
+            Text("Paste a WireGuard config from an upstream VPN provider such as Mullvad or Proton VPN.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Toggle("Use WireGuard upstream", isOn: Binding(
                 get: { state.wireguardExitEnabled },
@@ -788,56 +829,19 @@ struct RootView: View {
             ))
             .disabled(manager.actionInFlight)
 
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
-                GridRow {
-                    label("Interface")
-                    TextField("Interface", text: $wireguardExitInterface)
-                    label("Address")
-                    TextField("Address", text: $wireguardExitAddress)
-                }
-                GridRow {
-                    label("Endpoint")
-                    TextField("Endpoint", text: $wireguardExitEndpoint)
-                    label("Allowed IPs")
-                    TextField("Allowed IPs", text: $wireguardExitAllowedIps)
-                }
-                GridRow {
-                    label("Peer Key")
-                    TextField("Peer Key", text: $wireguardExitPeerPublicKey)
-                }
-                GridRow {
-                    label("Private Key")
-                    SecureField("Private Key", text: $wireguardExitPrivateKey)
-                }
-                GridRow {
-                    label("Preshared")
-                    SecureField("Preshared", text: $wireguardExitPeerPresharedKey)
-                }
-                GridRow {
-                    label("DNS")
-                    TextField("DNS", text: $wireguardExitDns)
-                    label("MTU")
-                    TextField("MTU", text: $wireguardExitMtu)
-                }
-                GridRow {
-                    label("Keepalive")
-                    TextField("Keepalive", text: $wireguardExitKeepalive)
-                }
-            }
+            TextEditor(text: $wireguardExitConfig)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 180)
+                .padding(6)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor))
+                )
 
             Button {
-                manager.saveWireGuardExitSettings(
-                    interface: wireguardExitInterface,
-                    address: wireguardExitAddress,
-                    privateKey: wireguardExitPrivateKey,
-                    peerPublicKey: wireguardExitPeerPublicKey,
-                    peerPresharedKey: wireguardExitPeerPresharedKey,
-                    endpoint: wireguardExitEndpoint,
-                    allowedIps: wireguardExitAllowedIps,
-                    dns: wireguardExitDns,
-                    mtu: wireguardExitMtu,
-                    keepalive: wireguardExitKeepalive
-                )
+                manager.saveWireGuardExitConfig(wireguardExitConfig)
             } label: {
                 Label("Save WireGuard", systemImage: "checkmark")
             }
@@ -1171,16 +1175,7 @@ struct RootView: View {
         tunnelIp = state.tunnelIp
         listenPort = String(state.listenPort)
         magicDnsSuffix = state.magicDnsSuffix
-        wireguardExitInterface = state.wireguardExitInterface
-        wireguardExitAddress = state.wireguardExitAddress
-        wireguardExitPrivateKey = state.wireguardExitPrivateKey
-        wireguardExitPeerPublicKey = state.wireguardExitPeerPublicKey
-        wireguardExitPeerPresharedKey = state.wireguardExitPeerPresharedKey
-        wireguardExitEndpoint = state.wireguardExitEndpoint
-        wireguardExitAllowedIps = state.wireguardExitAllowedIps
-        wireguardExitDns = state.wireguardExitDns
-        wireguardExitMtu = String(state.wireguardExitMtu)
-        wireguardExitKeepalive = String(state.wireguardExitPersistentKeepaliveSecs)
+        wireguardExitConfig = state.wireguardExitConfig
 
         for network in state.networks {
             networkNameDrafts[network.id] = network.name
@@ -1209,6 +1204,12 @@ struct RootView: View {
         if manager.actionInFlight, !manager.actionStatus.isEmpty {
             return manager.actionStatus
         }
+        if state.exitNodeBlocked {
+            return state.exitNodeStatusText.isEmpty ? "Internet blocked" : state.exitNodeStatusText
+        }
+        if state.exitNodeActive, !state.exitNodeStatusText.isEmpty {
+            return state.exitNodeStatusText
+        }
         if state.vpnActive {
             return state.vpnStatus.isEmpty ? "VPN on" : state.vpnStatus
         }
@@ -1219,6 +1220,27 @@ struct RootView: View {
             return "Service needs repair"
         }
         return "Off"
+    }
+
+    private var headerStatusDotVisible: Bool {
+        state.exitNodeBlocked || state.exitNodeActive || state.vpnActive || state.vpnEnabled
+    }
+
+    private var headerStatusColor: Color {
+        if state.exitNodeBlocked {
+            return .red
+        }
+        if state.exitNodeActive || state.vpnActive {
+            return .green
+        }
+        if state.vpnEnabled {
+            return .orange
+        }
+        return .secondary
+    }
+
+    private var headerStatusTextColor: Color {
+        state.exitNodeBlocked ? .red : .secondary
     }
 
     private func deviceAvailabilityText(_ network: NativeNetworkState) -> String {
@@ -1340,6 +1362,38 @@ struct RootView: View {
         default:
             return "Unknown"
         }
+    }
+
+    private func fipsPathText(_ participant: NativeParticipantState) -> String {
+        if isSelf(participant) {
+            return "This device"
+        }
+        if isDirectFipsPeer(participant) {
+            let transport = participant.fipsTransportType.isEmpty ? "FIPS" : participant.fipsTransportType.uppercased()
+            if participant.fipsSrttMs > 0 {
+                return "Direct \(transport), \(participant.fipsSrttMs) ms"
+            }
+            return "Direct \(transport)"
+        }
+        if participant.reachable {
+            return "Routed through FIPS mesh"
+        }
+        if participant.state == "pending" {
+            return "Connecting"
+        }
+        return "Offline"
+    }
+
+    private func isDirectFipsPeer(_ participant: NativeParticipantState) -> Bool {
+        !isSelf(participant)
+            && participant.reachable
+            && !participant.fipsTransportAddr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func isFipsRouted(_ participant: NativeParticipantState) -> Bool {
+        !isSelf(participant)
+            && participant.reachable
+            && participant.fipsTransportAddr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func connectivityDot(_ participant: NativeParticipantState, size: CGFloat) -> some View {

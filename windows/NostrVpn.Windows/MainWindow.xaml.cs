@@ -100,6 +100,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void ExitLeakProtection_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is CheckBox checkBox)
+        {
+            await ViewModel.SetExitNodeLeakProtectionAsync(checkBox.IsChecked == true);
+        }
+    }
+
     private async void WireguardExit_Click(object sender, RoutedEventArgs e)
     {
         if (sender is CheckBox checkBox)

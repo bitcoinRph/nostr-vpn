@@ -14,6 +14,7 @@ pub struct UpdateState {
     pub checking: bool,
     pub downloading: bool,
     pub available: bool,
+    pub auto_install: bool,
     pub version: String,
     pub status: String,
     pub asset: Option<ReleaseAsset>,

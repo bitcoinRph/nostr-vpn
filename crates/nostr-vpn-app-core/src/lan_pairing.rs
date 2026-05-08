@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::invite::{parse_network_invite, to_npub};
 
 pub(crate) const LAN_PAIRING_ANNOUNCEMENT_VERSION: u8 = 2;
-pub(crate) const LAN_PAIRING_DURATION: Duration = Duration::from_secs(15 * 60);
+pub(crate) const LAN_PAIRING_DURATION: Duration = Duration::from_mins(15);
 pub(crate) const LAN_PAIRING_STALE_AFTER: Duration = Duration::from_secs(16);
 
 const LAN_PAIRING_ADDR: Ipv4Addr = Ipv4Addr::new(239, 255, 73, 73);

@@ -18,6 +18,7 @@
     <SolidColorBrush x:Key="AccentSoft" Color="#F0E8FF" />
     <SolidColorBrush x:Key="Ok" Color="#12A150" />
     <SolidColorBrush x:Key="Warn" Color="#A16207" />
+    <SolidColorBrush x:Key="Danger" Color="#DC2626" />
     <SolidColorBrush x:Key="Line" Color="#DDE3EA" />
 
     <Style TargetType="{x:Type Window}">

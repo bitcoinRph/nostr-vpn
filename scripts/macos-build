@@ -202,6 +202,9 @@ run_macos_xcodeproj() {
     exit 1
   fi
   (cd "$MACOS_DIR" && xcodegen generate --spec project.yml)
+  # XcodeGen emits objectVersion 77 on newer Xcode installs even though this
+  # project uses classic groups. Xcode 15 runners cannot open that format.
+  perl -0pi -e 's/objectVersion = 77;/objectVersion = 56;/' "$PROJECT/project.pbxproj"
 }
 
 run_macos_build() {
