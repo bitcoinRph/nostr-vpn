@@ -1023,12 +1023,9 @@ impl NativeAppRuntime {
             .collect::<Vec<_>>();
         let online_count = participants
             .iter()
-            .filter(|participant| participant.pubkey_hex != own_pubkey_hex && participant.reachable)
+            .filter(|participant| participant.reachable)
             .count() as u64;
-        let expected_count = participants
-            .iter()
-            .filter(|participant| participant.pubkey_hex != own_pubkey_hex)
-            .count() as u64;
+        let expected_count = participants.len() as u64;
 
         NativeNetworkState {
             id: network.id.clone(),
@@ -1313,7 +1310,7 @@ impl NativeAppRuntime {
 
     fn peer_last_fips_seen_text(peer: Option<&DaemonPeerState>, is_local: bool) -> String {
         if is_local {
-            return "self".to_string();
+            return "this device".to_string();
         }
         peer.and_then(peer_last_fips_seen_secs)
             .map_or_else(String::new, |seen| {
@@ -1763,13 +1760,13 @@ mod tests {
         assert!(!state.own_pubkey_hex.is_empty());
         assert_eq!(state.expected_peer_count, 0);
         assert_eq!(state.connected_peer_count, 0);
-        assert_eq!(state.networks[0].expected_count, 0);
+        assert_eq!(state.networks[0].expected_count, 1);
         assert_eq!(state.networks[0].online_count, 0);
         assert_eq!(state.networks[0].participants.len(), 1);
     }
 
     #[test]
-    fn native_peer_counts_exclude_local_participant() {
+    fn native_counts_keep_peer_and_device_totals_separate() {
         let error = anyhow!("boom");
         let mut runtime = NativeAppRuntime::from_startup_error(&error);
         let own_pubkey = runtime
@@ -1785,7 +1782,7 @@ mod tests {
 
         assert_eq!(state.expected_peer_count, 1);
         assert_eq!(state.connected_peer_count, 0);
-        assert_eq!(network.expected_count, 1);
+        assert_eq!(network.expected_count, 2);
         assert_eq!(network.online_count, 0);
         assert_eq!(network.participants.len(), 2);
         assert!(network.participants.iter().any(|participant| {
@@ -1835,6 +1832,63 @@ mod tests {
             .expect("join request should be queued");
         assert_eq!(pending.recipient, admin_hex);
         assert!(network.participants.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn accepting_join_request_uses_requester_node_name_as_alias() {
+        use nostr_sdk::prelude::{Keys, ToBech32};
+
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-accept-join-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+
+        let requester_npub = Keys::generate()
+            .public_key()
+            .to_bech32()
+            .expect("requester npub");
+        let requester_hex = normalize_nostr_pubkey(&requester_npub).expect("normalize requester");
+
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        runtime.mobile_runtime = true;
+        runtime.config_path = dir.join("config.toml");
+        let network_id = runtime.config.networks[0].id.clone();
+        runtime.config.networks[0]
+            .inbound_join_requests
+            .push(PendingInboundJoinRequest {
+                requester: requester_hex.clone(),
+                requester_node_name: "Ubuntu Dev".to_string(),
+                requested_at: 1_726_000_000,
+            });
+
+        runtime.dispatch(NativeAppAction::AcceptJoinRequest {
+            network_id: network_id.clone(),
+            requester_npub,
+        });
+
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        assert!(
+            runtime.config.networks[0]
+                .participants
+                .contains(&requester_hex)
+        );
+        assert!(runtime.config.networks[0].inbound_join_requests.is_empty());
+        assert_eq!(
+            runtime.config.peer_alias(&requester_hex).as_deref(),
+            Some("ubuntu-dev")
+        );
+
+        let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
+        assert_eq!(
+            saved.peer_alias(&requester_hex).as_deref(),
+            Some("ubuntu-dev")
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

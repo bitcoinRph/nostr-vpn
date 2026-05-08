@@ -293,7 +293,7 @@ private fun DeviceListHeader(
 ) {
     Column {
         Text(networkTitle(network), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text(deviceCountText(state), color = Muted, style = MaterialTheme.typography.bodySmall)
+        Text(deviceCountText(network), color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -316,10 +316,10 @@ private fun ParticipantState.deviceName(state: AppState): String {
     return "${npub.take(12)}...${npub.takeLast(6)}"
 }
 
-private fun deviceCountText(state: AppState): String {
-    if (state.expectedPeerCount == 0L) return "This device"
-    val word = if (state.expectedPeerCount == 1L) "device" else "devices"
-    return "${state.connectedPeerCount} online - ${state.expectedPeerCount} $word"
+private fun deviceCountText(network: NetworkState): String {
+    if (network.expectedCount == 0L) return "This device"
+    val word = if (network.expectedCount == 1L) "device" else "devices"
+    return "${network.onlineCount} online - ${network.expectedCount} $word"
 }
 
 @Composable

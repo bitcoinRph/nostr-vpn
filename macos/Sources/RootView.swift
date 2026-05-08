@@ -234,7 +234,7 @@ struct RootView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Devices")
                             .font(.system(size: 24, weight: .semibold))
-                        Text(peerAvailabilityText)
+                        Text(deviceAvailabilityText(network))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -294,7 +294,7 @@ struct RootView: View {
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     if isSelf(participant) {
-                        badge("Self", style: selected ? .selected : .ok)
+                        badge("This device", style: selected ? .selected : .ok)
                     }
                     if participant.isAdmin {
                         badge("Admin", style: selected ? .selected : .muted)
@@ -367,7 +367,7 @@ struct RootView: View {
                     if isSelf(participant) || participant.isAdmin || participant.offersExitNode {
                         HStack(spacing: 6) {
                             if isSelf(participant) {
-                                badge("Self", style: .ok)
+                                badge("This device", style: .ok)
                             }
                             if participant.isAdmin {
                                 badge("Admin", style: .muted)
@@ -1221,12 +1221,12 @@ struct RootView: View {
         return "Off"
     }
 
-    private var peerAvailabilityText: String {
-        if state.expectedPeerCount == 0 {
+    private func deviceAvailabilityText(_ network: NativeNetworkState) -> String {
+        if network.expectedCount == 0 {
             return "No devices"
         }
-        let deviceWord = state.expectedPeerCount == 1 ? "device" : "devices"
-        return "\(state.connectedPeerCount) online · \(state.expectedPeerCount) \(deviceWord)"
+        let deviceWord = network.expectedCount == 1 ? "device" : "devices"
+        return "\(network.onlineCount) online · \(network.expectedCount) \(deviceWord)"
     }
 
     private var serviceInstallButtonTitle: String {
@@ -1315,7 +1315,7 @@ struct RootView: View {
     private func deviceRoleText(_ participant: NativeParticipantState) -> String {
         var roles: [String] = []
         if isSelf(participant) {
-            roles.append("Self")
+            roles.append("This device")
         }
         if participant.isAdmin {
             roles.append("Admin")

@@ -142,11 +142,11 @@ private struct DeviceListHeader: View {
     }
 
     private var deviceCountText: String {
-        if state.expectedPeerCount == 0 {
+        if network.expectedCount == 0 {
             return "This device"
         }
-        let word = state.expectedPeerCount == 1 ? "device" : "devices"
-        return "\(state.connectedPeerCount) online - \(state.expectedPeerCount) \(word)"
+        let word = network.expectedCount == 1 ? "device" : "devices"
+        return "\(network.onlineCount) online - \(network.expectedCount) \(word)"
     }
 }
 
@@ -280,7 +280,7 @@ private struct ParticipantRow: View {
                             Pill("Admin", tint: AppColors.accent)
                         }
                         if isSelf(participant, state: model.state) {
-                            Pill("Self", tint: AppColors.ok)
+                            Pill("This device", tint: AppColors.ok)
                         }
                         if participant.offersExitNode {
                             Pill("Exit", tint: .orange)
@@ -803,7 +803,7 @@ private func deviceSubtitle(_ participant: ParticipantState, state: AppState) ->
 
 private func deviceStatus(_ participant: ParticipantState, state: AppState) -> String {
     if isSelf(participant, state: state) {
-        return state.vpnEnabled ? "Self" : "Off"
+        return state.vpnEnabled ? "This device" : "Off"
     }
     if !participant.statusText.isEmpty {
         return participant.statusText

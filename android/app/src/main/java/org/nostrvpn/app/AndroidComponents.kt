@@ -67,7 +67,7 @@ internal fun ParticipantRow(state: AppState, participant: ParticipantState) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (isSelf) Pill("Self", Color(0xFFECFDF5), Ok)
+                    if (isSelf) Pill("This device", Color(0xFFECFDF5), Ok)
                     if (participant.isAdmin) Pill("Admin", Color(0xFFF5F3FF), Accent)
                     if (participant.offersExitNode) Pill("Exit", Color(0xFFFFF7ED), Color(0xFFA16207))
                 }
@@ -470,7 +470,7 @@ private fun ParticipantState.subtitle(isSelf: Boolean): String {
 }
 
 private fun ParticipantState.statusLabel(appState: AppState): String {
-    if (isSelf(appState)) return if (appState.vpnEnabled) "Self" else "Off"
+    if (isSelf(appState)) return if (appState.vpnEnabled) "This device" else "Off"
     if (statusText.isNotBlank()) return statusText
     return when (state) {
         "local", "online", "present" -> "Online"

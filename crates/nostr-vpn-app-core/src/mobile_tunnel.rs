@@ -296,7 +296,6 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
             addresses: Vec::new(),
             connect_policy: ConnectPolicy::AutoConnect,
             auto_reconnect: true,
-            via_nostr: true,
         })
         .collect();
     config
@@ -446,7 +445,6 @@ mod tests {
         assert!(!udp.advertise_on_nostr());
         assert!(!udp.is_public());
         assert_eq!(config.peers.len(), 1);
-        assert!(config.peers[0].via_nostr);
     }
 
     #[test]

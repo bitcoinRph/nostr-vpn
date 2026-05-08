@@ -786,7 +786,6 @@ struct FipsEndpointTransportConfig {
 struct FipsEndpointPeerTransportConfig {
     npub: String,
     addresses: Vec<String>,
-    discover_via_nostr: bool,
 }
 
 fn fips_endpoint_config(
@@ -800,7 +799,7 @@ fn fips_endpoint_config(
     let advertise_udp = transport
         .map(|transport| transport.advertise_endpoint)
         .unwrap_or(false);
-    let nostr_enabled = advertise_udp || peers.iter().any(|peer| peer.discover_via_nostr);
+    let nostr_enabled = advertise_udp || !peers.is_empty();
     config.node.discovery.nostr.enabled = nostr_enabled;
     config.node.discovery.nostr.advertise = advertise_udp;
     config.node.discovery.nostr.policy = NostrDiscoveryPolicy::ConfiguredOnly;
@@ -828,7 +827,6 @@ fn fips_endpoint_config(
     });
     config.peers = peers
         .iter()
-        .filter(|peer| peer.discover_via_nostr || !peer.addresses.is_empty())
         .map(|peer| FipsPeerConfig {
             npub: peer.npub.clone(),
             alias: None,
@@ -839,7 +837,6 @@ fn fips_endpoint_config(
                 .collect(),
             connect_policy: ConnectPolicy::AutoConnect,
             auto_reconnect: true,
-            via_nostr: peer.discover_via_nostr,
         })
         .collect();
     config
@@ -857,9 +854,7 @@ fn fips_endpoint_peers_from_mesh(
             .or_insert_with(|| FipsEndpointPeerTransportConfig {
                 npub,
                 addresses: Vec::new(),
-                discover_via_nostr: true,
-            })
-            .discover_via_nostr = true;
+            });
     }
 
     for (npub, addresses) in static_peer_endpoints {
@@ -869,7 +864,6 @@ fn fips_endpoint_peers_from_mesh(
             .or_insert_with(|| FipsEndpointPeerTransportConfig {
                 npub,
                 addresses: Vec::new(),
-                discover_via_nostr: false,
             });
         peer.addresses.extend(
             addresses
@@ -2472,7 +2466,6 @@ mod tests {
             .find(|peer| peer.npub == peer_npub)
             .expect("cached endpoint peer");
         assert_eq!(peer.addresses, vec!["198.51.100.9:51820".to_string()]);
-        assert!(peer.discover_via_nostr);
     }
 
     #[tokio::test]
@@ -2734,7 +2727,6 @@ mod tests {
         assert!(!udp.advertise_on_nostr());
         assert!(!udp.accept_connections());
         assert_eq!(config.peers.len(), 1);
-        assert!(config.peers[0].via_nostr);
         assert!(config.peers[0].addresses.is_empty());
     }
 
@@ -2792,7 +2784,6 @@ mod tests {
         assert!(udp.accept_connections());
         assert_eq!(udp.external_addr.as_deref(), Some("192.168.50.20:51820"));
         assert_eq!(config.peers.len(), 1);
-        assert!(config.peers[0].via_nostr);
     }
 
     #[test]
@@ -2828,14 +2819,12 @@ mod tests {
             .iter()
             .find(|peer| peer.npub == mesh_peer.endpoint_npub)
             .expect("mesh peer should be configured");
-        assert!(bob.via_nostr);
         assert!(bob.addresses.is_empty());
         let charlie = config
             .peers
             .iter()
             .find(|peer| peer.npub == charlie_npub)
             .expect("static transit peer should be configured");
-        assert!(!charlie.via_nostr);
         assert_eq!(charlie.addresses.len(), 1);
         assert_eq!(charlie.addresses[0].transport, "udp");
         assert_eq!(charlie.addresses[0].addr, "10.203.0.12:51820");
