@@ -147,26 +147,11 @@ pub(crate) async fn connect_vpn(args: ConnectArgs) -> Result<()> {
     )
     .await;
     #[cfg(feature = "embedded-fips")]
-    let fips_endpoint_cache_file =
-        crate::fips_private_mesh::fips_endpoint_cache_file_path(&config_path);
-    #[cfg(feature = "embedded-fips")]
-    let fips_endpoint_cache =
-        match crate::fips_private_mesh::read_fips_endpoint_cache(&fips_endpoint_cache_file) {
-            Ok(cache) => cache,
-            Err(error) => {
-                eprintln!("connect: failed to read FIPS endpoint cache: {error}");
-                None
-            }
-        };
+    crate::fips_private_mesh::purge_legacy_fips_endpoint_cache(&config_path);
     #[cfg(feature = "embedded-fips")]
     let mut fips_tunnel_runtime = {
-        let config = fips_tunnel_config_from_app(
-            &app,
-            &network_id,
-            iface.clone(),
-            own_pubkey.as_deref(),
-            fips_endpoint_cache.as_ref(),
-        )?;
+        let config =
+            fips_tunnel_config_from_app(&app, &network_id, iface.clone(), own_pubkey.as_deref())?;
         let runtime = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
         println!("connect: FIPS private mesh on {}", runtime.iface());
         Some(runtime)
@@ -280,8 +265,7 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
     }
     let state_file = daemon_state_file_path(&config_path);
     #[cfg(feature = "embedded-fips")]
-    let fips_endpoint_cache_file =
-        crate::fips_private_mesh::fips_endpoint_cache_file_path(&config_path);
+    crate::fips_private_mesh::purge_legacy_fips_endpoint_cache(&config_path);
     let _ = fs::remove_file(daemon_control_file_path(&config_path));
     #[cfg(feature = "embedded-fips")]
     let mut fips_join_request_sends: HashMap<String, u64> = HashMap::new();
@@ -302,23 +286,9 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
         .await;
     }
     #[cfg(feature = "embedded-fips")]
-    let mut fips_endpoint_cache =
-        match crate::fips_private_mesh::read_fips_endpoint_cache(&fips_endpoint_cache_file) {
-            Ok(cache) => cache,
-            Err(error) => {
-                eprintln!("daemon: failed to read FIPS endpoint cache: {error}");
-                None
-            }
-        };
-    #[cfg(feature = "embedded-fips")]
     let mut fips_tunnel_runtime = if fips_private_runtime_active(&app, true, expected_peers) {
-        let config = fips_tunnel_config_from_app(
-            &app,
-            &network_id,
-            iface.clone(),
-            own_pubkey.as_deref(),
-            fips_endpoint_cache.as_ref(),
-        )?;
+        let config =
+            fips_tunnel_config_from_app(&app, &network_id, iface.clone(), own_pubkey.as_deref())?;
         let runtime = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
         eprintln!("daemon: FIPS private mesh on {}", runtime.iface());
         Some(runtime)
@@ -326,10 +296,6 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
         None
     };
     let _magic_dns_runtime = ConnectMagicDnsRuntime::start(&app);
-    #[cfg(feature = "embedded-fips")]
-    let mut last_written_fips_endpoint_cache = fips_endpoint_cache
-        .as_ref()
-        .and_then(|cache| serde_json::to_string(cache).ok());
 
     let mut announce_interval =
         tokio::time::interval(Duration::from_secs(args.mesh_refresh_interval_secs.max(5)));
@@ -573,7 +539,6 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                             &app,
                             &network_id,
                             own_pubkey.as_deref(),
-                            fips_endpoint_cache.as_ref(),
                         )
                         .await
                     {
@@ -622,7 +587,6 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                                 &app,
                                 &network_id,
                                 own_pubkey.as_deref(),
-                                fips_endpoint_cache.as_ref(),
                             )
                             .await
                             {
@@ -780,7 +744,6 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                         &network_id,
                         &iface,
                         own_pubkey.as_deref(),
-                        fips_endpoint_cache.as_ref(),
                         vpn_enabled,
                         expected_peers,
                     )
@@ -841,30 +804,6 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                     }
                 }
                 let fips_peer_statuses = current_fips_peer_statuses!(fips_tunnel_runtime);
-                #[cfg(feature = "embedded-fips")]
-                if let Some(next_cache) =
-                    crate::fips_private_mesh::updated_fips_endpoint_cache_state(
-                        fips_endpoint_cache.as_ref(),
-                        &app,
-                        &network_id,
-                        own_pubkey.as_deref(),
-                        &fips_peer_statuses,
-                        unix_timestamp(),
-                    )
-                {
-                    match crate::fips_private_mesh::write_fips_endpoint_cache_if_changed(
-                        &fips_endpoint_cache_file,
-                        &next_cache,
-                        &mut last_written_fips_endpoint_cache,
-                    ) {
-                        Ok(_) => {
-                            fips_endpoint_cache = Some(next_cache);
-                        }
-                        Err(error) => {
-                            eprintln!("daemon: failed to persist FIPS endpoint cache: {error}");
-                        }
-                    }
-                }
                 let fips_advertised_routes =
                     current_fips_advertised_routes!(fips_tunnel_runtime, &app);
                 let _ = persist_daemon_runtime_state(
