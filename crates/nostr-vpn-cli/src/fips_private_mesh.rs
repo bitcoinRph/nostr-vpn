@@ -786,7 +786,7 @@ struct FipsEndpointTransportConfig {
 struct FipsEndpointPeerTransportConfig {
     npub: String,
     addresses: Vec<String>,
-    via_nostr: bool,
+    discover_via_nostr: bool,
 }
 
 fn fips_endpoint_config(
@@ -800,7 +800,7 @@ fn fips_endpoint_config(
     let advertise_udp = transport
         .map(|transport| transport.advertise_endpoint)
         .unwrap_or(false);
-    let nostr_enabled = advertise_udp || peers.iter().any(|peer| peer.via_nostr);
+    let nostr_enabled = advertise_udp || peers.iter().any(|peer| peer.discover_via_nostr);
     config.node.discovery.nostr.enabled = nostr_enabled;
     config.node.discovery.nostr.advertise = advertise_udp;
     config.node.discovery.nostr.policy = NostrDiscoveryPolicy::ConfiguredOnly;
@@ -828,7 +828,7 @@ fn fips_endpoint_config(
     });
     config.peers = peers
         .iter()
-        .filter(|peer| peer.via_nostr || !peer.addresses.is_empty())
+        .filter(|peer| peer.discover_via_nostr || !peer.addresses.is_empty())
         .map(|peer| FipsPeerConfig {
             npub: peer.npub.clone(),
             alias: None,
@@ -839,7 +839,7 @@ fn fips_endpoint_config(
                 .collect(),
             connect_policy: ConnectPolicy::AutoConnect,
             auto_reconnect: true,
-            via_nostr: peer.via_nostr,
+            via_nostr: peer.discover_via_nostr,
         })
         .collect();
     config
@@ -857,9 +857,9 @@ fn fips_endpoint_peers_from_mesh(
             .or_insert_with(|| FipsEndpointPeerTransportConfig {
                 npub,
                 addresses: Vec::new(),
-                via_nostr: true,
+                discover_via_nostr: true,
             })
-            .via_nostr = true;
+            .discover_via_nostr = true;
     }
 
     for (npub, addresses) in static_peer_endpoints {
@@ -869,7 +869,7 @@ fn fips_endpoint_peers_from_mesh(
             .or_insert_with(|| FipsEndpointPeerTransportConfig {
                 npub,
                 addresses: Vec::new(),
-                via_nostr: false,
+                discover_via_nostr: false,
             });
         peer.addresses.extend(
             addresses
@@ -2442,7 +2442,7 @@ mod tests {
     }
 
     #[test]
-    fn fips_tunnel_config_adds_cached_peer_endpoints_to_mesh_peers() {
+    fn fips_tunnel_config_keeps_discovery_when_cached_endpoint_exists_for_mesh_peer() {
         let own_keys = Keys::generate();
         let peer_keys = Keys::generate();
         let own_pubkey = own_keys.public_key().to_hex();
@@ -2472,7 +2472,7 @@ mod tests {
             .find(|peer| peer.npub == peer_npub)
             .expect("cached endpoint peer");
         assert_eq!(peer.addresses, vec!["198.51.100.9:51820".to_string()]);
-        assert!(!peer.via_nostr);
+        assert!(peer.discover_via_nostr);
     }
 
     #[tokio::test]
