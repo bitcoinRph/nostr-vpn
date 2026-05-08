@@ -61,21 +61,21 @@
 
       <p>
         Nostr VPN is a Tailscale-style private mesh VPN client, not a public VPN or public
-        internet proxy service. It uses Nostr relays for discovery and WireGuard-compatible
-        encrypted tunnels between devices and services you choose.
+        internet proxy service. It uses FIPS private mesh tunnels between devices and
+        services you choose.
       </p>
 
       <h2>Data Used to Operate the VPN</h2>
       <p>Nostr VPN processes the following data to create and maintain VPN connections:</p>
       <ul>
         <li>your Nostr public key, device name, network membership, and peer list;</li>
-        <li>WireGuard public keys, tunnel addresses, peer endpoints, and routing choices;</li>
-        <li>join requests, invite metadata, relay choices, presence status, and connection state;</li>
+        <li>tunnel addresses, FIPS peer endpoints, and routing choices;</li>
+        <li>join requests, invite metadata, relay choices for FIPS discovery, mesh status, and connection state;</li>
         <li>traffic counters and health information shown in the app.</li>
       </ul>
       <p>
         Private keys and local configuration are stored on your device. Packet traffic inside the VPN
-        tunnel is encrypted. When you use an exit node, relay service, public service, Nostr relay, or
+        tunnel is encrypted. When you use an exit node, FIPS relay/bridge path, Nostr relay, or
         peer-operated device, that operator receives the data needed to provide the service you asked
         to use.
       </p>
@@ -87,8 +87,8 @@
       </p>
       <p>
         The developer does not sell VPN data and does not use or disclose VPN data to third parties
-        for any purpose. The app only transmits the connection data needed to the peers, relays,
-        relay services, public services, and exit nodes you choose to operate your VPN.
+        for any purpose. The app only transmits the connection data needed to the peers, FIPS
+        discovery/rendezvous relays, bridge paths, and exit nodes you choose to operate your VPN.
       </p>
 
       <h2>Analytics and Tracking</h2>
@@ -100,7 +100,7 @@
 
       <h2>Your Choices</h2>
       <p>
-        You choose which networks, relays, peers, routes, public services, and exit nodes to use. You
+        You choose which networks, FIPS discovery/rendezvous relays, peers, routes, and exit nodes to use. You
         can remove peers, leave networks, stop the VPN tunnel, or delete the app to remove local app
         data from your device.
       </p>

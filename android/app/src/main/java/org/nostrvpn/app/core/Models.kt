@@ -15,7 +15,6 @@ data class AppState(
     val vpnActive: Boolean = false,
     val vpnStatus: String = "Disconnected",
     val daemonRunning: Boolean = false,
-    val relayConnected: Boolean = false,
     val ownNpub: String = "",
     val nodeName: String = "",
     val selfMagicDnsName: String = "",
@@ -35,7 +34,6 @@ data class AppState(
     val lanPairingActive: Boolean = false,
     val lanPairingRemainingSecs: Long = 0,
     val networks: List<NetworkState> = emptyList(),
-    val relays: List<RelayState> = emptyList(),
     val lanPeers: List<LanPeerState> = emptyList(),
     val health: List<HealthIssue> = emptyList(),
 )
@@ -74,19 +72,13 @@ data class ParticipantState(
     val fipsBytesSent: Long = 0,
     val fipsBytesRecv: Long = 0,
     val statusText: String = "",
-    val lastSignalText: String = "",
+    val lastSeenText: String = "",
 )
 
 data class InboundJoinRequest(
     val requesterNpub: String = "",
     val requesterNodeName: String = "",
     val requestedAtText: String = "",
-)
-
-data class RelayState(
-    val url: String = "",
-    val state: String = "",
-    val statusText: String = "",
 )
 
 data class LanPeerState(
@@ -119,7 +111,6 @@ fun parseAppState(jsonText: String): AppState {
         vpnActive = json.optBoolean("vpnActive"),
         vpnStatus = json.optString("vpnStatus", "Disconnected"),
         daemonRunning = json.optBoolean("daemonRunning"),
-        relayConnected = json.optBoolean("relayConnected"),
         ownNpub = json.optString("ownNpub"),
         nodeName = json.optString("nodeName"),
         selfMagicDnsName = json.optString("selfMagicDnsName"),
@@ -139,7 +130,6 @@ fun parseAppState(jsonText: String): AppState {
         lanPairingActive = json.optBoolean("lanPairingActive"),
         lanPairingRemainingSecs = json.optLong("lanPairingRemainingSecs"),
         networks = json.optJSONArray("networks").toNetworkList(),
-        relays = json.optJSONArray("relays").toRelayList(),
         lanPeers = json.optJSONArray("lanPeers").toLanPeerList(),
         health = json.optJSONArray("health").toHealthList(),
     )
@@ -182,7 +172,7 @@ private fun JSONArray?.toParticipantList(): List<ParticipantState> = mapObjects 
         fipsBytesSent = item.optLong("fipsBytesSent"),
         fipsBytesRecv = item.optLong("fipsBytesRecv"),
         statusText = item.optString("statusText"),
-        lastSignalText = item.optString("lastSignalText"),
+        lastSeenText = item.optString("lastSeenText", item.optString("lastSignalText")),
     )
 }
 
@@ -191,14 +181,6 @@ private fun JSONArray?.toInboundJoinRequestList(): List<InboundJoinRequest> = ma
         requesterNpub = item.optString("requesterNpub"),
         requesterNodeName = item.optString("requesterNodeName"),
         requestedAtText = item.optString("requestedAtText"),
-    )
-}
-
-private fun JSONArray?.toRelayList(): List<RelayState> = mapObjects { item ->
-    RelayState(
-        url = item.optString("url"),
-        state = item.optString("state"),
-        statusText = item.optString("statusText"),
     )
 }
 

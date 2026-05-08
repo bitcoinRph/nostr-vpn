@@ -3,7 +3,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::join_requests::MeshJoinRequest;
-use crate::signaling::NetworkRoster;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkRoster {
+    #[serde(default)]
+    pub network_name: String,
+    pub participants: Vec<String>,
+    #[serde(default)]
+    pub admins: Vec<String>,
+    #[serde(default)]
+    pub aliases: HashMap<String, String>,
+    #[serde(default)]
+    pub signed_at: u64,
+}
 
 const FIPS_CONTROL_MAGIC: &[u8] = b"NVPN-FIPS-CTRL\0";
 const FIPS_CONTROL_VERSION: u8 = 1;

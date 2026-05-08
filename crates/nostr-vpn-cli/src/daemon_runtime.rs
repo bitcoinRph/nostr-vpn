@@ -160,13 +160,6 @@ pub(crate) fn daemon_staged_config_file_path(config_path: &Path) -> PathBuf {
     parent.join("config.pending.toml")
 }
 
-pub(crate) fn daemon_peer_cache_file_path(config_path: &Path) -> PathBuf {
-    let parent = config_path
-        .parent()
-        .map_or_else(|| Path::new(".").to_path_buf(), PathBuf::from);
-    parent.join("daemon.mesh-cache.json")
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DaemonControlResult {
     request: String,
@@ -818,30 +811,6 @@ pub(crate) fn repair_saved_network_state(config_path: &Path) -> Result<bool> {
     }
 }
 
-pub(crate) fn read_daemon_peer_cache(path: &Path) -> Result<Option<DaemonPeerCacheState>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read daemon peer cache {}", path.display()))?;
-    let parsed = serde_json::from_str::<DaemonPeerCacheState>(&raw)
-        .with_context(|| format!("failed to parse daemon peer cache {}", path.display()))?;
-    Ok(Some(parsed))
-}
-
-pub(crate) fn write_daemon_peer_cache(path: &Path, state: &DaemonPeerCacheState) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let raw = serde_json::to_string_pretty(state)?;
-    fs::write(path, raw)
-        .with_context(|| format!("failed to write daemon peer cache {}", path.display()))?;
-    set_private_cache_file_permissions(path)?;
-    Ok(())
-}
-
 pub(crate) fn write_runtime_file_atomically(path: &Path, contents: &[u8]) -> Result<()> {
     let parent = path
         .parent()
@@ -956,8 +925,8 @@ pub(crate) fn spawn_daemon_process(args: &ConnectArgs, config_path: &Path) -> Re
         .arg(config_path)
         .arg("--iface")
         .arg(&args.iface)
-        .arg("--announce-interval-secs")
-        .arg(args.announce_interval_secs.to_string())
+        .arg("--mesh-refresh-interval-secs")
+        .arg(args.mesh_refresh_interval_secs.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(stderr_log));
@@ -967,9 +936,6 @@ pub(crate) fn spawn_daemon_process(args: &ConnectArgs, config_path: &Path) -> Re
     }
     for participant in &args.participants {
         command.arg("--participant").arg(participant);
-    }
-    for relay in &args.relay {
-        command.arg("--relay").arg(relay);
     }
 
     let mut child = command

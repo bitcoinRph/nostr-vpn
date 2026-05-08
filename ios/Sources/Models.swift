@@ -12,7 +12,6 @@ struct AppState: Decodable {
     var vpnActive = false
     var vpnStatus = "Disconnected"
     var daemonRunning = false
-    var relayConnected = false
     var ownNpub = ""
     var nodeName = ""
     var selfMagicDnsName = ""
@@ -33,7 +32,6 @@ struct AppState: Decodable {
     var lanPairingRemainingSecs: UInt64 = 0
     var configPath = ""
     var networks: [NetworkState] = []
-    var relays: [RelayState] = []
     var lanPeers: [LanPeerState] = []
     var health: [HealthIssue] = []
 
@@ -43,12 +41,12 @@ struct AppState: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case rev, error, appVersion, platform, mobile, vpnControlSupported
-        case runtimeStatusDetail, vpnEnabled, vpnActive, vpnStatus, daemonRunning, relayConnected
+        case runtimeStatusDetail, vpnEnabled, vpnActive, vpnStatus, daemonRunning
         case ownNpub, nodeName, selfMagicDnsName, tunnelIp, endpoint, listenPort, activeNetworkInvite
         case connectedPeerCount, expectedPeerCount, meshReady, exitNode, advertiseExitNode
         case advertisedRoutes, magicDnsSuffix, magicDnsStatus, autoconnect
         case lanPairingActive, lanPairingRemainingSecs, configPath
-        case networks, relays, lanPeers, health
+        case networks, lanPeers, health
     }
 
     init() {}
@@ -66,7 +64,6 @@ struct AppState: Decodable {
         vpnActive = container.bool(.vpnActive)
         vpnStatus = container.string(.vpnStatus, default: "Disconnected")
         daemonRunning = container.bool(.daemonRunning)
-        relayConnected = container.bool(.relayConnected)
         ownNpub = container.string(.ownNpub)
         nodeName = container.string(.nodeName)
         selfMagicDnsName = container.string(.selfMagicDnsName)
@@ -87,7 +84,6 @@ struct AppState: Decodable {
         lanPairingRemainingSecs = container.uint64(.lanPairingRemainingSecs)
         configPath = container.string(.configPath)
         networks = container.array(.networks)
-        relays = container.array(.relays)
         lanPeers = container.array(.lanPeers)
         health = container.array(.health)
     }
@@ -157,7 +153,7 @@ struct ParticipantState: Decodable, Identifiable {
     var fipsBytesRecv: UInt64 = 0
     var state = ""
     var statusText = ""
-    var lastSignalText = ""
+    var lastSeenText = ""
 
     var displayName: String {
         if !magicDnsName.isEmpty { return magicDnsName }
@@ -170,7 +166,7 @@ struct ParticipantState: Decodable, Identifiable {
         case isAdmin, reachable, offersExitNode
         case fipsEndpointNpub, fipsTransportAddr, fipsTransportType, fipsSrttMs
         case fipsPacketsSent, fipsPacketsRecv, fipsBytesSent, fipsBytesRecv
-        case state, statusText, lastSignalText
+        case state, statusText, lastSeenText, lastSignalText
     }
 
     init() {}
@@ -196,7 +192,7 @@ struct ParticipantState: Decodable, Identifiable {
         fipsBytesRecv = container.uint64(.fipsBytesRecv)
         state = container.string(.state)
         statusText = container.string(.statusText)
-        lastSignalText = container.string(.lastSignalText)
+        lastSeenText = container.string(.lastSeenText, default: container.string(.lastSignalText))
     }
 }
 
@@ -210,13 +206,6 @@ struct InboundJoinRequest: Decodable, Identifiable {
     var requesterNpub = ""
     var requesterNodeName = ""
     var requestedAtText = ""
-}
-
-struct RelayState: Decodable, Identifiable {
-    var id: String { url }
-    var url = ""
-    var state = ""
-    var statusText = ""
 }
 
 struct LanPeerState: Decodable, Identifiable {

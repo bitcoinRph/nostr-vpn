@@ -2,23 +2,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NativeRelayState {
-    pub url: String,
-    pub state: String,
-    pub status_text: String,
-}
-
-#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeRelaySummary {
-    pub up: u64,
-    pub down: u64,
-    pub checking: u64,
-    pub unknown: u64,
-}
-
-#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct NativeParticipantState {
     pub npub: String,
     pub pubkey_hex: String,
@@ -41,9 +24,9 @@ pub struct NativeParticipantState {
     pub fips_bytes_sent: u64,
     pub fips_bytes_recv: u64,
     pub state: String,
-    pub presence_state: String,
+    pub mesh_state: String,
     pub status_text: String,
-    pub last_signal_text: String,
+    pub last_seen_text: String,
 }
 
 #[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -159,7 +142,6 @@ pub struct NativeAppState {
     pub daemon_running: bool,
     pub vpn_enabled: bool,
     pub vpn_active: bool,
-    pub relay_connected: bool,
     pub vpn_status: String,
     pub daemon_binary_version: String,
     pub service_binary_version: String,
@@ -191,7 +173,5 @@ pub struct NativeAppState {
     pub network: NativeNetworkSummary,
     pub port_mapping: NativePortMappingStatus,
     pub networks: Vec<NativeNetworkState>,
-    pub relays: Vec<NativeRelayState>,
-    pub relay_summary: NativeRelaySummary,
     pub lan_peers: Vec<NativeLanPeerState>,
 }

@@ -133,7 +133,8 @@ pub extern "C" fn nostr_vpn_decode_qr_image_json(path: *const c_char) -> *mut c_
 
 #[unsafe(no_mangle)]
 pub extern "C" fn nostr_vpn_mobile_tunnel_config_json(data_dir: *const c_char) -> *mut c_char {
-    json_raw_string(&tunnel_config_json(&c_string_lossy(data_dir)))
+    let config_json = tunnel_config_json(&c_string_lossy(data_dir));
+    json_raw_string(&config_json)
 }
 
 #[unsafe(no_mangle)]
@@ -163,7 +164,8 @@ pub unsafe extern "C" fn nostr_vpn_mobile_tunnel_free(handle: *mut NvpnMobileTun
 
 /// # Safety
 ///
-/// `handle` must point to a live mobile tunnel handle. `packet` must point to `len` readable bytes.
+/// `handle` must be a live mobile tunnel handle. `packet` must point to `len`
+/// readable bytes for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nostr_vpn_mobile_tunnel_send_packet(
     handle: *const NvpnMobileTunnelHandle,
@@ -180,8 +182,8 @@ pub unsafe extern "C" fn nostr_vpn_mobile_tunnel_send_packet(
 
 /// # Safety
 ///
-/// `handle` must point to a live mobile tunnel handle. `out` must point to `capacity` writable
-/// bytes.
+/// `handle` must be a live mobile tunnel handle. `out` must point to
+/// `capacity` writable bytes for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nostr_vpn_mobile_tunnel_next_packet(
     handle: *const NvpnMobileTunnelHandle,
@@ -587,7 +589,9 @@ mod tests {
                 .is_some_and(|error| error.contains("invalid native action JSON"))
         );
 
-        unsafe { nostr_vpn_app_free(handle) };
+        unsafe {
+            nostr_vpn_app_free(handle);
+        }
     }
 
     #[test]
@@ -599,7 +603,7 @@ mod tests {
         assert!(width > 0);
         assert_eq!(
             value["cells"].as_array().expect("cells").len(),
-            usize::try_from(width * width).expect("matrix size fits usize")
+            usize::try_from(width * width).expect("matrix cell count fits usize")
         );
         assert_eq!(value["error"], "");
     }
@@ -620,7 +624,9 @@ mod tests {
         let text = unsafe { CStr::from_ptr(value) }
             .to_string_lossy()
             .into_owned();
-        unsafe { nostr_vpn_string_free(value) };
+        unsafe {
+            nostr_vpn_string_free(value);
+        }
         text
     }
 }

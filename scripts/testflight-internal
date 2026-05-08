@@ -143,8 +143,8 @@ DEFAULT_WHATS_NEW = (
     "TestFlight feedback or crash reporting."
 )
 DEFAULT_BETA_DESCRIPTION = (
-    "Nostr VPN is a Tailscale-style private mesh VPN client. It uses Nostr for discovery "
-    "and WireGuard-compatible encrypted tunnels between devices and services you choose; "
+    "Nostr VPN is a Tailscale-style private mesh VPN client. It uses FIPS private mesh "
+    "tunnels between devices and services you choose; "
     "it is not a public VPN or internet proxy service."
 )
 DEFAULT_REVIEW_NOTES = (
@@ -152,7 +152,7 @@ DEFAULT_REVIEW_NOTES = (
     "nvpn://invite link from another Nostr VPN device, then use the main VPN switch to "
     "start and stop the iOS packet tunnel. The app uses Apple's NetworkExtension packet "
     "tunnel APIs for VPN control. Nostr VPN is a private mesh VPN: users choose their own "
-    "networks, relays, peers, routes, public services, and optional private exit nodes. It "
+    "networks, peers, routes, public services, and optional private exit nodes. It "
     "does not provide a public VPN or public internet proxy service. On iOS, a VPN data "
     "disclosure is shown on the main app screen before using the tunnel."
 )

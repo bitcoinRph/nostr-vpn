@@ -2,15 +2,6 @@ use serde::{Deserialize, Serialize};
 
 pub use nostr_vpn_core::diagnostics::{HealthIssue, NetworkSummary, PortMappingStatus};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct RelaySummary {
-    pub up: usize,
-    pub down: usize,
-    pub checking: usize,
-    pub unknown: usize,
-}
-
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -29,8 +20,6 @@ pub struct DaemonRuntimeState {
     pub vpn_enabled: bool,
     #[serde(alias = "vpn_active")]
     pub vpn_active: bool,
-    #[serde(alias = "relay_connected")]
-    pub relay_connected: bool,
     #[serde(alias = "vpn_status")]
     pub vpn_status: String,
     #[serde(alias = "expected_peer_count")]
@@ -84,22 +73,14 @@ pub struct DaemonPeerState {
     pub public_key: String,
     #[serde(alias = "advertised_routes")]
     pub advertised_routes: Vec<String>,
-    #[serde(alias = "presence_timestamp")]
-    pub presence_timestamp: u64,
-    #[serde(alias = "last_signal_seen_at")]
-    pub last_signal_seen_at: Option<u64>,
+    #[serde(default, alias = "presence_timestamp", alias = "presenceTimestamp")]
+    pub last_mesh_seen_at: u64,
+    #[serde(default, alias = "last_signal_seen_at", alias = "lastSignalSeenAt")]
+    pub last_fips_seen_at: Option<u64>,
     pub reachable: bool,
     #[serde(alias = "last_handshake_at")]
     pub last_handshake_at: Option<u64>,
     pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct RelayView {
-    pub url: String,
-    pub state: String,
-    pub status_text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -124,9 +105,9 @@ pub struct ParticipantView {
     pub fips_bytes_sent: u64,
     pub fips_bytes_recv: u64,
     pub state: String,
-    pub presence_state: String,
+    pub mesh_state: String,
     pub status_text: String,
-    pub last_signal_text: String,
+    pub last_seen_text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -191,7 +172,6 @@ pub struct UiState {
     pub daemon_running: bool,
     pub vpn_enabled: bool,
     pub vpn_active: bool,
-    pub relay_connected: bool,
     pub cli_installed: bool,
     pub service_supported: bool,
     pub service_enablement_supported: bool,
@@ -232,8 +212,6 @@ pub struct UiState {
     pub network: NetworkSummary,
     pub port_mapping: PortMappingStatus,
     pub networks: Vec<NetworkView>,
-    pub relays: Vec<RelayView>,
-    pub relay_summary: RelaySummary,
     pub lan_peers: Vec<LanPeerView>,
 }
 
@@ -333,17 +311,13 @@ mod tests {
         let state = UiState {
             vpn_control_supported: true,
             own_npub: "npub1example".to_string(),
-            relay_summary: RelaySummary {
-                unknown: 3,
-                ..RelaySummary::default()
-            },
             ..UiState::default()
         };
 
         let value = serde_json::to_value(state).expect("serialize state");
         assert_eq!(value["vpnControlSupported"], true);
         assert_eq!(value["ownNpub"], "npub1example");
-        assert_eq!(value["relaySummary"]["unknown"], 3);
+        assert!(value.get("relaySummary").is_none());
     }
 
     #[test]
@@ -368,7 +342,6 @@ mod tests {
             "listen_port": 51820,
             "vpn_enabled": true,
             "vpn_active": true,
-            "relay_connected": true,
             "vpn_status": "Running",
             "expected_peer_count": 1,
             "connected_peer_count": 1,
@@ -388,8 +361,8 @@ mod tests {
                 "rx_bytes": 19269,
                 "public_key": "",
                 "advertised_routes": [],
-                "presence_timestamp": 1778104080,
-                "last_signal_seen_at": 1778104080,
+                "last_mesh_seen_at": 1778104080,
+                "last_fips_seen_at": 1778104080,
                 "reachable": true,
                 "last_handshake_at": 1778104080,
                 "error": null

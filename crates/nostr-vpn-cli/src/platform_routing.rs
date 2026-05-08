@@ -1,33 +1,33 @@
 #[cfg(target_os = "linux")]
 use std::fs;
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
+use std::net::Ipv4Addr;
+#[cfg(any(target_os = "linux", test))]
+use std::net::Ipv6Addr;
+#[cfg(target_os = "linux")]
 use std::net::ToSocketAddrs;
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+#[cfg(target_os = "linux")]
+use std::net::{IpAddr, SocketAddr};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::process::Command as ProcessCommand;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use anyhow::{Context, Result, anyhow};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 use netdev::get_interfaces;
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(target_os = "linux")]
 use netdev::interface::interface::Interface as NetworkInterface;
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(target_os = "linux")]
 use nostr_vpn_core::config::AppConfig;
 
-#[cfg(target_os = "macos")]
-use crate::MacosExitNodeRuntime;
 #[cfg(any(target_os = "macos", test))]
 use crate::MacosRouteSpec;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use crate::TunnelPeer;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::run_checked;
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 use crate::strip_cidr;
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LinuxRouteGetSpec {
     pub(crate) gateway: Option<String>,
@@ -51,21 +51,10 @@ pub(crate) struct LinuxDefaultRouteSpec {
     pub(crate) dev: String,
 }
 
-#[cfg(any(target_os = "macos", test))]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct MacosEndpointBypassRoute {
-    pub(crate) target: String,
-    pub(crate) gateway: Option<String>,
-    pub(crate) interface: String,
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
-pub(crate) const LOCAL_TUNNEL_MTU: &str = "1380";
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows", test))]
 pub(crate) const FIPS_TUNNEL_MTU: &str = "1150";
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn linux_default_route_device_from_output(output: &str) -> Option<String> {
     output.lines().find_map(|line| {
         let tokens = line.split_whitespace().collect::<Vec<_>>();
@@ -76,7 +65,7 @@ pub(crate) fn linux_default_route_device_from_output(output: &str) -> Option<Str
     })
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn linux_route_get_spec_from_output(output: &str) -> Option<LinuxRouteGetSpec> {
     let line = output.lines().find(|line| !line.trim().is_empty())?.trim();
     let tokens = line.split_whitespace().collect::<Vec<_>>();
@@ -188,7 +177,7 @@ pub(crate) fn flush_linux_route_cache() -> Result<()> {
     )
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 fn relay_bypass_ipv4_hosts(app: &AppConfig) -> Vec<Ipv4Addr> {
     let mut hosts = app
         .nostr
@@ -201,7 +190,7 @@ fn relay_bypass_ipv4_hosts(app: &AppConfig) -> Vec<Ipv4Addr> {
     hosts
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(target_os = "linux")]
 fn relay_ipv4_hosts(relay: &str) -> Vec<Ipv4Addr> {
     let Some((host, port)) = relay_host_port(relay) else {
         return Vec::new();
@@ -228,7 +217,7 @@ fn relay_ipv4_hosts(relay: &str) -> Vec<Ipv4Addr> {
         .unwrap_or_default()
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(target_os = "linux")]
 fn relay_host_port(relay: &str) -> Option<(String, u16)> {
     let relay = relay.trim();
     if relay.is_empty() {
@@ -247,7 +236,7 @@ fn relay_host_port(relay: &str) -> Option<(String, u16)> {
     split_host_port(authority, default_port)
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn stun_host_port(server: &str) -> Option<(String, u16)> {
     let server = server.trim();
     if server.is_empty() {
@@ -262,7 +251,7 @@ pub(crate) fn stun_host_port(server: &str) -> Option<(String, u16)> {
     split_host_port(authority, 3478)
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(target_os = "linux")]
 fn stun_ipv4_hosts(app: &AppConfig) -> Vec<Ipv4Addr> {
     let mut hosts = app
         .nat
@@ -296,7 +285,7 @@ fn stun_ipv4_hosts(app: &AppConfig) -> Vec<Ipv4Addr> {
     hosts
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(target_os = "linux")]
 fn reflector_ipv4_hosts(app: &AppConfig) -> Vec<Ipv4Addr> {
     let mut hosts = app
         .nat
@@ -313,7 +302,7 @@ fn reflector_ipv4_hosts(app: &AppConfig) -> Vec<Ipv4Addr> {
     hosts
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(target_os = "linux")]
 fn management_ipv4_hosts_from_interfaces(interfaces: &[NetworkInterface]) -> Vec<Ipv4Addr> {
     let mut hosts = interfaces
         .iter()
@@ -338,7 +327,7 @@ fn management_ipv4_hosts_from_interfaces(interfaces: &[NetworkInterface]) -> Vec
     hosts
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn control_plane_bypass_ipv4_hosts_from_interfaces(
     app: &AppConfig,
     interfaces: &[NetworkInterface],
@@ -352,12 +341,12 @@ pub(crate) fn control_plane_bypass_ipv4_hosts_from_interfaces(
     hosts
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 pub(crate) fn control_plane_bypass_ipv4_hosts(app: &AppConfig) -> Vec<Ipv4Addr> {
     control_plane_bypass_ipv4_hosts_from_interfaces(app, &get_interfaces())
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn split_host_port(authority: &str, default_port: u16) -> Option<(String, u16)> {
     let authority = authority.trim();
     if authority.is_empty() {
@@ -381,25 +370,6 @@ pub(crate) fn split_host_port(authority: &str, default_port: u16) -> Option<(Str
         }
         _ => Some((authority.to_string(), default_port)),
     }
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn linux_bypass_route_specs(
-    app: &AppConfig,
-    peers: &[TunnelPeer],
-    tunnel_iface: &str,
-    original_default_route: Option<&str>,
-) -> Result<Vec<LinuxEndpointBypassRoute>> {
-    let hosts = peers
-        .iter()
-        .filter_map(|peer| match crate::endpoint_host_ip(&peer.endpoint) {
-            Some(IpAddr::V4(ip)) => Some(ip),
-            _ => None,
-        })
-        .chain(control_plane_bypass_ipv4_hosts(app))
-        .collect::<Vec<_>>();
-
-    linux_bypass_route_specs_for_hosts(hosts, tunnel_iface, original_default_route)
 }
 
 #[cfg(target_os = "linux")]
@@ -475,11 +445,6 @@ pub(crate) fn delete_linux_endpoint_bypass_route(target: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn macos_default_route() -> Result<MacosRouteSpec> {
-    crate::macos_network::macos_default_route()
-}
-
-#[cfg(target_os = "macos")]
 pub(crate) fn macos_default_routes() -> Result<Vec<MacosRouteSpec>> {
     crate::macos_network::macos_default_routes()
 }
@@ -489,26 +454,6 @@ pub(crate) fn macos_underlay_default_route_from_routes(
     routes: &[MacosRouteSpec],
 ) -> Option<MacosRouteSpec> {
     crate::macos_network::macos_underlay_default_route_from_routes(routes)
-}
-
-#[cfg(target_os = "macos")]
-pub(crate) fn macos_bypass_route_specs(
-    app: &AppConfig,
-    peers: &[TunnelPeer],
-    tunnel_iface: &str,
-    original_default_route: Option<&MacosRouteSpec>,
-) -> Result<Vec<MacosEndpointBypassRoute>> {
-    crate::macos_network::macos_bypass_route_specs(app, peers, tunnel_iface, original_default_route)
-}
-
-#[cfg(target_os = "macos")]
-pub(crate) fn apply_macos_endpoint_bypass_route(route: &MacosEndpointBypassRoute) -> Result<()> {
-    crate::macos_network::apply_macos_endpoint_bypass_route(route)
-}
-
-#[cfg(target_os = "macos")]
-pub(crate) fn delete_macos_endpoint_bypass_route(route: &MacosEndpointBypassRoute) -> Result<()> {
-    crate::macos_network::delete_macos_endpoint_bypass_route(route)
 }
 
 #[cfg(target_os = "macos")]
@@ -563,22 +508,6 @@ pub(crate) fn write_macos_ip_forward(enabled: bool) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn ensure_macos_ip_forwarding(
-    enabled: bool,
-    runtime: &mut MacosExitNodeRuntime,
-) -> Result<()> {
-    crate::macos_network::ensure_macos_ip_forwarding(enabled, runtime)
-}
-
-#[cfg(target_os = "macos")]
-pub(crate) fn ensure_macos_pf_nat(
-    outbound_iface: &str,
-    runtime: &mut MacosExitNodeRuntime,
-) -> Result<()> {
-    crate::macos_network::ensure_macos_pf_nat(outbound_iface, runtime)
-}
-
-#[cfg(target_os = "macos")]
 pub(crate) fn cleanup_macos_pf_nat() -> Result<()> {
     crate::macos_network::cleanup_macos_pf_nat()
 }
@@ -607,7 +536,7 @@ fn linux_ip_forward_path(family: LinuxExitNodeIpFamily) -> &'static str {
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn linux_exit_node_source_cidr(tunnel_ip: &str) -> Option<String> {
     let octets = strip_cidr(tunnel_ip).parse::<Ipv4Addr>().ok()?.octets();
     if octets[0] == 10 && octets[1] == 44 {
@@ -617,7 +546,7 @@ pub(crate) fn linux_exit_node_source_cidr(tunnel_ip: &str) -> Option<String> {
     Some(format!("{}.{}.{}.0/24", octets[0], octets[1], octets[2]))
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinuxExitNodeIpFamily {
     V4,
@@ -641,7 +570,7 @@ pub(crate) fn linux_exit_node_default_route_families(
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn linux_exit_node_firewall_binary(family: LinuxExitNodeIpFamily) -> &'static str {
     match family {
         LinuxExitNodeIpFamily::V4 => "iptables",
@@ -649,7 +578,7 @@ pub(crate) fn linux_exit_node_firewall_binary(family: LinuxExitNodeIpFamily) -> 
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn linux_exit_node_forward_in_rule(
     iface: &str,
     family: LinuxExitNodeIpFamily,
@@ -671,7 +600,7 @@ pub(crate) fn linux_exit_node_forward_in_rule(
     ]
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn linux_exit_node_forward_out_rule(
     iface: &str,
     family: LinuxExitNodeIpFamily,
@@ -697,7 +626,7 @@ pub(crate) fn linux_exit_node_forward_out_rule(
     ]
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn linux_exit_node_ipv4_masquerade_rule(
     outbound_iface: &str,
     tunnel_source_cidr: &str,
@@ -795,15 +724,6 @@ pub(crate) fn linux_iptables_delete_rule(
 }
 
 #[cfg(any(test, not(target_os = "windows")))]
-pub(crate) fn apply_local_interface_network(
-    iface: &str,
-    address: &str,
-    route_targets: &[String],
-) -> Result<()> {
-    apply_local_interface_network_with_mtu(iface, address, route_targets, LOCAL_TUNNEL_MTU)
-}
-
-#[cfg(any(test, not(target_os = "windows")))]
 pub(crate) fn apply_local_interface_network_with_mtu(
     iface: &str,
     address: &str,
@@ -813,6 +733,8 @@ pub(crate) fn apply_local_interface_network_with_mtu(
     #[cfg(target_os = "linux")]
     {
         let ipv4_route_source = linux_ipv4_route_source(address);
+        let local_has_ipv4 = linux_tunnel_address_is_ipv4(address);
+        let local_has_ipv6 = linux_tunnel_address_is_ipv6(address);
         run_checked(
             ProcessCommand::new("ip")
                 .arg("address")
@@ -832,6 +754,12 @@ pub(crate) fn apply_local_interface_network_with_mtu(
                 .arg(iface),
         )?;
         for target in route_targets {
+            if linux_route_target_is_ipv4(target) && !local_has_ipv4 {
+                continue;
+            }
+            if linux_route_target_is_ipv6(target) && !local_has_ipv6 {
+                continue;
+            }
             if target == "0.0.0.0/0" {
                 let _ = ProcessCommand::new("ip")
                     .arg("-4")
@@ -899,7 +827,7 @@ pub(crate) fn apply_local_interface_network_with_mtu(
     ))
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 pub(crate) fn linux_ipv4_route_source(address: &str) -> Option<String> {
     strip_cidr(address)
         .parse::<Ipv4Addr>()
@@ -908,8 +836,23 @@ pub(crate) fn linux_ipv4_route_source(address: &str) -> Option<String> {
 }
 
 #[cfg(any(target_os = "linux", test))]
+pub(crate) fn linux_tunnel_address_is_ipv4(address: &str) -> bool {
+    strip_cidr(address).parse::<Ipv4Addr>().is_ok()
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn linux_tunnel_address_is_ipv6(address: &str) -> bool {
+    strip_cidr(address).parse::<Ipv6Addr>().is_ok()
+}
+
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn linux_route_target_is_ipv4(target: &str) -> bool {
     strip_cidr(target).parse::<Ipv4Addr>().is_ok()
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn linux_route_target_is_ipv6(target: &str) -> bool {
+    strip_cidr(target).parse::<Ipv6Addr>().is_ok()
 }
 
 #[cfg(target_os = "macos")]
@@ -919,4 +862,21 @@ fn apply_macos_route(iface: &str, target: &str) -> Result<()> {
         return apply_macos_default_route(None, Some(iface));
     }
     apply_macos_route_spec(target, None, Some(iface))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linux_route_family_helpers_detect_ipv4_and_ipv6_cidrs() {
+        assert!(linux_tunnel_address_is_ipv4("10.44.0.1/32"));
+        assert!(!linux_tunnel_address_is_ipv6("10.44.0.1/32"));
+        assert!(linux_tunnel_address_is_ipv6("fd00::1/128"));
+        assert!(!linux_tunnel_address_is_ipv4("fd00::1/128"));
+        assert!(linux_route_target_is_ipv4("0.0.0.0/0"));
+        assert!(!linux_route_target_is_ipv4("::/0"));
+        assert!(linux_route_target_is_ipv6("::/0"));
+        assert!(!linux_route_target_is_ipv6("10.44.0.0/16"));
+    }
 }

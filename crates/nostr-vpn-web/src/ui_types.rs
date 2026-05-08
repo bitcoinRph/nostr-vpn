@@ -22,7 +22,6 @@ pub(crate) struct DaemonRuntimeState {
     pub binary_version: String,
     pub vpn_enabled: bool,
     pub vpn_active: bool,
-    pub relay_connected: bool,
     pub vpn_status: String,
     pub expected_peer_count: usize,
     pub connected_peer_count: usize,
@@ -69,31 +68,15 @@ pub(crate) struct DaemonPeerState {
     pub public_key: String,
     #[serde(default)]
     pub advertised_routes: Vec<String>,
-    pub presence_timestamp: u64,
-    #[serde(default)]
-    pub last_signal_seen_at: Option<u64>,
+    #[serde(default, alias = "presence_timestamp", alias = "presenceTimestamp")]
+    pub last_mesh_seen_at: u64,
+    #[serde(default, alias = "last_signal_seen_at", alias = "lastSignalSeenAt")]
+    pub last_fips_seen_at: Option<u64>,
     pub reachable: bool,
     #[serde(default)]
     pub last_handshake_at: Option<u64>,
     #[serde(default)]
     pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RelaySummary {
-    pub up: usize,
-    pub down: usize,
-    pub checking: usize,
-    pub unknown: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RelayView {
-    pub url: String,
-    pub state: String,
-    pub status_text: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,9 +101,9 @@ pub(crate) struct ParticipantView {
     pub fips_bytes_sent: u64,
     pub fips_bytes_recv: u64,
     pub state: String,
-    pub presence_state: String,
+    pub mesh_state: String,
     pub status_text: String,
-    pub last_signal_text: String,
+    pub last_seen_text: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -172,7 +155,6 @@ pub(crate) struct UiState {
     pub daemon_running: bool,
     pub vpn_enabled: bool,
     pub vpn_active: bool,
-    pub relay_connected: bool,
     pub cli_installed: bool,
     pub service_supported: bool,
     pub service_enablement_supported: bool,
@@ -212,8 +194,6 @@ pub(crate) struct UiState {
     pub network: NetworkSummary,
     pub port_mapping: PortMappingStatus,
     pub networks: Vec<NetworkView>,
-    pub relays: Vec<RelayView>,
-    pub relay_summary: RelaySummary,
     pub lan_peers: Vec<serde_json::Value>,
 }
 
@@ -299,10 +279,4 @@ pub(crate) struct JoinRequestAction {
 pub(crate) struct AliasRequest {
     pub npub: String,
     pub alias: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RelayRequest {
-    pub relay: String,
 }

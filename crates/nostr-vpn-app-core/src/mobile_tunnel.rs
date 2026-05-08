@@ -22,7 +22,6 @@ const TUNNEL_CHANNEL_CAPACITY: usize = 1024;
 pub(crate) struct MobileTunnelConfig {
     pub(crate) identity_nsec: String,
     pub(crate) network_id: String,
-    pub(crate) relays: Vec<String>,
     pub(crate) local_address: String,
     pub(crate) mtu: u16,
     pub(crate) peers: Vec<FipsMeshPeerConfig>,
@@ -82,7 +81,6 @@ impl MobileTunnelConfig {
         Ok(Self {
             identity_nsec: app.nostr.secret_key.clone(),
             network_id,
-            relays: app.nostr.relays.clone(),
             local_address,
             mtu: DEFAULT_MOBILE_MTU,
             peers,
@@ -148,7 +146,7 @@ impl MobileTunnel {
     )> {
         let scope = format!("nostr-vpn:{}", config.network_id.trim());
         let endpoint = FipsEndpoint::builder()
-            .config(fips_endpoint_config(&scope, &config.relays, &config.peers))
+            .config(fips_endpoint_config(&scope, &config.peers))
             .identity_nsec(config.identity_nsec)
             .discovery_scope(scope)
             .without_system_tun()
@@ -256,26 +254,18 @@ impl Drop for MobileTunnel {
     }
 }
 
-fn fips_endpoint_config(
-    scope: &str,
-    relays: &[String],
-    peers: &[FipsMeshPeerConfig],
-) -> FipsConfig {
+fn fips_endpoint_config(scope: &str, peers: &[FipsMeshPeerConfig]) -> FipsConfig {
     let mut config = FipsConfig::new();
-    config.node.discovery.nostr.enabled = !relays.is_empty();
-    config.node.discovery.nostr.advertise = !relays.is_empty() && !peers.is_empty();
+    config.node.discovery.nostr.enabled = false;
+    config.node.discovery.nostr.advertise = false;
     config.node.discovery.nostr.policy = NostrDiscoveryPolicy::ConfiguredOnly;
-    config.node.discovery.nostr.share_local_candidates = true;
+    config.node.discovery.nostr.share_local_candidates = false;
     config.node.discovery.nostr.app = scope.to_string();
-    if !relays.is_empty() {
-        config.node.discovery.nostr.advert_relays = relays.to_vec();
-        config.node.discovery.nostr.dm_relays = relays.to_vec();
-    }
     config.transports.udp = TransportInstances::Single(UdpConfig {
         bind_addr: Some("0.0.0.0:0".to_string()),
         outbound_only: Some(false),
         accept_connections: Some(false),
-        advertise_on_nostr: Some(!relays.is_empty() && !peers.is_empty()),
+        advertise_on_nostr: Some(false),
         public: Some(false),
         ..UdpConfig::default()
     });
@@ -287,7 +277,7 @@ fn fips_endpoint_config(
             addresses: Vec::new(),
             connect_policy: ConnectPolicy::AutoConnect,
             auto_reconnect: true,
-            via_nostr: true,
+            via_nostr: false,
         })
         .collect();
     config
@@ -328,7 +318,6 @@ fn empty_config() -> MobileTunnelConfig {
     MobileTunnelConfig {
         identity_nsec: String::new(),
         network_id: String::new(),
-        relays: Vec::new(),
         local_address: String::new(),
         mtu: DEFAULT_MOBILE_MTU,
         peers: Vec::new(),
@@ -385,19 +374,17 @@ mod tests {
     }
 
     #[test]
-    fn mobile_fips_config_advertises_ephemeral_nat_when_relays_and_peers_exist() {
+    fn mobile_fips_config_disables_relay_discovery() {
         let peer = FipsMeshPeerConfig::from_participant_pubkey(
             "26525c442dd039de4e728b41ee8d7f717b267ab25b7c219d53a3249e1c9174cc",
             vec!["10.44.22.44/32".to_string()],
         )
         .expect("peer");
-        let relays = vec!["wss://relay.example".to_string()];
+        let config = fips_endpoint_config("nostr-vpn:test", &[peer]);
 
-        let config = fips_endpoint_config("nostr-vpn:test", &relays, &[peer]);
-
-        assert!(config.node.discovery.nostr.enabled);
-        assert!(config.node.discovery.nostr.advertise);
-        assert!(config.node.discovery.nostr.share_local_candidates);
+        assert!(!config.node.discovery.nostr.enabled);
+        assert!(!config.node.discovery.nostr.advertise);
+        assert!(!config.node.discovery.nostr.share_local_candidates);
         assert_eq!(
             config.node.discovery.nostr.policy,
             NostrDiscoveryPolicy::ConfiguredOnly
@@ -408,19 +395,17 @@ mod tests {
         assert_eq!(udp.bind_addr(), "0.0.0.0:0");
         assert!(!udp.outbound_only());
         assert!(!udp.accept_connections());
-        assert!(udp.advertise_on_nostr());
+        assert!(!udp.advertise_on_nostr());
         assert!(!udp.is_public());
         assert_eq!(config.peers.len(), 1);
-        assert!(config.peers[0].via_nostr);
+        assert!(!config.peers[0].via_nostr);
     }
 
     #[test]
     fn mobile_fips_config_does_not_advertise_without_peers() {
-        let relays = vec!["wss://relay.example".to_string()];
+        let config = fips_endpoint_config("nostr-vpn:test", &[]);
 
-        let config = fips_endpoint_config("nostr-vpn:test", &relays, &[]);
-
-        assert!(config.node.discovery.nostr.enabled);
+        assert!(!config.node.discovery.nostr.enabled);
         assert!(!config.node.discovery.nostr.advertise);
         let TransportInstances::Single(udp) = &config.transports.udp else {
             panic!("expected single udp transport");

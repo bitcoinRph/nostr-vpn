@@ -32,7 +32,6 @@ use crate::config_magic_dns::{
     default_peer_aliases, detected_hostname, normalize_network_entry_id, uniquify_magic_dns_label,
     uniquify_network_entry_id, uses_default_node_name,
 };
-use crate::data_plane::{ExitDataPlane, PrivateDataPlane};
 use crate::network_roster::{
     canonical_npub_key, canonicalize_inbound_join_requests, canonicalize_outbound_join_request,
     normalize_inbound_join_requests, normalize_network_admins, normalize_npub_key,
@@ -41,19 +40,11 @@ use crate::network_roster::{
 use crate::network_routes::is_exit_node_route;
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::generate_keypair;
-
-/// Same defaults as hashtree's `DEFAULT_RELAYS`.
-pub const DEFAULT_RELAYS: &[&str] = &[
-    "wss://temp.iris.to",
-    "wss://relay.damus.io",
-    "wss://relay.snort.social",
-    "wss://relay.primal.net",
-];
+pub const DEFAULT_RELAYS: &[&str] = &[];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NostrConfig {
-    #[serde(default = "default_relays")]
+    #[serde(default, skip_serializing)]
     pub relays: Vec<String>,
     /// Nostr private identity key in `nsec` or hex format.
     #[serde(default)]
@@ -80,19 +71,12 @@ pub struct AppConfig {
     pub networks: Vec<NetworkConfig>,
     #[serde(default = "default_node_name")]
     pub node_name: String,
-    // Legacy field kept so older config files still deserialize cleanly.
-    #[serde(default, skip_serializing)]
-    pub auto_disconnect_relays_when_mesh_ready: bool,
     #[serde(default = "default_lan_discovery_enabled", skip_serializing)]
     pub lan_discovery_enabled: bool,
     #[serde(default = "default_launch_on_startup")]
     pub launch_on_startup: bool,
     #[serde(default = "default_autoconnect")]
     pub autoconnect: bool,
-    #[serde(default)]
-    pub private_data_plane: PrivateDataPlane,
-    #[serde(default)]
-    pub exit_data_plane: ExitDataPlane,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub fips_peer_endpoints: HashMap<String, Vec<String>>,
     #[serde(
@@ -215,12 +199,9 @@ impl Default for AppConfig {
                 shared_roster_signed_by: String::new(),
             }],
             node_name: default_node_name(),
-            auto_disconnect_relays_when_mesh_ready: false,
             lan_discovery_enabled: default_lan_discovery_enabled(),
             launch_on_startup: default_launch_on_startup(),
             autoconnect: default_autoconnect(),
-            private_data_plane: PrivateDataPlane::default(),
-            exit_data_plane: ExitDataPlane::default(),
             fips_peer_endpoints: HashMap::new(),
             fips_advertise_endpoint: default_fips_advertise_endpoint(),
             exit_node: String::new(),
@@ -251,10 +232,6 @@ impl Default for NatConfig {
 pub struct NodeConfig {
     #[serde(default = "default_node_id")]
     pub id: String,
-    #[serde(default)]
-    pub private_key: String,
-    #[serde(default)]
-    pub public_key: String,
     #[serde(default = "default_endpoint")]
     pub endpoint: String,
     #[serde(default = "default_tunnel_ip")]
@@ -269,11 +246,8 @@ pub struct NodeConfig {
 
 impl Default for NodeConfig {
     fn default() -> Self {
-        let key_pair = generate_keypair();
         Self {
             id: default_node_id(),
-            private_key: key_pair.private_key,
-            public_key: key_pair.public_key,
             endpoint: default_endpoint(),
             tunnel_ip: default_tunnel_ip(),
             listen_port: default_listen_port(),
@@ -286,14 +260,6 @@ impl Default for NodeConfig {
 impl AppConfig {
     pub fn generated() -> Self {
         Self::default()
-    }
-
-    pub fn private_mesh_uses_fips(&self) -> bool {
-        self.private_data_plane == PrivateDataPlane::Fips
-    }
-
-    pub fn wireguard_exit_enabled(&self) -> bool {
-        self.exit_data_plane == ExitDataPlane::WireGuard
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -323,7 +289,6 @@ impl AppConfig {
 
     pub fn ensure_defaults(&mut self) {
         self.ensure_nostr_identity();
-        self.auto_disconnect_relays_when_mesh_ready = false;
         let own_pubkey_hex = self.own_nostr_pubkey_hex().ok();
         if uses_default_node_name(&self.node_name, own_pubkey_hex.as_deref()) {
             let hostname = detected_hostname();
@@ -341,10 +306,6 @@ impl AppConfig {
         }
 
         self.magic_dns_suffix = normalize_magic_dns_suffix(&self.magic_dns_suffix);
-
-        if self.nostr.relays.is_empty() {
-            self.nostr.relays = default_relays();
-        }
 
         if self.node.id.trim().is_empty() {
             self.node.id = default_node_id();
@@ -375,11 +336,6 @@ impl AppConfig {
         self.node.advertised_routes = advertised_routes;
         self.node.advertise_exit_node = advertise_exit_node;
 
-        if self.node.private_key.trim().is_empty() || self.node.public_key.trim().is_empty() {
-            let key_pair = generate_keypair();
-            self.node.private_key = key_pair.private_key;
-            self.node.public_key = key_pair.public_key;
-        }
         self.exit_node = normalize_nostr_pubkey(self.exit_node.trim()).unwrap_or_default();
         if let Ok(own_pubkey) = self.own_nostr_pubkey_hex()
             && self.exit_node == own_pubkey
@@ -463,13 +419,7 @@ impl AppConfig {
         self.normalize_peer_aliases();
     }
 
-    fn apply_load_migrations(&mut self) {
-        // Release migration: private meshes moved from WireGuard to FIPS;
-        // WireGuard remains the default data plane for exit traffic.
-        if self.private_data_plane == PrivateDataPlane::WireGuard {
-            self.private_data_plane = PrivateDataPlane::Fips;
-        }
-    }
+    fn apply_load_migrations(&mut self) {}
 
     fn canonicalize_user_facing_pubkeys(&mut self) {
         self.nostr.public_key = canonical_npub_key(&self.nostr.public_key).unwrap_or_default();
@@ -1457,8 +1407,6 @@ fn next_shared_roster_updated_at(previous: u64) -> u64 {
 mod tests {
     use super::{AppConfig, normalize_nostr_pubkey};
     use crate::config_defaults::generate_nostr_identity;
-    use crate::data_plane::{ExitDataPlane, PrivateDataPlane};
-
     #[test]
     fn ensure_defaults_keeps_existing_public_identity_without_parsing_secret_key() {
         let (_, public_key) = generate_nostr_identity();
@@ -1474,30 +1422,6 @@ mod tests {
             public_key_hex
         );
         assert_eq!(config.nostr.secret_key, "not-a-secret-key");
-    }
-
-    #[test]
-    fn data_plane_defaults_use_fips_private_mesh_with_wireguard_exit() {
-        let config = AppConfig::default();
-
-        assert_eq!(config.private_data_plane, PrivateDataPlane::Fips);
-        assert_eq!(config.exit_data_plane, ExitDataPlane::WireGuard);
-    }
-
-    #[test]
-    fn data_plane_config_deserializes_fips_private_mesh_with_wireguard_exit() {
-        let mut config: AppConfig = toml::from_str(
-            r#"
-private_data_plane = "fips"
-exit_data_plane = "wireguard"
-"#,
-        )
-        .expect("config should parse");
-
-        config.ensure_defaults();
-
-        assert_eq!(config.private_data_plane, PrivateDataPlane::Fips);
-        assert_eq!(config.exit_data_plane, ExitDataPlane::WireGuard);
     }
 
     #[test]

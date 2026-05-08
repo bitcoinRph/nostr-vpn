@@ -1,29 +1,5 @@
 use super::*;
 
-pub(super) fn macos_route_get_spec_from_output(output: &str) -> Option<MacosRouteSpec> {
-    let mut gateway = None;
-    let mut interface = None;
-
-    for line in output.lines().map(str::trim) {
-        if let Some(value) = line.strip_prefix("gateway:") {
-            let value = value.trim();
-            if !value.is_empty() {
-                gateway = Some(value.to_string());
-            }
-        } else if let Some(value) = line.strip_prefix("interface:") {
-            let value = value.trim();
-            if !value.is_empty() {
-                interface = Some(value.to_string());
-            }
-        }
-    }
-
-    Some(MacosRouteSpec {
-        gateway,
-        interface: interface?,
-    })
-}
-
 pub(super) fn macos_default_routes_from_netstat(output: &str) -> Vec<MacosRouteSpec> {
     let mut routes = Vec::new();
 
@@ -102,12 +78,6 @@ pub(crate) fn macos_interface_names_from_ifconfig_list(output: &str) -> Vec<Stri
         .collect()
 }
 
-#[cfg(target_os = "macos")]
-pub(crate) fn macos_current_interface_names() -> Result<Vec<String>> {
-    let output = command_stdout_checked(ProcessCommand::new("ifconfig").arg("-l"))?;
-    Ok(macos_interface_names_from_ifconfig_list(&output))
-}
-
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn macos_ipconfig_router_from_output(output: &str) -> Option<Ipv4Addr> {
     for line in output.lines().map(str::trim) {
@@ -125,18 +95,6 @@ pub(crate) fn macos_ipconfig_router_from_output(output: &str) -> Option<Ipv4Addr
     }
 
     None
-}
-
-#[cfg(target_os = "macos")]
-pub(super) fn macos_default_route() -> Result<MacosRouteSpec> {
-    let output = command_stdout_checked(
-        ProcessCommand::new("route")
-            .arg("-n")
-            .arg("get")
-            .arg("default"),
-    )?;
-    macos_route_get_spec_from_output(&output)
-        .ok_or_else(|| anyhow!("failed to resolve macOS default route"))
 }
 
 #[cfg(target_os = "macos")]
@@ -282,66 +240,6 @@ pub(super) fn macos_default_routes() -> Result<Vec<MacosRouteSpec>> {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn macos_route_to_host(host: Ipv4Addr) -> Result<MacosRouteSpec> {
-    let output = command_stdout_checked(
-        ProcessCommand::new("route")
-            .arg("-n")
-            .arg("get")
-            .arg(host.to_string()),
-    )?;
-    macos_route_get_spec_from_output(&output)
-        .ok_or_else(|| anyhow!("failed to resolve macOS route for {host}"))
-}
-
-#[cfg(target_os = "macos")]
-pub(super) fn macos_bypass_route_specs(
-    app: &AppConfig,
-    peers: &[TunnelPeer],
-    tunnel_iface: &str,
-    original_default_route: Option<&MacosRouteSpec>,
-) -> Result<Vec<MacosEndpointBypassRoute>> {
-    let mut hosts = peers
-        .iter()
-        .filter_map(|peer| match endpoint_host_ip(&peer.endpoint) {
-            Some(IpAddr::V4(ip)) => Some(ip),
-            _ => None,
-        })
-        .chain(control_plane_bypass_ipv4_hosts(app))
-        .collect::<Vec<_>>();
-    hosts.sort_unstable();
-    hosts.dedup();
-
-    let mut routes = Vec::with_capacity(hosts.len());
-    for host in hosts {
-        let spec = macos_route_to_host(host)
-            .ok()
-            .filter(|spec| spec.interface != tunnel_iface)
-            .or_else(|| {
-                original_default_route
-                    .cloned()
-                    .filter(|spec| spec.interface != tunnel_iface)
-            })
-            .ok_or_else(|| anyhow!("failed to resolve macOS bypass route for {host}"))?;
-        routes.push(MacosEndpointBypassRoute {
-            target: format!("{host}/32"),
-            gateway: spec.gateway,
-            interface: spec.interface,
-        });
-    }
-
-    Ok(routes)
-}
-
-#[cfg(target_os = "macos")]
-pub(super) fn apply_macos_endpoint_bypass_route(route: &MacosEndpointBypassRoute) -> Result<()> {
-    apply_macos_route_spec(
-        &route.target,
-        route.gateway.as_deref(),
-        Some(route.interface.as_str()),
-    )
-}
-
-#[cfg(target_os = "macos")]
 pub(super) fn delete_macos_managed_route(
     target: &str,
     gateway: Option<&str>,
@@ -354,15 +252,6 @@ pub(super) fn delete_macos_managed_route(
     }
 
     delete_macos_route_spec(target, None)
-}
-
-#[cfg(target_os = "macos")]
-pub(super) fn delete_macos_endpoint_bypass_route(route: &MacosEndpointBypassRoute) -> Result<()> {
-    delete_macos_managed_route(
-        &route.target,
-        route.gateway.as_deref(),
-        Some(route.interface.as_str()),
-    )
 }
 
 #[cfg(target_os = "macos")]
@@ -581,72 +470,7 @@ pub(super) fn write_macos_ip_forward(enabled: bool) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn ensure_macos_ip_forwarding(
-    enabled: bool,
-    runtime: &mut MacosExitNodeRuntime,
-) -> Result<()> {
-    let previous = read_macos_ip_forward()?;
-    runtime.ipv4_forward_was_enabled = Some(previous);
-    if previous != enabled {
-        write_macos_ip_forward(enabled)?;
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
 const MACOS_PF_EXIT_ANCHOR: &str = "com.apple/to.nostrvpn/exit";
-
-#[cfg(target_os = "macos")]
-pub(super) fn macos_pf_enabled() -> Result<bool> {
-    Ok(
-        command_stdout_checked(ProcessCommand::new("pfctl").arg("-s").arg("info"))?
-            .lines()
-            .any(|line| line.to_ascii_lowercase().contains("status: enabled")),
-    )
-}
-
-#[cfg(target_os = "macos")]
-pub(super) fn ensure_macos_pf_nat(
-    outbound_iface: &str,
-    runtime: &mut MacosExitNodeRuntime,
-) -> Result<()> {
-    let pf_enabled = macos_pf_enabled()?;
-    runtime.pf_was_enabled = Some(pf_enabled);
-    if !pf_enabled {
-        run_checked(ProcessCommand::new("pfctl").arg("-E"))?;
-    }
-
-    let rule =
-        format!("nat on {outbound_iface} inet from 10.44.0.0/16 to any -> ({outbound_iface})\n");
-    let mut child = ProcessCommand::new("pfctl")
-        .arg("-a")
-        .arg(MACOS_PF_EXIT_ANCHOR)
-        .arg("-N")
-        .arg("-f")
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to spawn pfctl for macOS NAT rules")?;
-    child
-        .stdin
-        .as_mut()
-        .ok_or_else(|| anyhow!("missing pfctl stdin"))?
-        .write_all(rule.as_bytes())
-        .context("failed to write PF NAT rules")?;
-    let output = child
-        .wait_with_output()
-        .context("failed to wait for pfctl")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "pfctl failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout).trim(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(())
-}
 
 #[cfg(target_os = "macos")]
 pub(super) fn cleanup_macos_pf_nat() -> Result<()> {

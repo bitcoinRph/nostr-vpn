@@ -95,7 +95,10 @@ now="$(date +%s)"
   --node-name "alice" \
   --participant "$own_npub" \
   --participant "$bob_npub" \
-  --relay "ws://127.0.0.1:8080" >/dev/null
+  --endpoint "10.203.0.10:51820" \
+  --listen-port 51820 \
+  --fips-advertise-endpoint true \
+  --fips-peer-endpoint "$bob_npub=10.203.0.11:51820" >/dev/null
 
 tmp_config="$(mktemp)"
 awk '
@@ -129,7 +132,6 @@ case "\${1:-}" in
       "listen_port": 51820,
       "vpn_enabled": true,
       "vpn_active": true,
-      "relay_connected": true,
       "vpn_status": "FIPS private mesh ready",
       "expected_peer_count": 1,
       "connected_peer_count": 1,
@@ -149,8 +151,8 @@ case "\${1:-}" in
         "rx_bytes": 8192,
         "public_key": "",
         "advertised_routes": [],
-        "presence_timestamp": $now,
-        "last_signal_seen_at": $now,
+        "last_mesh_seen_at": $now,
+        "last_fips_seen_at": $now,
         "reachable": true,
         "last_handshake_at": $now,
         "error": null
