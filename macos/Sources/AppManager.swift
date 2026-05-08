@@ -492,7 +492,12 @@ final class AppManager: ObservableObject {
     private func fetchUpdateCheck() async throws -> UpdateCheck {
         let manifestUrl = await MainActor.run { self.updateManifestUrl }
         let data = try await loadUpdateData(from: manifestUrl)
-        let manifest = try JSONDecoder().decode(ReleaseManifest.self, from: data)
+        let manifest: ReleaseManifest
+        do {
+            manifest = try JSONDecoder().decode(ReleaseManifest.self, from: data)
+        } catch {
+            throw UpdateFetchError.malformedManifest
+        }
         let currentVersion = await MainActor.run { self.state.appVersion }
         let asset = manifest.preferredMacAsset()
         let assetUrl = asset.flatMap { URL(string: $0.path, relativeTo: manifestUrl)?.absoluteURL }
@@ -733,6 +738,23 @@ enum UpdateError: LocalizedError {
     }
 }
 
+enum UpdateFetchError: LocalizedError {
+    case httpStatus(code: Int)
+    case malformedManifest
+
+    var errorDescription: String? {
+        switch self {
+        case .httpStatus(let code):
+            if code == 404 {
+                return "No release manifest published yet."
+            }
+            return "Update server returned HTTP \(code)."
+        case .malformedManifest:
+            return "Update manifest is not valid JSON."
+        }
+    }
+}
+
 enum UpdateE2EError: LocalizedError {
     case noAsset
 
@@ -804,7 +826,30 @@ private func configuredUpdateManifestUrl() -> URL {
 }
 
 private func loadUpdateDataBlocking(from url: URL) throws -> Data {
-    try Data(contentsOf: url)
+    if url.isFileURL {
+        return try Data(contentsOf: url)
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    let semaphore = DispatchSemaphore(value: 0)
+    var resultData: Data?
+    var resultResponse: URLResponse?
+    var resultError: Error?
+    let task = URLSession.shared.dataTask(with: request) { data, response, error in
+        resultData = data
+        resultResponse = response
+        resultError = error
+        semaphore.signal()
+    }
+    task.resume()
+    semaphore.wait()
+    if let resultError {
+        throw resultError
+    }
+    if let http = resultResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+        throw UpdateFetchError.httpStatus(code: http.statusCode)
+    }
+    return resultData ?? Data()
 }
 
 private func downloadUpdateAssetBlocking(from assetUrl: URL) throws -> URL {
@@ -911,7 +956,10 @@ private func loadUpdateData(from url: URL) async throws -> Data {
     if url.isFileURL {
         return try Data(contentsOf: url)
     }
-    let (data, _) = try await URLSession.shared.data(from: url)
+    let (data, response) = try await URLSession.shared.data(from: url)
+    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+        throw UpdateFetchError.httpStatus(code: http.statusCode)
+    }
     return data
 }
 

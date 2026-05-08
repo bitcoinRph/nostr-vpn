@@ -18,7 +18,6 @@ struct RootView: View {
     @State private var networkNameDrafts: [String: String] = [:]
     @State private var participantAliasDrafts: [String: String] = [:]
     @State private var savedNetworksExpanded = false
-    @State private var advancedSettingsExpanded = false
     @State private var diagnosticsExpanded = false
     @State private var showingQrScanner = false
     @State private var selectedSidebarItem: SidebarItem? = .devices
@@ -112,18 +111,19 @@ struct RootView: View {
     }
 
     private var headerVpnControl: some View {
-        HStack(spacing: 10) {
-            if headerStatusDotVisible {
-                Circle()
-                    .fill(headerStatusColor)
-                    .frame(width: 7, height: 7)
-            }
+        HStack(spacing: 8) {
             Text(headerVpnStatusText)
                 .font(.caption2)
                 .foregroundStyle(headerStatusTextColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(width: 150, alignment: .trailing)
+                .frame(maxWidth: 150, alignment: .trailing)
+                .layoutPriority(1)
+            if headerStatusDotVisible {
+                Circle()
+                    .fill(headerStatusColor)
+                    .frame(width: 7, height: 7)
+            }
             headerVpnSwitch
         }
         .help(manager.vpnSwitchEnabled ? "Turn VPN off" : "Turn VPN on")
@@ -738,17 +738,7 @@ struct RootView: View {
             deviceSettings
             networkSettings
             systemSettings
-
-            disclosureSection(
-                title: "Advanced",
-                systemImage: "slider.horizontal.3",
-                isExpanded: $advancedSettingsExpanded
-            ) {
-                VStack(alignment: .leading, spacing: 14) {
-                    diagnosticsSection
-                }
-                .padding(.top, 8)
-            }
+            diagnosticsSection
         }
     }
 
@@ -926,8 +916,14 @@ struct RootView: View {
 
     private var systemSettings: some View {
         surface {
-            HStack {
+            HStack(spacing: 8) {
                 sectionHeader("System", systemImage: "gearshape.2")
+                if !state.appVersion.isEmpty {
+                    Text("v\(state.appVersion)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
                 Spacer()
                 if manager.serviceSettling || manager.updateChecking || manager.updateInstalling {
                     ProgressView()
@@ -942,7 +938,7 @@ struct RootView: View {
                     badge("Repair available", style: .warn)
                 }
                 badge(state.cliInstalled ? "CLI installed" : "CLI missing", style: state.cliInstalled ? .ok : .muted)
-                badge(manager.updateAvailable ? "Update \(manager.updateVersion)" : "Current", style: manager.updateAvailable ? .warn : .ok)
+                badge(manager.updateAvailable ? "Update \(manager.updateVersion)" : "Up to date", style: manager.updateAvailable ? .warn : .ok)
             }
 
             if manager.serviceRepairRecommended || !state.serviceStatusDetail.isEmpty || !manager.updateStatus.isEmpty {
@@ -978,37 +974,39 @@ struct RootView: View {
     }
 
     private var diagnosticsSection: some View {
-        disclosureSection(
-            title: "Diagnostics",
-            systemImage: "waveform.path.ecg",
-            isExpanded: $diagnosticsExpanded
-        ) {
-            VStack(alignment: .leading, spacing: 12) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), alignment: .leading)], alignment: .leading, spacing: 10) {
-                    metric("Interface", state.network.defaultInterface.isEmpty ? "unknown" : state.network.defaultInterface)
-                    metric("IPv4", state.network.primaryIpv4.isEmpty ? "-" : state.network.primaryIpv4)
-                    metric("IPv6", state.network.primaryIpv6.isEmpty ? "-" : state.network.primaryIpv6)
-                    metric("Gateway", firstNonEmpty(state.network.gatewayIpv4, state.network.gatewayIpv6, fallback: "unknown"))
-                    metric("Mapping", state.portMapping.activeProtocol.isEmpty ? "none" : state.portMapping.activeProtocol)
-                    metric("External", state.portMapping.externalEndpoint.isEmpty ? "stun/direct" : state.portMapping.externalEndpoint)
-                }
-                if state.health.isEmpty {
-                    emptyRow("No health warnings", systemImage: "checkmark.circle")
-                } else {
-                    ForEach(state.health, id: \.code) { issue in
-                        HStack(alignment: .top, spacing: 8) {
-                            badge(issue.severity, style: healthStyle(issue.severity))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(issue.summary)
-                                Text(issue.detail)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+        surface {
+            disclosureSection(
+                title: "Diagnostics",
+                systemImage: "waveform.path.ecg",
+                isExpanded: $diagnosticsExpanded
+            ) {
+                VStack(alignment: .leading, spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), alignment: .leading)], alignment: .leading, spacing: 10) {
+                        metric("Interface", state.network.defaultInterface.isEmpty ? "unknown" : state.network.defaultInterface)
+                        metric("IPv4", state.network.primaryIpv4.isEmpty ? "-" : state.network.primaryIpv4)
+                        metric("IPv6", state.network.primaryIpv6.isEmpty ? "-" : state.network.primaryIpv6)
+                        metric("Gateway", firstNonEmpty(state.network.gatewayIpv4, state.network.gatewayIpv6, fallback: "unknown"))
+                        metric("Mapping", state.portMapping.activeProtocol.isEmpty ? "none" : state.portMapping.activeProtocol)
+                        metric("External", state.portMapping.externalEndpoint.isEmpty ? "stun/direct" : state.portMapping.externalEndpoint)
+                    }
+                    if state.health.isEmpty {
+                        emptyRow("No health warnings", systemImage: "checkmark.circle")
+                    } else {
+                        ForEach(state.health, id: \.code) { issue in
+                            HStack(alignment: .top, spacing: 8) {
+                                badge(issue.severity, style: healthStyle(issue.severity))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(issue.summary)
+                                    Text(issue.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
                 }
+                .padding(.top, 8)
             }
-            .padding(.top, 8)
         }
     }
 
