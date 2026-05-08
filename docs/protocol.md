@@ -76,7 +76,7 @@ The daemon reports each peer with FIPS-specific state:
 
 NAT discovery remains a local endpoint aid:
 
-- reflectors and STUN servers can discover a public UDP endpoint
+- STUN servers can discover a public UDP endpoint
 - discovery is bound to the active listen port when possible
 - port-mapping state is surfaced in diagnostics
 

@@ -5,7 +5,6 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT_NAME="nostr-vpn-e2e-exit-node"
 COMPOSE=(docker compose -p "$PROJECT_NAME" -f "$ROOT_DIR/docker-compose.exit-node-e2e.yml")
 
-REFLECTOR_ADDR="198.51.100.3:3478"
 CONFIG_PATH="/root/.config/nvpn/config.toml"
 PUBLIC_INTERNET_TARGET="${NVPN_EXIT_NODE_E2E_PUBLIC_IP:-198.51.100.100}"
 
@@ -26,7 +25,7 @@ dump_debug() {
   set +e
   echo "exit-node docker e2e failed, collecting debug output..."
   "${COMPOSE[@]}" ps || true
-  for service in reflector internet-target nat-b node-a node-b; do
+  for service in internet-target nat-b node-a node-b; do
     echo "--- logs: $service ---"
     "${COMPOSE[@]}" logs --no-color --tail 120 "$service" || true
   done
@@ -114,9 +113,9 @@ ping_until_success() {
 cleanup
 
 "${COMPOSE[@]}" build >/dev/null
-"${COMPOSE[@]}" up -d reflector internet-target node-a nat-b >/dev/null
+"${COMPOSE[@]}" up -d internet-target node-a nat-b >/dev/null
 
-for service in reflector internet-target node-a nat-b; do
+for service in internet-target node-a nat-b; do
   wait_for_service "$service"
 done
 
@@ -157,8 +156,6 @@ fi
   --exit-node "$ALICE_NPUB" >/dev/null
 
 for node in node-a node-b; do
-  "${COMPOSE[@]}" exec -T "$node" sh -lc \
-    "sed -i 's|^reflectors = .*|reflectors = [\"$REFLECTOR_ADDR\"]|' '$CONFIG_PATH'"
   "${COMPOSE[@]}" exec -T "$node" sh -lc \
     "sed -i 's|^discovery_timeout_secs = .*|discovery_timeout_secs = 2|' '$CONFIG_PATH'"
 done
@@ -216,26 +213,11 @@ if [[ -z "$ALICE_TUNNEL_IP" || -z "$BOB_TUNNEL_IP" ]]; then
   exit 1
 fi
 
-REFLECTOR_ROUTE="$("${COMPOSE[@]}" exec -T node-b sh -lc "ip route get 198.51.100.3 | tr -d '\r'")"
 DEFAULT_ROUTE="$("${COMPOSE[@]}" exec -T node-b sh -lc "ip route show default | head -n1 | tr -d '\r'")"
-
-if grep -q 'dev utun100' <<<"$REFLECTOR_ROUTE"; then
-  echo "exit-node docker e2e failed: reflector route unexpectedly points into the tunnel" >&2
-  echo "$REFLECTOR_ROUTE"
-  exit 1
-fi
 
 if ! grep -q 'dev utun100' <<<"$DEFAULT_ROUTE"; then
   echo "exit-node docker e2e failed: default route did not switch to the tunnel" >&2
   echo "$DEFAULT_ROUTE"
-  exit 1
-fi
-
-if ! ping_until_success node-b 198.51.100.3 /tmp/nvpn-exit-node-reflector-ping.log; then
-  echo "exit-node docker e2e failed: client could not reach reflector on the preserved underlay path" >&2
-  if [[ -f /tmp/nvpn-exit-node-reflector-ping.log ]]; then
-    cat /tmp/nvpn-exit-node-reflector-ping.log
-  fi
   exit 1
 fi
 
@@ -255,15 +237,11 @@ if ! ping_until_success node-b "$PUBLIC_INTERNET_TARGET" /tmp/nvpn-exit-node-pub
   exit 1
 fi
 
-echo "--- Reflector route ---"
-echo "$REFLECTOR_ROUTE"
 echo "--- Default route ---"
 echo "$DEFAULT_ROUTE"
-echo "--- Reflector ping ---"
-cat /tmp/nvpn-exit-node-reflector-ping.log
 echo "--- Public internet route ---"
 echo "$PUBLIC_ROUTE"
 echo "--- Public internet ping ---"
 cat /tmp/nvpn-exit-node-public-ping.log
 
-echo "exit-node docker e2e passed: tunnel traffic reached the selected exit node, the default route switched into the tunnel, and control-plane traffic stayed on the underlay"
+echo "exit-node docker e2e passed: tunnel traffic reached the selected exit node and the default route switched into the tunnel"

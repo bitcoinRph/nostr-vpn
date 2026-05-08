@@ -7,7 +7,7 @@ use std::net::Ipv6Addr;
 #[cfg(target_os = "linux")]
 use std::net::ToSocketAddrs;
 #[cfg(target_os = "linux")]
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::process::Command as ProcessCommand;
 
@@ -318,23 +318,6 @@ fn stun_ipv4_hosts(app: &AppConfig) -> Vec<Ipv4Addr> {
 }
 
 #[cfg(target_os = "linux")]
-fn reflector_ipv4_hosts(app: &AppConfig) -> Vec<Ipv4Addr> {
-    let mut hosts = app
-        .nat
-        .reflectors
-        .iter()
-        .filter_map(|reflector| reflector.parse::<SocketAddr>().ok())
-        .filter_map(|addr| match addr.ip() {
-            IpAddr::V4(ip) => Some(ip),
-            IpAddr::V6(_) => None,
-        })
-        .collect::<Vec<_>>();
-    hosts.sort_unstable();
-    hosts.dedup();
-    hosts
-}
-
-#[cfg(target_os = "linux")]
 fn management_ipv4_hosts_from_interfaces(interfaces: &[NetworkInterface]) -> Vec<Ipv4Addr> {
     let mut hosts = interfaces
         .iter()
@@ -366,7 +349,6 @@ pub(crate) fn control_plane_bypass_ipv4_hosts_from_interfaces(
 ) -> Vec<Ipv4Addr> {
     let mut hosts = relay_bypass_ipv4_hosts(app);
     hosts.extend(stun_ipv4_hosts(app));
-    hosts.extend(reflector_ipv4_hosts(app));
     hosts.extend(management_ipv4_hosts_from_interfaces(interfaces));
     hosts.sort_unstable();
     hosts.dedup();

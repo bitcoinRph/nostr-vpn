@@ -115,7 +115,7 @@ fn successful_local_path_stops_sticking_after_subnet_change() {
 }
 
 #[test]
-fn benchmark_net_local_path_stops_sticking_after_public_reflector_path_appears() {
+fn benchmark_net_local_path_stops_sticking_after_public_path_appears() {
     let mut paths = PeerPathBook::default();
     let announcement = announcement(
         "10.254.241.10:51820",
@@ -130,7 +130,7 @@ fn benchmark_net_local_path_stops_sticking_after_public_reflector_path_appears()
 
     let selected = paths
         .select_endpoint("peer-a", &announcement, Some("10.44.202.86:51820"), 12, 5)
-        .expect("public reflector path after local-only route change");
+        .expect("public path after local-only route change");
 
     assert_eq!(selected, "10.254.241.10:51820");
 }

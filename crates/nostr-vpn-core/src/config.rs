@@ -517,8 +517,6 @@ pub struct NatConfig {
     pub enabled: bool,
     #[serde(default = "default_nat_stun_servers")]
     pub stun_servers: Vec<String>,
-    #[serde(default)]
-    pub reflectors: Vec<String>,
     #[serde(default = "default_nat_discovery_timeout_secs")]
     pub discovery_timeout_secs: u64,
 }
@@ -635,7 +633,6 @@ impl Default for NatConfig {
         Self {
             enabled: default_nat_enabled(),
             stun_servers: default_nat_stun_servers(),
-            reflectors: Vec::new(),
             discovery_timeout_secs: default_nat_discovery_timeout_secs(),
         }
     }

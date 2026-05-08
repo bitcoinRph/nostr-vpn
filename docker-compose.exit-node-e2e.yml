@@ -1,15 +1,4 @@
 services:
-  reflector:
-    build:
-      context: .
-      dockerfile: Dockerfile.e2e
-      additional_contexts:
-        fips: ../fips
-    command: ["nvpn-reflector", "--bind", "0.0.0.0:3478"]
-    networks:
-      internet:
-        ipv4_address: 198.51.100.3
-
   internet-target:
     build:
       context: .
@@ -51,8 +40,6 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
-    depends_on:
-      - reflector
     networks:
       internet:
         ipv4_address: 198.51.100.10
@@ -101,7 +88,6 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     depends_on:
-      - reflector
       - nat-b
     networks:
       private-b:

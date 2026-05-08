@@ -28,14 +28,13 @@ It currently ships:
 | Component | Purpose |
 | --- | --- |
 | `nvpn` | Main CLI for config, daemon lifecycle, networking, diagnostics, and tunnel sessions |
-| `nvpn-reflector` | Minimal UDP reflector used for NAT discovery and hole-punch testing |
 | `nostr-vpn-core` | Shared library for config, FIPS control state, NAT helpers, diagnostics, and MagicDNS |
 | `nostr-vpn-app-core` | Native app state/action contract and UniFFI bridge used by the Rust-core/native-front rewrite |
 | `macos` | SwiftUI/AppKit native shell over `nostr-vpn-app-core` |
 
 ## Protocol
 
-For the current protocol-level description of invites, admin roster sync, NAT discovery, and the FIPS mesh data plane, see [docs/protocol.md](docs/protocol.md).
+For the current protocol-level description of invites, admin roster sync, and the FIPS mesh data plane, see [docs/protocol.md](docs/protocol.md).
 
 Private mesh traffic defaults to [FIPS](https://github.com/mmalmi/fips). `nvpn` uses the configured VPN participants as the overlay route map, but FIPS connectivity is a separate underlay: FIPS peers can be found through Nostr discovery or supplied as configured `fips_peer_endpoints`, and those FIPS peers may relay packets even when they are not members of the same VPN. `nvpn` still only admits private traffic for the active network roster.
 
@@ -74,7 +73,7 @@ The config contains:
 
 - global app settings such as autoconnect, tray behavior, and MagicDNS suffix
 - Nostr settings used by FIPS discovery, including relay URLs and identity keys
-- NAT settings including STUN servers, reflectors, and discovery timeout
+- NAT settings including STUN servers and discovery timeout
 - node settings including endpoint, tunnel IP, listen port, and advertised routes
 - a `[[networks]]` list of named participant sets with one active network at a time
 
@@ -146,7 +145,7 @@ just run
 If you only want the CLI and test binaries:
 
 ```bash
-cargo build -p nostr-vpn-cli -p nostr-vpn-reflector
+cargo build -p nostr-vpn-cli
 ```
 
 ## Install `nvpn`
@@ -308,8 +307,6 @@ Lower-level commands:
 - `remove-participant`
 - `add-admin`
 - `remove-admin`
-- `nat-discover`
-- `hole-punch`
 - `ping`
 - `ip`
 - `whois`
@@ -330,18 +327,6 @@ Notes:
 - mobile shells will own their platform VPN runtime bridges while sharing the same Rust app contract
 - the legacy Tauri/Svelte app was removed after the native rewrite became the canonical architecture
 
-## Local NAT test binary
-
-For local integration testing:
-
-Run a UDP reflector:
-
-```bash
-cargo run -p nostr-vpn-reflector --bin nvpn-reflector -- --bind 127.0.0.1:3478
-```
-
-The reflector is used by `nvpn nat-discover` and `nvpn hole-punch` in local and Docker e2e setups.
-
 ## Docker end-to-end coverage
 
 Docker e2e scripts under [`scripts/`](scripts):
@@ -354,12 +339,8 @@ Docker e2e scripts under [`scripts/`](scripts):
   Verifies that inactive saved networks do not change the active mesh identity, expected peer count, or auto-derived tunnel IP.
 - `./scripts/e2e-divergent-roster-docker.sh`
   Verifies that peers with a shared mesh ID can still connect when one node has extra configured participants.
-- `./scripts/e2e-nat-docker.sh`
-  Verifies daemon mode across separate Docker NATs, public endpoint discovery, handshake success, and ping.
 - `./scripts/e2e-exit-node-docker.sh`
   Verifies exit-node advertisement, selection, tunnel traffic to the chosen exit node, and default-route traffic crossing the exit path to an external target. Set `NVPN_EXIT_NODE_E2E_PUBLIC_IP=9.9.9.9` (or another reachable public IP) to also prove a real internet hop routes through the tunnel.
-- `./scripts/e2e-wireguard-exit-node-docker.sh`
-  Verifies that a FIPS exit-node provider routes forwarded member traffic and its own default internet traffic through the WireGuard upstream while keeping the WireGuard peer endpoint on the underlay.
 These flows are Linux-oriented because they require real tunnel devices and container networking privileges.
 
 ## Desktop update end-to-end coverage
@@ -386,7 +367,6 @@ The update E2E scripts set `NVPN_UPDATE_MANIFEST_URL` to a local fixture and sup
 - [`crates/nostr-vpn-cli`](crates/nostr-vpn-cli): `nvpn` CLI and daemon implementation
 - [`crates/nostr-vpn-app-core`](crates/nostr-vpn-app-core): native app state/action contract and UniFFI bridge
 - [`macos`](macos), [`linux`](linux), [`windows`](windows), [`android`](android), [`ios`](ios): native platform shells
-- [`crates/nostr-vpn-reflector`](crates/nostr-vpn-reflector): NAT discovery and hole-punch reflector binary
 - [`scripts`](scripts): build, release, Docker e2e, and desktop updater e2e entrypoints
 
 ## Release workflow notes
