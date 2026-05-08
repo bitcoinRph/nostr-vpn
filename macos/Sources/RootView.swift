@@ -11,8 +11,6 @@ struct RootView: View {
     @State private var listenPort = ""
     @State private var magicDnsSuffix = ""
     @State private var wireguardExitConfig = ""
-    @State private var participantInput = ""
-    @State private var participantAliasInput = ""
     @State private var networkNameInput = ""
     @State private var deviceSearch = ""
     @State private var exitNodeSearch = ""
@@ -367,7 +365,7 @@ struct RootView: View {
             if let participant = selectedParticipant(in: network) {
                 VStack(alignment: .leading, spacing: 22) {
                     deviceDetailHeader(participant, network: network)
-                    if network.localIsAdmin {
+                    if network.localIsAdmin && !isSelf(participant) {
                         deviceAdminSection(participant, network: network)
                     }
                     deviceAddressesSection(participant)
@@ -430,41 +428,23 @@ struct RootView: View {
 
     private func deviceAdminSection(_ participant: NativeParticipantState, network: NativeNetworkState) -> some View {
         surface {
-            sectionHeader("Admin Actions", systemImage: "person.badge.key")
+            sectionHeader("Manage Device", systemImage: "person.badge.key")
 
             HStack(spacing: 8) {
-                TextField("Device ID", text: $participantInput)
-                    .onSubmit(addParticipantToActiveNetwork)
-                TextField("Name", text: $participantAliasInput)
-                    .frame(maxWidth: 160)
-                    .onSubmit(addParticipantToActiveNetwork)
+                label("Name")
+                TextField("Name", text: participantAliasBinding(participant))
                 Button {
-                    addParticipantToActiveNetwork()
+                    manager.setParticipantAlias(
+                        npub: participant.npub,
+                        alias: participantAliasDrafts[participant.pubkeyHex] ?? participant.magicDnsAlias
+                    )
                 } label: {
-                    Label("Add", systemImage: "plus")
+                    Label("Save", systemImage: "checkmark")
                 }
-                .disabled(participantInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || manager.actionInFlight)
+                .disabled(manager.actionInFlight)
             }
 
-            if !isSelf(participant) {
-                Divider()
-
-                HStack(spacing: 8) {
-                    label("Name")
-                    TextField("Name", text: participantAliasBinding(participant))
-                    Button {
-                        manager.setParticipantAlias(
-                            npub: participant.npub,
-                            alias: participantAliasDrafts[participant.pubkeyHex] ?? participant.magicDnsAlias
-                        )
-                    } label: {
-                        Label("Save", systemImage: "checkmark")
-                    }
-                    .disabled(manager.actionInFlight)
-                }
-
-                deviceActionButtons(participant, network: network)
-            }
+            deviceActionButtons(participant, network: network)
         }
     }
 
@@ -1149,15 +1129,6 @@ struct RootView: View {
             get: { participantAliasDrafts[participant.pubkeyHex] ?? participant.magicDnsAlias },
             set: { participantAliasDrafts[participant.pubkeyHex] = $0 }
         )
-    }
-
-    private func addParticipantToActiveNetwork() {
-        guard let network = activeNetwork else {
-            return
-        }
-        manager.addParticipant(networkId: network.id, npub: participantInput, alias: participantAliasInput)
-        participantInput = ""
-        participantAliasInput = ""
     }
 
     private func addNetwork() {
