@@ -359,6 +359,27 @@ final class AppManager: ObservableObject {
         dispatch(.updateSettings(patch: settingsPatch(exitNode: npub)), status: "Saving exit node")
     }
 
+    func selectDirectExit() {
+        dispatch(
+            .updateSettings(patch: settingsPatch(exitNode: "", wireguardExitEnabled: false)),
+            status: "Saving exit node"
+        )
+    }
+
+    func selectWireGuardUpstreamExit() {
+        dispatch(
+            .updateSettings(patch: settingsPatch(exitNode: "", wireguardExitEnabled: true)),
+            status: "Saving exit node"
+        )
+    }
+
+    func selectPeerExit(_ npub: String) {
+        dispatch(
+            .updateSettings(patch: settingsPatch(exitNode: npub, wireguardExitEnabled: false)),
+            status: "Saving exit node"
+        )
+    }
+
     func setExitNodeLeakProtection(_ enabled: Bool) {
         dispatch(.updateSettings(patch: settingsPatch(exitNodeLeakProtection: enabled)), status: "Saving exit protection")
     }

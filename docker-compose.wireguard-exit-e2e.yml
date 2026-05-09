@@ -1,0 +1,79 @@
+services:
+  # 203.0.113.0/24 is reachable only through wg-upstream's public-side eth.
+  # Without the WireGuard tunnel, node-a cannot reach this host, so any
+  # successful ping to it proves traffic is going through the WG upstream.
+  internet-target:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      additional_contexts:
+        fips: ../fips
+    cap_add:
+      - NET_ADMIN
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      public:
+        ipv4_address: 203.0.113.100
+
+  wg-upstream:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      additional_contexts:
+        fips: ../fips
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.forwarding=1
+      - net.ipv4.conf.default.forwarding=1
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      internet:
+        ipv4_address: 198.51.100.20
+      public:
+        ipv4_address: 203.0.113.20
+
+  node-a:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      additional_contexts:
+        fips: ../fips
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      internet:
+        ipv4_address: 198.51.100.10
+
+  node-b:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      additional_contexts:
+        fips: ../fips
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      internet:
+        ipv4_address: 198.51.100.11
+
+networks:
+  internet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 198.51.100.0/24
+  public:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 203.0.113.0/24

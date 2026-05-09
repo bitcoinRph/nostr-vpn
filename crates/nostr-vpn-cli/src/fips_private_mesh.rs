@@ -1305,6 +1305,12 @@ impl FipsPrivateTunnelRuntime {
         exit_node_leak_protection: bool,
     ) {
         let mut route_families = crate::linux_exit_node_default_route_families(routes);
+        // WG upstream selected as this device's own egress (Mullvad/Proton-style):
+        // bring up the tunnel and replace this node's default route even when we
+        // are not advertising ourselves as an exit for the mesh.
+        if !route_families.ipv4 && wireguard_exit.enabled && wireguard_exit.configured() {
+            route_families.ipv4 = true;
+        }
         if !route_families.ipv4 && !route_families.ipv6 {
             self.reconcile_linux_exit_node_forwarding_cleanup();
             return;

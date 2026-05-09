@@ -21,7 +21,13 @@ struct RootView: View {
     @State private var diagnosticsExpanded = false
     @State private var showingQrScanner = false
     @State private var selectedSidebarItem: SidebarItem? = .devices
-    @State private var lastSyncedRev: UInt64 = 0
+    @State private var lastSyncedNodeName = ""
+    @State private var lastSyncedEndpoint = ""
+    @State private var lastSyncedTunnelIp = ""
+    @State private var lastSyncedListenPort: UInt32 = 0
+    @State private var lastSyncedMagicDnsSuffix = ""
+    @State private var lastSyncedWireguardExitConfig: String? = nil
+    @State private var wireguardExitExpanded = false
 
     private var state: NativeAppState {
         manager.state
@@ -688,20 +694,29 @@ struct RootView: View {
                     routeChoice(
                         title: "Direct",
                         subtitle: "Use normal internet routing",
-                        selected: state.exitNode.isEmpty,
+                        selected: !state.wireguardExitEnabled && state.exitNode.isEmpty,
                         enabled: true
                     ) {
-                        manager.setExitNode("")
+                        manager.selectDirectExit()
+                    }
+
+                    routeChoice(
+                        title: "WireGuard upstream",
+                        subtitle: wireguardUpstreamSubtitle,
+                        selected: state.wireguardExitEnabled,
+                        enabled: state.wireguardExitConfigured
+                    ) {
+                        manager.selectWireGuardUpstreamExit()
                     }
 
                     ForEach(exitNodeCandidates(network), id: \.pubkeyHex) { participant in
                         routeChoice(
                             title: deviceName(participant),
                             subtitle: participant.offersExitNode ? participant.statusText : "Exit not offered",
-                            selected: state.exitNode == participant.npub,
+                            selected: !state.wireguardExitEnabled && state.exitNode == participant.npub,
                             enabled: participant.offersExitNode
                         ) {
-                            manager.setExitNode(participant.npub)
+                            manager.selectPeerExit(participant.npub)
                         }
                     }
                 }
@@ -722,6 +737,17 @@ struct RootView: View {
             }
             wireGuardExitSettings
         }
+    }
+
+    private var wireguardUpstreamSubtitle: String {
+        if !state.wireguardExitConfigured {
+            return "Paste a config below to enable"
+        }
+        let endpoint = state.wireguardExitEndpoint
+        if endpoint.isEmpty {
+            return "Configured"
+        }
+        return "via \(endpoint)"
     }
 
     private func routeChoice(
@@ -808,34 +834,37 @@ struct RootView: View {
 
     private var wireGuardExitSettings: some View {
         surface {
-            sectionHeader("WireGuard Upstream", systemImage: "network")
-            Text("Paste a WireGuard config from an upstream VPN provider such as Mullvad or Proton VPN.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            disclosureSection(
+                title: "Configure WireGuard Upstream",
+                systemImage: "network",
+                isExpanded: $wireguardExitExpanded,
+                font: .headline
+            ) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Paste a WireGuard config from an upstream VPN provider such as Mullvad or Proton VPN.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-            Toggle("Use WireGuard upstream", isOn: Binding(
-                get: { state.wireguardExitEnabled },
-                set: { manager.setWireGuardExitEnabled($0) }
-            ))
-            .disabled(manager.actionInFlight)
+                    TextEditor(text: $wireguardExitConfig)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 180)
+                        .padding(6)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color(nsColor: .separatorColor))
+                        )
 
-            TextEditor(text: $wireguardExitConfig)
-                .font(.system(.body, design: .monospaced))
-                .frame(minHeight: 180)
-                .padding(6)
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(nsColor: .separatorColor))
-                )
-
-            Button {
-                manager.saveWireGuardExitConfig(wireguardExitConfig)
-            } label: {
-                Label("Save WireGuard", systemImage: "checkmark")
+                    Button {
+                        manager.saveWireGuardExitConfig(wireguardExitConfig)
+                    } label: {
+                        Label("Save", systemImage: "checkmark")
+                    }
+                    .disabled(manager.actionInFlight)
+                }
+                .padding(.top, 6)
             }
-            .disabled(manager.actionInFlight)
         }
     }
 
@@ -1155,21 +1184,43 @@ struct RootView: View {
     }
 
     private func syncDrafts() {
-        guard lastSyncedRev != state.rev else {
-            return
+        if state.nodeName != lastSyncedNodeName {
+            nodeName = state.nodeName
+            lastSyncedNodeName = state.nodeName
         }
-        lastSyncedRev = state.rev
-        nodeName = state.nodeName
-        endpoint = state.endpoint
-        tunnelIp = state.tunnelIp
-        listenPort = String(state.listenPort)
-        magicDnsSuffix = state.magicDnsSuffix
-        wireguardExitConfig = state.wireguardExitConfig
+        if state.endpoint != lastSyncedEndpoint {
+            endpoint = state.endpoint
+            lastSyncedEndpoint = state.endpoint
+        }
+        if state.tunnelIp != lastSyncedTunnelIp {
+            tunnelIp = state.tunnelIp
+            lastSyncedTunnelIp = state.tunnelIp
+        }
+        if state.listenPort != lastSyncedListenPort {
+            listenPort = String(state.listenPort)
+            lastSyncedListenPort = state.listenPort
+        }
+        if state.magicDnsSuffix != lastSyncedMagicDnsSuffix {
+            magicDnsSuffix = state.magicDnsSuffix
+            lastSyncedMagicDnsSuffix = state.magicDnsSuffix
+        }
+        if lastSyncedWireguardExitConfig != state.wireguardExitConfig {
+            let firstSync = lastSyncedWireguardExitConfig == nil
+            wireguardExitConfig = state.wireguardExitConfig
+            lastSyncedWireguardExitConfig = state.wireguardExitConfig
+            if firstSync && !state.wireguardExitConfigured {
+                wireguardExitExpanded = true
+            }
+        }
 
         for network in state.networks {
-            networkNameDrafts[network.id] = network.name
+            if networkNameDrafts[network.id] == nil {
+                networkNameDrafts[network.id] = network.name
+            }
             for participant in network.participants {
-                participantAliasDrafts[participant.pubkeyHex] = participant.magicDnsAlias
+                if participantAliasDrafts[participant.pubkeyHex] == nil {
+                    participantAliasDrafts[participant.pubkeyHex] = participant.magicDnsAlias
+                }
             }
         }
 

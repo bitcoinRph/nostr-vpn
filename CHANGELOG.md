@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- macOS Exit Nodes page: WireGuard upstream config textarea no longer wipes itself out every ~1s while typing. Each draft field (node name, endpoint, tunnel IP, listen port, MagicDNS suffix, WireGuard config) now syncs from upstream only when its own upstream value actually changes, instead of on every state-rev tick. Network-name and participant-alias drafts get the same treatment so in-flight edits survive periodic refreshes.
+- Linux daemon: WireGuard upstream now activates as the local node's own egress when `wireguard_exit.enabled` is set, even if the node is not advertising itself as a mesh exit. Previously the WG tunnel was only brought up when the node was serving as an exit for the rest of the mesh, so toggling "Use WireGuard upstream" alone routed nothing through it.
+
+### Changed
+
+- macOS Exit Nodes page: WireGuard upstream now appears as a radio item in the same exit-target list as Direct and mesh peer exits, so the three options are mutually exclusive and visually unified. The standalone "Use WireGuard upstream" toggle is gone — selecting the radio enables it, selecting Direct or a peer disables it. The paste-config card moves to a "Configure WireGuard Upstream" disclosure that auto-expands on first run when no config has been pasted yet.
+
+### Added
+
+- `scripts/e2e-wireguard-exit-docker.sh` + `docker-compose.wireguard-exit-e2e.yml` (`just e2e-wireguard-exit`) verify on Linux that an nvpn node with `wireguard_exit.enabled=true` and no advertised exit routes still routes its own internet traffic through the WireGuard upstream tunnel. The test puts the internet target on a separate subnet only reachable via the WG upstream's public-side eth, so any successful ping proves the tunnel is actually carrying the traffic, and a packet counter on the target confirms the source IP was MASQUERADEd to the upstream's public IP rather than leaking out the local bridge.
+
 ## 4.0.9 - 2026-05-09
 
 ### Changed

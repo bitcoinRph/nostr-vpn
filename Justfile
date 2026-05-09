@@ -49,6 +49,7 @@ info:
     @echo "  just e2e-fips-routed-udp"
     @echo "  just e2e-lan-pairing"
     @echo "  just e2e-roster-admin"
+    @echo "  just e2e-wireguard-exit"
 
 run:
     @case "$(uname -s)" in \
@@ -150,3 +151,6 @@ e2e-lan-pairing:
 
 e2e-roster-admin:
     ./scripts/e2e-roster-admin-docker.sh
+
+e2e-wireguard-exit:
+    ./scripts/e2e-wireguard-exit-docker.sh
