@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.7 - 2026-05-09
+
+### Fixed
+
+- Bumped fips-endpoint to `38babf8` to pick up four upstream data-path fixes: nostr peers running an unspeakable FMP version no longer trigger a per-minute STUN-offer-answer-punch retry storm; proactive `PathMtuNotification` now feeds the path-MTU lookup so new TCP flows on long-lived paths use up-to-date MSS clamping; mid-chain ancestor swaps in deep mesh trees propagate to leaf coords (was 100% loss to non-parent destinations until depth or parent also changed); dead `SessionSetup`/`SessionAck` variants removed.
+
 ## 4.0.6 - 2026-05-09
 
 ### Fixed
