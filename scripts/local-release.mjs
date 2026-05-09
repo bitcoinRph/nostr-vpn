@@ -386,7 +386,7 @@ function buildWindowsArtifacts({ env, tag, dryRun, builtLines }) {
 
   const llvmBin = env.NVPN_WINDOWS_LLVM_BIN || 'C:\\Program Files\\LLVM\\bin'
   const targets = splitCsv(
-    env.NVPN_WINDOWS_CLI_TARGETS || 'x86_64-pc-windows-msvc,aarch64-pc-windows-msvc',
+    env.NVPN_WINDOWS_CLI_TARGETS || 'x86_64-pc-windows-msvc',
   )
   const guestDist = `${guestRepo}\\dist`
   const guestRepoQuoted = psQuote(guestRepo)
