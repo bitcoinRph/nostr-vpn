@@ -70,6 +70,10 @@ public sealed class TrayService : IDisposable
             viewModel.State.VpnControlSupported && !viewModel.ActionInFlight);
         vpnToggle.Checked = viewModel.State.VpnEnabled;
         menu.Items.Add(vpnToggle);
+        // Status subtitle right below the toggle, mirrors the macOS row's
+        // second line and reuses the same VpnStatusText that the header
+        // shows in the main window.
+        menu.Items.Add(Item(viewModel.VpnStatusText, (_, _) => { }, false));
 
         menu.Items.Add(new ToolStripSeparator());
 

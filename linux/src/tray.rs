@@ -429,15 +429,17 @@ fn build_menu(state: &NativeAppState) -> MenuNode {
             state.vpn_enabled,
             TrayCommand::ToggleVpn,
         ),
-        separator(2),
-        label_node(3, &device_display_name(state), false),
+        // Status subtitle right below the toggle, mirrors macOS subtitle line.
+        label_node(2, &vpn_status_text(state), false),
+        separator(3),
+        label_node(4, &device_display_name(state), false),
         item(
-            4,
+            5,
             "Copy Device ID",
             !state.own_npub.is_empty(),
             TrayCommand::CopyDeviceId,
         ),
-        separator(5),
+        separator(6),
     ];
 
     if let Some(network) = active_network(state) {
@@ -641,6 +643,37 @@ fn find_menu_node(node: &MenuNode, id: i32) -> Option<&MenuNode> {
     node.children
         .iter()
         .find_map(|child| find_menu_node(child, id))
+}
+
+/// Mirrors `AppManager.vpnStatusText` on macOS so the header and tray
+/// surface the same status string. Linux currently has no dispatch-action
+/// status field, so the actionInFlight branch is omitted.
+pub fn vpn_status_text(state: &NativeAppState) -> String {
+    if state.exit_node_blocked {
+        return if state.exit_node_status_text.trim().is_empty() {
+            "Internet blocked".to_string()
+        } else {
+            state.exit_node_status_text.clone()
+        };
+    }
+    if state.exit_node_active && !state.exit_node_status_text.trim().is_empty() {
+        return state.exit_node_status_text.clone();
+    }
+    if state.vpn_active {
+        return if state.vpn_status.trim().is_empty() {
+            "VPN on".to_string()
+        } else {
+            state.vpn_status.clone()
+        };
+    }
+    if state.vpn_enabled {
+        return if state.vpn_status.trim().is_empty() {
+            "Turning on".to_string()
+        } else {
+            state.vpn_status.clone()
+        };
+    }
+    "Off".to_string()
 }
 
 fn device_display_name(state: &NativeAppState) -> String {

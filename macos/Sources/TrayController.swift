@@ -329,7 +329,7 @@ private struct MenuSnapshot: Equatable {
         return MenuSnapshot(
             vpnEnabled: state.vpnEnabled,
             vpnTogglable: !manager.actionInFlight && state.vpnControlSupported,
-            vpnStatusText: vpnSubtitle(for: state, actionInFlight: manager.actionInFlight),
+            vpnStatusText: manager.vpnStatusText,
             deviceName: resolveDeviceName(from: state),
             deviceIdValue: state.ownNpub,
             networkTitle: networkTitle,
@@ -341,19 +341,6 @@ private struct MenuSnapshot: Equatable {
             tooltip: tooltip
         )
     }
-}
-
-private func vpnSubtitle(for state: NativeAppState, actionInFlight: Bool) -> String {
-    if actionInFlight, !state.vpnStatus.isEmpty {
-        return state.vpnStatus
-    }
-    if state.vpnActive {
-        return "Connected"
-    }
-    if state.vpnEnabled, !state.vpnStatus.isEmpty {
-        return state.vpnStatus
-    }
-    return state.vpnEnabled ? "Connecting…" : "Off"
 }
 
 private func resolveDeviceName(from state: NativeAppState) -> String {

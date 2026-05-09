@@ -1170,25 +1170,7 @@ struct RootView: View {
     }
 
     private var headerVpnStatusText: String {
-        if manager.actionInFlight, !manager.actionStatus.isEmpty {
-            return manager.actionStatus
-        }
-        if state.exitNodeBlocked {
-            return state.exitNodeStatusText.isEmpty ? "Internet blocked" : state.exitNodeStatusText
-        }
-        if state.exitNodeActive, !state.exitNodeStatusText.isEmpty {
-            return state.exitNodeStatusText
-        }
-        if state.vpnActive {
-            return state.vpnStatus.isEmpty ? "VPN on" : state.vpnStatus
-        }
-        if state.vpnEnabled {
-            return state.vpnStatus.isEmpty ? "Turning on" : state.vpnStatus
-        }
-        if manager.serviceRepairRecommended {
-            return "Service needs repair"
-        }
-        return "Off"
+        manager.vpnStatusText
     }
 
     private var headerStatusDotVisible: Bool {

@@ -76,6 +76,30 @@ final class AppManager: ObservableObject {
         state.vpnEnabled
     }
 
+    /// Status line shown next to the VPN switch in the header and the tray.
+    /// Single source of truth so both stay in sync.
+    var vpnStatusText: String {
+        if actionInFlight, !actionStatus.isEmpty {
+            return actionStatus
+        }
+        if state.exitNodeBlocked {
+            return state.exitNodeStatusText.isEmpty ? "Internet blocked" : state.exitNodeStatusText
+        }
+        if state.exitNodeActive, !state.exitNodeStatusText.isEmpty {
+            return state.exitNodeStatusText
+        }
+        if state.vpnActive {
+            return state.vpnStatus.isEmpty ? "VPN on" : state.vpnStatus
+        }
+        if state.vpnEnabled {
+            return state.vpnStatus.isEmpty ? "Turning on" : state.vpnStatus
+        }
+        if Self.serviceRepairRecommended(in: state) {
+            return "Service needs repair"
+        }
+        return "Off"
+    }
+
     var updateInstallEnabled: Bool {
         updateAvailable && updateAssetUrl != nil && !updateChecking && !updateInstalling
     }

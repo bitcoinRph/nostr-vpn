@@ -276,6 +276,8 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public string ActiveNetworkName => DisplayNetworkName(ActiveNetwork);
     public string HeroSubtitle => $"{State.ConnectedPeerCount} of {State.ExpectedPeerCount} connected";
     public string VpnButtonText => State.VpnEnabled ? "On" : "Off";
+    /// Mirrors `AppManager.vpnStatusText` on macOS so the header and the tray
+    /// surface the same status string across platforms.
     public string VpnStatusText
     {
         get
@@ -294,7 +296,15 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             {
                 return State.ExitNodeStatusText;
             }
-            return State.VpnStatus;
+            if (State.VpnActive)
+            {
+                return string.IsNullOrWhiteSpace(State.VpnStatus) ? "VPN on" : State.VpnStatus;
+            }
+            if (State.VpnEnabled)
+            {
+                return string.IsNullOrWhiteSpace(State.VpnStatus) ? "Turning on" : State.VpnStatus;
+            }
+            return "Off";
         }
     }
     public Brush HeaderStatusBrush => State.ExitNodeBlocked
