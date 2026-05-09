@@ -392,18 +392,20 @@ private struct SubmenuClickPayload<T: Equatable>: AnySubmenuClickPayload {
 // MARK: - VPN toggle row view
 
 /// Custom NSView used as the first menu item: a brand-style row with a
-/// title, a status subtitle, and a real NSSwitch on the right. NSSwitch is
-/// the platform-native toggle widget — same control class used in
-/// Tailscale's menu bar item, System Settings, etc.
+/// title, a status subtitle, and a capsule toggle on the right. The capsule
+/// is hand-drawn (rather than NSSwitch) so it tracks the same
+/// `controlAccentColor` blue as the in-app header switch in RootView,
+/// regardless of macOS version or user accent settings.
 @MainActor
 private final class VpnToggleItemView: NSView {
     let titleLabel = NSTextField(labelWithString: "VPN")
     let subtitleLabel = NSTextField(labelWithString: "")
-    let toggle = NSSwitch()
+    let toggle: CapsuleSwitch
     private let onToggle: () -> Void
 
     init(onToggle: @escaping () -> Void) {
         self.onToggle = onToggle
+        self.toggle = CapsuleSwitch()
         super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 44))
         autoresizingMask = .width
 
@@ -423,8 +425,7 @@ private final class VpnToggleItemView: NSView {
         addSubview(stack)
 
         toggle.translatesAutoresizingMaskIntoConstraints = false
-        toggle.target = self
-        toggle.action = #selector(handleToggle)
+        toggle.onClick = { [weak self] in self?.onToggle() }
         addSubview(toggle)
 
         NSLayoutConstraint.activate([
@@ -434,28 +435,115 @@ private final class VpnToggleItemView: NSView {
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
             toggle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             toggle.centerYAnchor.constraint(equalTo: centerYAnchor),
+            toggle.widthAnchor.constraint(equalToConstant: 38),
+            toggle.heightAnchor.constraint(equalToConstant: 22),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
-    @objc private func handleToggle() {
-        onToggle()
-    }
-
     func update(isOn: Bool, isEnabled: Bool, statusText: String) {
-        // Avoid restarting the switch's animation when nothing changed.
-        let desiredState: NSControl.StateValue = isOn ? .on : .off
-        if toggle.state != desiredState {
-            toggle.state = desiredState
-        }
-        if toggle.isEnabled != isEnabled {
-            toggle.isEnabled = isEnabled
-        }
+        toggle.setOn(isOn, animated: true)
+        toggle.isEnabled = isEnabled
         titleLabel.textColor = isEnabled ? .labelColor : .disabledControlTextColor
         if subtitleLabel.stringValue != statusText {
             subtitleLabel.stringValue = statusText
         }
         subtitleLabel.isHidden = statusText.isEmpty
+    }
+}
+
+/// Capsule-shaped toggle that visually matches the in-app header switch
+/// (RootView.headerVpnSwitch). On = `controlAccentColor`, off = a
+/// translucent system gray; the knob is a white circle that slides between
+/// the two ends.
+@MainActor
+private final class CapsuleSwitch: NSView {
+    var isOn: Bool = false
+    var isEnabled: Bool = true { didSet { needsDisplay = true } }
+    var onClick: (() -> Void)?
+
+    private let trackLayer = CALayer()
+    private let knobLayer = CALayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer = CALayer()
+        trackLayer.cornerCurve = .continuous
+        knobLayer.cornerCurve = .continuous
+        knobLayer.shadowColor = NSColor.black.cgColor
+        knobLayer.shadowOpacity = 0.22
+        knobLayer.shadowRadius = 1
+        knobLayer.shadowOffset = CGSize(width: 0, height: -1)
+        layer?.addSublayer(trackLayer)
+        layer?.addSublayer(knobLayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: 38, height: 22) }
+
+    override func layout() {
+        super.layout()
+        trackLayer.frame = bounds
+        trackLayer.cornerRadius = bounds.height / 2
+        let knobSize = bounds.height - 4
+        let knobX = isOn ? bounds.width - knobSize - 2 : 2
+        knobLayer.frame = NSRect(x: knobX, y: 2, width: knobSize, height: knobSize)
+        knobLayer.cornerRadius = knobSize / 2
+        applyColors(animated: false)
+    }
+
+    override func updateLayer() {
+        applyColors(animated: false)
+    }
+
+    func setOn(_ on: Bool, animated: Bool) {
+        guard on != isOn else { return }
+        isOn = on
+        let knobSize = bounds.height - 4
+        let knobX = on ? bounds.width - knobSize - 2 : 2
+        let newFrame = NSRect(x: knobX, y: 2, width: knobSize, height: knobSize)
+        if animated {
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.18)
+            knobLayer.frame = newFrame
+            applyColors(animated: true)
+            CATransaction.commit()
+        } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            knobLayer.frame = newFrame
+            applyColors(animated: false)
+            CATransaction.commit()
+        }
+    }
+
+    private func applyColors(animated: Bool) {
+        let onColor = NSColor.controlAccentColor
+        let offColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.45)
+        let trackColor = isOn ? onColor : offColor
+        let opacity: Float = isEnabled ? 1.0 : 0.45
+        if animated {
+            trackLayer.backgroundColor = trackColor.cgColor
+        } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            trackLayer.backgroundColor = trackColor.cgColor
+            CATransaction.commit()
+        }
+        trackLayer.opacity = opacity
+        knobLayer.backgroundColor = NSColor.white.cgColor
+        knobLayer.opacity = opacity
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        // Optimistic flip so the knob slides immediately; the controller
+        // will issue a full update once the daemon round-trip lands and
+        // setOn(_:animated:) is a no-op when the state matches.
+        setOn(!isOn, animated: true)
+        onClick?()
     }
 }
