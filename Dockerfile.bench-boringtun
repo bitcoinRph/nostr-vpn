@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1.4
+#
+# Bench harness: vanilla WireGuard userspace impl (Cloudflare's boringtun)
+# with the same Linux + iperf3 + wireguard-tools shape as Dockerfile.e2e,
+# so scripts/perf-docker-boringtun.sh can reuse the same iperf3/ping
+# methodology as scripts/perf-docker.sh for an apples-to-apples
+# comparison against nvpn.
+
+FROM rust:1.93-bookworm AS builder
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo install --locked --root /tmp/cargo-out boringtun-cli
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates iperf3 iproute2 iputils-ping procps wireguard-tools \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /tmp/cargo-out/bin/boringtun-cli /usr/local/bin/boringtun-cli

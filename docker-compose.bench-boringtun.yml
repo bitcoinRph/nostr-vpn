@@ -1,0 +1,38 @@
+# Bench-only: two containers running Cloudflare's `boringtun-cli`
+# userspace WireGuard. Same network shape and IP ranges as
+# docker-compose.e2e.yml so scripts/perf-docker-boringtun.sh can reuse
+# the same iperf3 + ping methodology as scripts/perf-docker.sh.
+
+services:
+  node-a:
+    build:
+      context: .
+      dockerfile: Dockerfile.bench-boringtun
+    entrypoint: ["sleep", "infinity"]
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      e2e:
+        ipv4_address: 10.203.0.10
+
+  node-b:
+    build:
+      context: .
+      dockerfile: Dockerfile.bench-boringtun
+    entrypoint: ["sleep", "infinity"]
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      e2e:
+        ipv4_address: 10.203.0.11
+
+networks:
+  e2e:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.203.0.0/24
