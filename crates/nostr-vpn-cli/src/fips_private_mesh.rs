@@ -174,11 +174,18 @@ impl FipsPrivateMeshRuntime {
             return Ok(false);
         };
 
+        // Bulk tunnel data: fire-and-forget. The synchronous `send` path
+        // awaits a per-packet oneshot round-trip with the node task to
+        // surface send-side errors, which dominates throughput on every
+        // platform. TCP and the upper layer handle loss recovery anyway,
+        // and per-packet errors here would only manifest as silently
+        // dropped packets — exactly what `send` does, just slower.
+        let bytes_len = outgoing.bytes.len();
         self.endpoint
-            .send(outgoing.endpoint_npub, outgoing.bytes.clone())
+            .send_oneway(outgoing.endpoint_npub, outgoing.bytes)
             .await
             .context("failed to send private packet over FIPS endpoint data")?;
-        self.note_tx(&outgoing.participant_pubkey, outgoing.bytes.len())?;
+        self.note_tx(&outgoing.participant_pubkey, bytes_len)?;
         Ok(true)
     }
 
