@@ -337,8 +337,12 @@ function syncRepoToWindowsHost({ host, guestRepo, dryRun }) {
     `New-Item -ItemType Directory -Force -Path ${psQuote(guestRepo)} | Out-Null`,
     { dryRun },
   )
+  // COPYFILE_DISABLE=1 stops macOS bsdtar from emitting AppleDouble `._*`
+  // sidecar files. Without it, csc.exe on the Windows side picks up the
+  // metadata files via the csproj wildcard glob and fails with CS2015
+  // ("is a binary file instead of a text file").
   runShellPipe(
-    `tar ${tarExcludes} -cf - -C ${quote(repoRoot)} . | ssh ${quote(host)} tar -xf - -C ${quote(guestRepoForward)}`,
+    `COPYFILE_DISABLE=1 tar ${tarExcludes} -cf - -C ${quote(repoRoot)} . | ssh ${quote(host)} tar -xf - -C ${quote(guestRepoForward)}`,
     { dryRun, errMsg: `tar|ssh sync to ${host}` },
   )
 }
