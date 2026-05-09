@@ -108,7 +108,10 @@ sleep 1
 run_test() {
   local label="$1"; shift
   printf '## %s\n' "$label"
-  "${COMPOSE[@]}" exec -T node-a iperf3 -c "$BOB_TUNNEL_IP" -t "$DURATION" -i 0 -f m "$@" 2>&1 | tail -6
+  # --connect-timeout caps the 3WHS so a broken path bails out fast
+  # instead of hanging on tcp_synack_retries.
+  "${COMPOSE[@]}" exec -T node-a iperf3 -c "$BOB_TUNNEL_IP" -t "$DURATION" -i 0 -f m \
+    --connect-timeout 3000 "$@" 2>&1 | tail -6
   echo
 }
 
