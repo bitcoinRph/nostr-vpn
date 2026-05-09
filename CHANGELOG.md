@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.5 - 2026-05-09
+
+### Fixed
+
+- Windows release build no longer references the deleted `nostr-vpn-reflector` crate, which had been broken since the FIPS-only mesh cleanup landed.
+
 ## 4.0.4 - 2026-05-09
 
 ### Changed

@@ -71,7 +71,7 @@ function Resolve-OutputPath {
   return [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Path))
 }
 
-$CargoArgs = @("build", "-p", "nostr-vpn-app-core", "-p", "nostr-vpn-cli", "-p", "nostr-vpn-reflector")
+$CargoArgs = @("build", "-p", "nostr-vpn-app-core", "-p", "nostr-vpn-cli")
 if ($Configuration -eq "Release") {
   $CargoArgs += "--release"
 }
