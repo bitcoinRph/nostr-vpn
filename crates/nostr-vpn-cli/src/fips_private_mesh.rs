@@ -544,8 +544,10 @@ impl FipsPrivateMeshRuntime {
         if let Some(entry) = presence.get_mut(participant) {
             entry.tx_bytes = entry.tx_bytes.saturating_add(len as u64);
         } else {
-            let mut entry = FipsPeerPresence::default();
-            entry.tx_bytes = len as u64;
+            let entry = FipsPeerPresence {
+                tx_bytes: len as u64,
+                ..Default::default()
+            };
             presence.insert(participant.to_string(), entry);
         }
         Ok(())
