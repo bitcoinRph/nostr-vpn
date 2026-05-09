@@ -37,6 +37,7 @@ final class TrayController: NSObject {
 
     // Stable items
     private let vpnToggleItem = NSMenuItem()
+    private let vpnToggleView: VpnToggleItemView
     private let deviceNameItem = NSMenuItem()
     private let copyDeviceIdItem = NSMenuItem()
     private let networkSubmenuItem = NSMenuItem()
@@ -60,7 +61,11 @@ final class TrayController: NSObject {
         self.manager = manager
         self.openMainWindow = openMainWindow
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Allocated before super.init so we can wire its callback to self.
+        var toggleAction: () -> Void = {}
+        self.vpnToggleView = VpnToggleItemView { toggleAction() }
         super.init()
+        toggleAction = { [weak self] in self?.handleToggleVpn() }
 
         configureStatusItem()
         buildMenuSkeleton()
@@ -89,9 +94,11 @@ final class TrayController: NSObject {
     }
 
     private func buildMenuSkeleton() {
-        vpnToggleItem.title = "VPN"
-        vpnToggleItem.target = self
-        vpnToggleItem.action = #selector(handleToggleVpn)
+        // VPN toggle is a custom NSView with an NSSwitch — matches the in-app
+        // header capsule toggle and the macOS native toggle pattern. The menu
+        // item's view absorbs clicks on the switch; the surrounding row has
+        // no action.
+        vpnToggleItem.view = vpnToggleView
 
         deviceNameItem.isEnabled = false
 
@@ -153,9 +160,12 @@ final class TrayController: NSObject {
         }
         lastSnapshot = snapshot
 
-        // VPN toggle
-        vpnToggleItem.state = snapshot.vpnEnabled ? .on : .off
-        vpnToggleItem.isEnabled = snapshot.vpnTogglable
+        // VPN toggle (NSSwitch in custom view).
+        vpnToggleView.update(
+            isOn: snapshot.vpnEnabled,
+            isEnabled: snapshot.vpnTogglable,
+            statusText: snapshot.vpnStatusText
+        )
 
         // Device name + copy
         deviceNameItem.title = snapshot.deviceName
@@ -264,6 +274,7 @@ final class TrayController: NSObject {
 private struct MenuSnapshot: Equatable {
     let vpnEnabled: Bool
     let vpnTogglable: Bool
+    let vpnStatusText: String
     let deviceName: String
     let deviceIdValue: String
     let networkTitle: String?
@@ -311,6 +322,7 @@ private struct MenuSnapshot: Equatable {
         return MenuSnapshot(
             vpnEnabled: state.vpnEnabled,
             vpnTogglable: !manager.actionInFlight && state.vpnControlSupported,
+            vpnStatusText: vpnSubtitle(for: state, actionInFlight: manager.actionInFlight),
             deviceName: resolveDeviceName(from: state),
             deviceIdValue: state.ownNpub,
             networkTitle: networkTitle,
@@ -322,6 +334,19 @@ private struct MenuSnapshot: Equatable {
             tooltip: tooltip
         )
     }
+}
+
+private func vpnSubtitle(for state: NativeAppState, actionInFlight: Bool) -> String {
+    if actionInFlight, !state.vpnStatus.isEmpty {
+        return state.vpnStatus
+    }
+    if state.vpnActive {
+        return "Connected"
+    }
+    if state.vpnEnabled, !state.vpnStatus.isEmpty {
+        return state.vpnStatus
+    }
+    return state.vpnEnabled ? "Connecting…" : "Off"
 }
 
 private func resolveDeviceName(from state: NativeAppState) -> String {
@@ -362,4 +387,75 @@ private struct SubmenuClickPayload<T: Equatable>: AnySubmenuClickPayload {
     let item: SubmenuItem<T>
     let action: (SubmenuItem<T>) -> Void
     func invoke() { action(item) }
+}
+
+// MARK: - VPN toggle row view
+
+/// Custom NSView used as the first menu item: a brand-style row with a
+/// title, a status subtitle, and a real NSSwitch on the right. NSSwitch is
+/// the platform-native toggle widget — same control class used in
+/// Tailscale's menu bar item, System Settings, etc.
+@MainActor
+private final class VpnToggleItemView: NSView {
+    let titleLabel = NSTextField(labelWithString: "VPN")
+    let subtitleLabel = NSTextField(labelWithString: "")
+    let toggle = NSSwitch()
+    private let onToggle: () -> Void
+
+    init(onToggle: @escaping () -> Void) {
+        self.onToggle = onToggle
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 44))
+        autoresizingMask = .width
+
+        titleLabel.font = NSFont.menuFont(ofSize: 0)
+        titleLabel.textColor = .labelColor
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        subtitleLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView(views: [titleLabel, subtitleLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 1
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+        toggle.target = self
+        toggle.action = #selector(handleToggle)
+        addSubview(toggle)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(
+                lessThanOrEqualTo: toggle.leadingAnchor, constant: -8),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            toggle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            toggle.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    @objc private func handleToggle() {
+        onToggle()
+    }
+
+    func update(isOn: Bool, isEnabled: Bool, statusText: String) {
+        // Avoid restarting the switch's animation when nothing changed.
+        let desiredState: NSControl.StateValue = isOn ? .on : .off
+        if toggle.state != desiredState {
+            toggle.state = desiredState
+        }
+        if toggle.isEnabled != isEnabled {
+            toggle.isEnabled = isEnabled
+        }
+        titleLabel.textColor = isEnabled ? .labelColor : .disabledControlTextColor
+        if subtitleLabel.stringValue != statusText {
+            subtitleLabel.stringValue = statusText
+        }
+        subtitleLabel.isHidden = statusText.isEmpty
+    }
 }
