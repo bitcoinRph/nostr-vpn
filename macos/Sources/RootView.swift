@@ -27,7 +27,6 @@ struct RootView: View {
     @State private var lastSyncedListenPort: UInt32 = 0
     @State private var lastSyncedMagicDnsSuffix = ""
     @State private var lastSyncedWireguardExitConfig: String? = nil
-    @State private var wireguardExitExpanded = false
 
     private var state: NativeAppState {
         manager.state
@@ -834,37 +833,28 @@ struct RootView: View {
 
     private var wireGuardExitSettings: some View {
         surface {
-            disclosureSection(
-                title: "Configure WireGuard Upstream",
-                systemImage: "network",
-                isExpanded: $wireguardExitExpanded,
-                font: .headline
-            ) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Paste a WireGuard config from an upstream VPN provider such as Mullvad or Proton VPN.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            sectionHeader("WireGuard Upstream", systemImage: "network")
+            Text("Paste a WireGuard config from an upstream VPN provider such as Mullvad or Proton VPN.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-                    TextEditor(text: $wireguardExitConfig)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: 180)
-                        .padding(6)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color(nsColor: .separatorColor))
-                        )
+            TextEditor(text: $wireguardExitConfig)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 180)
+                .padding(6)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor))
+                )
 
-                    Button {
-                        manager.saveWireGuardExitConfig(wireguardExitConfig)
-                    } label: {
-                        Label("Save", systemImage: "checkmark")
-                    }
-                    .disabled(manager.actionInFlight)
-                }
-                .padding(.top, 6)
+            Button {
+                manager.saveWireGuardExitConfig(wireguardExitConfig)
+            } label: {
+                Label("Save", systemImage: "checkmark")
             }
+            .disabled(manager.actionInFlight)
         }
     }
 
@@ -1205,12 +1195,8 @@ struct RootView: View {
             lastSyncedMagicDnsSuffix = state.magicDnsSuffix
         }
         if lastSyncedWireguardExitConfig != state.wireguardExitConfig {
-            let firstSync = lastSyncedWireguardExitConfig == nil
             wireguardExitConfig = state.wireguardExitConfig
             lastSyncedWireguardExitConfig = state.wireguardExitConfig
-            if firstSync && !state.wireguardExitConfigured {
-                wireguardExitExpanded = true
-            }
         }
 
         for network in state.networks {
