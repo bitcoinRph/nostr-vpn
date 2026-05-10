@@ -52,8 +52,10 @@ final class AppManager: ObservableObject {
             .first?
             .appendingPathComponent("nvpn", isDirectory: true)
             .path ?? ""
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-        let app = FfiApp(dataDir: dataDir, appVersion: version)
+        // Pass empty so the FFI falls back to its own CARGO_PKG_VERSION
+        // (workspace-inherited). Avoids drift between MARKETING_VERSION in the
+        // xcodeproj and the bundled nvpn binary.
+        let app = FfiApp(dataDir: dataDir, appVersion: "")
         self.app = app
         self.state = app.state()
         self.launchedHidden = CommandLine.arguments.contains("--autostart")

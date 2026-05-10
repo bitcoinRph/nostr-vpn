@@ -31,7 +31,10 @@ class MainActivity : ComponentActivity() {
         debugAction = intent?.getStringExtra(EXTRA_DEBUG_ACTION)
         val dataDir = filesDir.resolve("app-core")
         seedMobileConfig(dataDir, androidDeviceName())
-        val core = AppCoreClient(dataDir.absolutePath, BuildConfig.VERSION_NAME)
+        // Pass empty so the FFI falls back to its own CARGO_PKG_VERSION
+        // (workspace-inherited). Avoids drift between BuildConfig.VERSION_NAME
+        // and the bundled nvpn binary's version.
+        val core = AppCoreClient(dataDir.absolutePath, "")
 
         setContent {
             var state by remember { mutableStateOf(core.state()) }

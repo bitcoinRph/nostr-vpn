@@ -23,8 +23,10 @@ final class AppModel: ObservableObject {
             try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
             Self.seedMobileConfig(in: supportDir, deviceName: Self.deviceName())
         }
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-        core = NativeCoreClient(dataDir: supportDir?.path ?? "", appVersion: version)
+        // Pass empty so the FFI falls back to its own CARGO_PKG_VERSION
+        // (workspace-inherited). Avoids drift between MARKETING_VERSION in the
+        // xcodeproj and the bundled nvpn binary.
+        core = NativeCoreClient(dataDir: supportDir?.path ?? "", appVersion: "")
         state = core.state()
     }
 

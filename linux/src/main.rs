@@ -98,7 +98,10 @@ impl AppModel {
         update_bar: gtk::Box,
         content: gtk::Box,
     ) -> Self {
-        let core = FfiApp::new(default_data_dir(), env!("CARGO_PKG_VERSION").to_string());
+        // Pass empty so the FFI falls back to its own CARGO_PKG_VERSION
+        // (workspace-inherited). The linux crate is excluded from the workspace
+        // so its CARGO_PKG_VERSION drifts from nostr-vpn-app-core's.
+        let core = FfiApp::new(default_data_dir(), String::new());
         let state = core.state();
         let mut drafts = Drafts::default();
         drafts.sync_from_state(&state);
