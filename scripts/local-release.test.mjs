@@ -6,15 +6,20 @@ import { tmpdir } from 'node:os'
 
 import {
   androidReleaseAssetName,
+  androidVersionCode,
   autoDetectWindowsVmName,
   buildReleaseManifestFiles,
   buildReleaseManifest,
+  bumpAndroidGradleVersion,
+  bumpCargoPackageVersion,
+  bumpPbxprojMarketingVersion,
   describeAsset,
   extractChangelogSection,
   linuxReleaseTargetsForDockerPlatform,
   parseEnvFile,
   readWorkspaceVersionTag,
   renderReleaseNotes,
+  semverFromTag,
   shouldBlockLocalLinuxAmd64Qemu,
   splitCsv,
   validateReleaseAssetSet,
@@ -366,4 +371,63 @@ test('renderReleaseNotes groups common app downloads before advanced files', () 
   assert.match(notes, /### Other Files[\s\S]*macOS Apple Silicon updater archive/)
   assert.doesNotMatch(notes, /nvpn-v0\.3\.23-aarch64-apple-darwin\.tar\.gz/)
   assert.doesNotMatch(notes, /nvpn-v0\.3\.23-x86_64-unknown-linux-musl\.tar\.gz/)
+})
+
+test('semverFromTag strips an optional v prefix', () => {
+  assert.equal(semverFromTag('v4.0.6'), '4.0.6')
+  assert.equal(semverFromTag('4.0.6'), '4.0.6')
+  assert.throws(() => semverFromTag('4.0'), /semver-shaped/)
+  assert.throws(() => semverFromTag('4.0.6-alpha'), /semver-shaped/)
+})
+
+test('androidVersionCode encodes semver into a monotonic integer', () => {
+  assert.equal(androidVersionCode('4.0.6'), 40_006)
+  assert.equal(androidVersionCode('4.0.10'), 40_010)
+  assert.equal(androidVersionCode('4.10.0'), 41_000)
+  assert.equal(androidVersionCode('5.0.0'), 50_000)
+  assert.throws(() => androidVersionCode('4.100.0'), /minor\/patch < 100/)
+})
+
+test('bumpPbxprojMarketingVersion replaces every MARKETING_VERSION setting', () => {
+  const input = `
+\t\t\t\tDEVELOPMENT_TEAM = ABC123;
+\t\t\t\tMARKETING_VERSION = 4.0.2;
+\t\t\t\tPRODUCT_NAME = Nostr VPN;
+\t\t\t\tMARKETING_VERSION = 4.0.2;
+`
+  const next = bumpPbxprojMarketingVersion(input, 'v4.0.6')
+  assert.equal(
+    next,
+    input.replaceAll('MARKETING_VERSION = 4.0.2;', 'MARKETING_VERSION = 4.0.6;'),
+  )
+})
+
+test('bumpAndroidGradleVersion bumps both versionCode and versionName', () => {
+  const input = `
+android {
+    defaultConfig {
+        versionCode = 40002
+        versionName = "4.0.2"
+    }
+}
+`
+  const next = bumpAndroidGradleVersion(input, '4.0.6')
+  assert.match(next, /versionCode = 40006/)
+  assert.match(next, /versionName = "4\.0\.6"/)
+  assert.doesNotMatch(next, /4\.0\.2/)
+})
+
+test('bumpCargoPackageVersion only touches [package] version', () => {
+  const input = `
+[package]
+name = "nostr-vpn-linux"
+version = "4.0.2"
+edition = "2021"
+
+[dependencies]
+adw = { package = "libadwaita", version = "0.7" }
+`
+  const next = bumpCargoPackageVersion(input, '4.0.6')
+  assert.match(next, /\[package\][\s\S]*version = "4\.0\.6"/)
+  assert.match(next, /adw = \{ package = "libadwaita", version = "0\.7" \}/)
 })

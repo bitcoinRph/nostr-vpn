@@ -21,6 +21,9 @@ import {
   androidReleaseAssetName,
   buildReleaseManifest,
   buildReleaseManifestFiles,
+  bumpAndroidGradleVersion,
+  bumpCargoPackageVersion,
+  bumpPbxprojMarketingVersion,
   linuxReleaseTargetsForDockerPlatform,
   normalizeTag,
   parseEnvFile,
@@ -57,7 +60,7 @@ Options:
   --release-tree <name>    htree release tree name (default: releases/nostr-vpn)
   --stage-dir <path>       Directory used for staged release metadata
   --env-file <path>        Extra dotenv file to load (repeatable)
-  --only <csv>             Limit steps to verify,macos,linux,windows,android
+  --only <csv>             Limit steps to platform-versions,verify,macos,linux,windows,android
   --skip <csv>             Skip steps by name
   --allow-partial          Stage/publish even if a selected platform build fails
   --help                   Show this help
@@ -685,6 +688,42 @@ function buildMacosArtifacts({ tag, dryRun, builtLines }) {
   builtLines.push('Built signed and notarized Apple Silicon macOS DMG and updater archive locally.')
 }
 
+/**
+ * Sync platform-native version metadata (xcodeproj MARKETING_VERSION, Android
+ * versionName/versionCode, linux crate's [package].version) to the Cargo
+ * workspace version. The GUIs themselves read versions through the FFI's
+ * CARGO_PKG_VERSION fallback, but the OS-level metadata (Finder Get Info,
+ * About panel, Play Store) needs these bumped before each release.
+ */
+function syncPlatformVersions({ tag, dryRun, builtLines }) {
+  const targets = [
+    { path: join(repoRoot, 'macos', 'NostrVpnMac.xcodeproj', 'project.pbxproj'), bump: bumpPbxprojMarketingVersion },
+    { path: join(repoRoot, 'ios', 'NostrVpnIos.xcodeproj', 'project.pbxproj'), bump: bumpPbxprojMarketingVersion },
+    { path: join(repoRoot, 'android', 'app', 'build.gradle.kts'), bump: bumpAndroidGradleVersion },
+    { path: join(repoRoot, 'linux', 'Cargo.toml'), bump: bumpCargoPackageVersion },
+  ]
+  const updated = []
+  for (const { path, bump } of targets) {
+    if (!existsSync(path)) {
+      continue
+    }
+    const original = readFileSync(path, 'utf8')
+    const next = bump(original, tag)
+    if (next === original) {
+      continue
+    }
+    if (!dryRun) {
+      writeFileSync(path, next)
+    }
+    updated.push(path.replace(`${repoRoot}/`, ''))
+  }
+  if (updated.length > 0) {
+    builtLines.push(`Synced platform versions to ${tag}: ${updated.join(', ')}.`)
+  } else {
+    builtLines.push(`Platform versions already at ${tag}.`)
+  }
+}
+
 function runVerify({ dryRun, builtLines }) {
   run('node', ['scripts/sync-versions.mjs'], { dryRun })
   run('cargo', ['fmt', '--check'], { dryRun })
@@ -868,6 +907,7 @@ function main() {
   }
 
   const steps = [
+    ['platform-versions', () => syncPlatformVersions({ tag, dryRun: options.dryRun, builtLines })],
     ['verify', () => runVerify({ dryRun: options.dryRun, builtLines })],
     ['macos', () => buildMacosArtifacts({ tag, dryRun: options.dryRun, builtLines })],
     ['android', () => buildAndroidArtifacts({ env, tag, dryRun: options.dryRun, builtLines })],

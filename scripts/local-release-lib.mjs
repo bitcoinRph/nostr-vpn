@@ -178,6 +178,73 @@ export function extractChangelogSection(changelogText, tag) {
   return trimmed || null
 }
 
+/**
+ * "v4.0.6" / "4.0.6" → "4.0.6". Throws on malformed input.
+ */
+export function semverFromTag(tag) {
+  const stripped = normalizeTag(tag).replace(/^v/, '')
+  if (!/^\d+\.\d+\.\d+$/.test(stripped)) {
+    throw new Error(`Release tag must be a semver-shaped string, got "${tag}"`)
+  }
+  return stripped
+}
+
+/**
+ * Encode a semver as a 5-digit-major-friendly Android versionCode:
+ *   "4.0.6"  → 40006
+ *   "4.10.6" → 40_10_06 = 41006
+ * Each component is allotted two digits; minor/patch must be < 100.
+ */
+export function androidVersionCode(version) {
+  const parts = semverFromTag(version).split('.').map(Number)
+  if (parts.some((value, index) => index > 0 && value >= 100)) {
+    throw new Error(`Android versionCode encoding requires minor/patch < 100, got ${version}`)
+  }
+  const [major, minor, patch] = parts
+  return major * 10_000 + minor * 100 + patch
+}
+
+/**
+ * Replace every `MARKETING_VERSION = X.Y.Z;` in an Xcode pbxproj. Returns the
+ * updated text. Both Debug and Release configs share the same setting in our
+ * project, so a global replace is the right scope.
+ */
+export function bumpPbxprojMarketingVersion(pbxprojText, version) {
+  const semver = semverFromTag(version)
+  return pbxprojText.replace(/(\bMARKETING_VERSION\s*=\s*)[^;]+(;)/g, `$1${semver}$2`)
+}
+
+/**
+ * Sync `versionCode = N` and `versionName = "X.Y.Z"` in an Android
+ * build.gradle.kts to match the workspace version.
+ */
+export function bumpAndroidGradleVersion(gradleText, version) {
+  const semver = semverFromTag(version)
+  const code = androidVersionCode(semver)
+  return gradleText
+    .replace(/(\bversionCode\s*=\s*)\d+/g, `$1${code}`)
+    .replace(/(\bversionName\s*=\s*")[^"]+(")/g, `$1${semver}$2`)
+}
+
+/**
+ * Replace `version = "X.Y.Z"` inside the first `[package]` table of a
+ * Cargo.toml. Used for the `linux/` crate which is excluded from the workspace
+ * (so workspace `[workspace.package].version` doesn't reach it).
+ */
+export function bumpCargoPackageVersion(cargoTomlText, version) {
+  const semver = semverFromTag(version)
+  const match = cargoTomlText.match(/^\[package\]\s*\n([\s\S]*?)(?=^\[)/m)
+  if (!match) {
+    throw new Error('Could not find [package] table in Cargo.toml')
+  }
+  const original = match[0]
+  const replaced = original.replace(/(\nversion\s*=\s*")[^"]+(")/, `$1${semver}$2`)
+  if (replaced === original) {
+    throw new Error('Could not find version field inside [package] table')
+  }
+  return cargoTomlText.replace(original, replaced)
+}
+
 export function autoDetectWindowsVmName(prlctlListOutput) {
   const candidates = []
   for (const line of prlctlListOutput.split(/\r?\n/)) {
