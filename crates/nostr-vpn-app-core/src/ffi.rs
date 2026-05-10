@@ -15,6 +15,7 @@ use nostr_vpn_core::config::{
     wireguard_exit_config_text,
 };
 use nostr_vpn_core::diagnostics::ProbeStatus;
+use nostr_vpn_core::process_ext::CommandWindowExt;
 use serde::Deserialize;
 
 use crate::actions::NativeAppAction;
@@ -1306,7 +1307,11 @@ impl NativeAppRuntime {
             self.expected_service_binary_version.clear();
             return;
         };
-        let Ok(output) = Command::new(nvpn_bin).args(["version", "--json"]).output() else {
+        let Ok(output) = Command::new(nvpn_bin)
+            .args(["version", "--json"])
+            .hide_console_window()
+            .output()
+        else {
             return;
         };
         if !output.status.success() {
@@ -1447,6 +1452,7 @@ impl NativeAppRuntime {
         };
         Command::new(nvpn_bin)
             .args(args)
+            .hide_console_window()
             .output()
             .with_context(|| format!("failed to execute {}", nvpn_bin.display()))
     }

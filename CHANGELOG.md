@@ -11,6 +11,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Windows app: console window no longer flashes every ~2s. The GUI's periodic `nvpn status` refresh (and other CLI invocations through `run_nvpn`) now spawn `nvpn.exe` with `CREATE_NO_WINDOW`, suppressing the conhost popup that fired on every `DispatcherTimer` tick. Implemented via a small `CommandWindowExt::hide_console_window` helper in `nostr-vpn-core::process_ext` that's a no-op on non-Windows.
 - macOS Exit Nodes page: WireGuard upstream config textarea no longer wipes itself out every ~1s while typing. Each draft field (node name, endpoint, tunnel IP, listen port, MagicDNS suffix, WireGuard config) now syncs from upstream only when its own upstream value actually changes, instead of on every state-rev tick. Network-name and participant-alias drafts get the same treatment so in-flight edits survive periodic refreshes.
 - Linux daemon: WireGuard upstream now activates as the local node's own egress when `wireguard_exit.enabled` is set, even if the node is not advertising itself as a mesh exit. Previously the WG tunnel was only brought up when the node was serving as an exit for the rest of the mesh, so toggling "Use WireGuard upstream" alone routed nothing through it.
 

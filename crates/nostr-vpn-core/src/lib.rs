@@ -12,6 +12,7 @@ mod network_roster;
 mod network_routes;
 pub mod paths;
 pub mod platform_paths;
+pub mod process_ext;
 
 pub use config::DEFAULT_RELAYS;
 
