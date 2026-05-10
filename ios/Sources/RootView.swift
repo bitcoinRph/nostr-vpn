@@ -258,24 +258,73 @@ private struct AddDeviceSheet: View {
 private struct ExitNodesPage: View {
     @ObservedObject var model: AppModel
 
+    private var directSelected: Bool {
+        !model.state.wireguardExitEnabled && model.state.exitNode.isEmpty
+    }
+
+    private var wgSelected: Bool {
+        model.state.wireguardExitEnabled
+    }
+
+    private var wgSubtitle: String {
+        if !model.state.wireguardExitConfigured {
+            return "No WireGuard config saved yet"
+        }
+        let endpoint = model.state.wireguardExitEndpoint
+        return endpoint.isEmpty ? "Configured" : endpoint
+    }
+
+    private func selectDirect() {
+        model.dispatch(
+            NativeActions.updateSettings(["exitNode": "", "wireguardExitEnabled": false]),
+            status: "Saving route"
+        )
+    }
+
+    private func selectWireGuard() {
+        model.dispatch(
+            NativeActions.updateSettings(["exitNode": "", "wireguardExitEnabled": true]),
+            status: "Saving route"
+        )
+    }
+
+    private func selectPeer(_ npub: String) {
+        model.dispatch(
+            NativeActions.updateSettings(["exitNode": npub, "wireguardExitEnabled": false]),
+            status: "Saving route"
+        )
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 14) {
                 AppCard {
                     Text("Exit Node")
                         .font(.headline)
-                    Button(model.state.exitNode.isEmpty ? "Direct" : "Use Direct") {
-                        model.dispatch(NativeActions.updateSettings(["exitNode": ""]), status: "Saving route")
-                    }
-                    .buttonStyle(.borderedProminent)
+                    ExitNodeRow(
+                        title: "Direct",
+                        subtitle: "No exit node — your own internet",
+                        selected: directSelected,
+                        enabled: true,
+                        action: selectDirect
+                    )
+                    ExitNodeRow(
+                        title: "WireGuard upstream",
+                        subtitle: wgSubtitle,
+                        selected: wgSelected,
+                        enabled: model.state.wireguardExitConfigured,
+                        action: selectWireGuard
+                    )
                     if let network = model.activeNetwork {
                         ForEach(network.participants.filter(\.offersExitNode)) { participant in
-                            Button(participant.displayName) {
-                                model.dispatch(
-                                    NativeActions.updateSettings(["exitNode": participant.npub]),
-                                    status: "Saving route"
-                                )
-                            }
+                            ExitNodeRow(
+                                title: participant.displayName,
+                                subtitle: participant.npub,
+                                selected: !model.state.wireguardExitEnabled
+                                    && model.state.exitNode == participant.npub,
+                                enabled: true,
+                                action: { selectPeer(participant.npub) }
+                            )
                         }
                     }
                 }
@@ -305,6 +354,40 @@ private struct ExitNodesPage: View {
             .padding()
         }
         .background(AppColors.background)
+    }
+}
+
+private struct ExitNodeRow: View {
+    let title: String
+    let subtitle: String
+    let selected: Bool
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(selected ? AppColors.accent : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body)
+                        .foregroundColor(.primary)
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1.0 : 0.5)
     }
 }
 

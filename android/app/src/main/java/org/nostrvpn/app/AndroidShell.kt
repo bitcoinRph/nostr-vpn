@@ -445,16 +445,61 @@ private fun androidx.compose.foundation.lazy.LazyListScope.exitNodesPage(
         AppCard {
             Text("Exit Node", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(10.dp))
-            Button(onClick = { dispatch(NativeActions.updateSettings("exitNode" to "")) }) {
-                Text(if (state.exitNode.isBlank()) "Direct" else "Use Direct")
-            }
-            Spacer(Modifier.height(8.dp))
-            network?.participants.orEmpty().filter { it.offersExitNode }.forEach { participant ->
-                TextButton(onClick = {
-                    dispatch(NativeActions.updateSettings("exitNode" to participant.npub))
-                }) {
-                    Text(participant.magicDnsName.ifBlank { participant.alias }, maxLines = 1)
+
+            val directSelected = !state.wireguardExitEnabled && state.exitNode.isBlank()
+            ExitNodeRow(
+                title = "Direct",
+                subtitle = "No exit node — your own internet",
+                selected = directSelected,
+                enabled = true,
+                onClick = {
+                    dispatch(
+                        NativeActions.updateSettings(
+                            "exitNode" to "",
+                            "wireguardExitEnabled" to false,
+                        ),
+                    )
+                },
+            )
+
+            val wgSubtitle =
+                if (!state.wireguardExitConfigured) {
+                    "No WireGuard config saved yet"
+                } else if (state.wireguardExitEndpoint.isBlank()) {
+                    "Configured"
+                } else {
+                    state.wireguardExitEndpoint
                 }
+            ExitNodeRow(
+                title = "WireGuard upstream",
+                subtitle = wgSubtitle,
+                selected = state.wireguardExitEnabled,
+                enabled = state.wireguardExitConfigured,
+                onClick = {
+                    dispatch(
+                        NativeActions.updateSettings(
+                            "exitNode" to "",
+                            "wireguardExitEnabled" to true,
+                        ),
+                    )
+                },
+            )
+
+            network?.participants.orEmpty().filter { it.offersExitNode }.forEach { participant ->
+                ExitNodeRow(
+                    title = participant.magicDnsName.ifBlank { participant.alias },
+                    subtitle = participant.npub,
+                    selected = !state.wireguardExitEnabled && state.exitNode == participant.npub,
+                    enabled = true,
+                    onClick = {
+                        dispatch(
+                            NativeActions.updateSettings(
+                                "exitNode" to participant.npub,
+                                "wireguardExitEnabled" to false,
+                            ),
+                        )
+                    },
+                )
             }
         }
     }
