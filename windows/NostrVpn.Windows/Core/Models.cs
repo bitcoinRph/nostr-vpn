@@ -120,6 +120,8 @@ public sealed class NativeParticipantState
     public string MeshState { get; set; } = "";
     public string StatusText { get; set; } = "";
     public string LastSeenText { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsSelf { get; set; }
     public bool IsFipsDirect => Reachable
         && !string.Equals(State, "local", StringComparison.OrdinalIgnoreCase)
         && !string.IsNullOrWhiteSpace(FipsTransportAddr);

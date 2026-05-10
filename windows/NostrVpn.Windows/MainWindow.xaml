@@ -61,13 +61,16 @@
         </Grid>
       </Border>
 
-      <Border DockPanel.Dock="Top" Padding="24,10" Background="#EAF2FF" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,1" Visibility="{Binding UpdateAvailable, Converter={StaticResource BoolToVisibility}}">
+      <Border DockPanel.Dock="Top" Padding="24,4" Background="#F2F4F7" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Visibility="{Binding UpdateAvailable, Converter={StaticResource BoolToVisibility}}">
         <DockPanel LastChildFill="True">
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-            <CheckBox Content="Install automatically" IsChecked="{Binding AutoInstallUpdates, Mode=TwoWay}" Margin="0,0,12,0" />
-            <Button Content="Install" Command="{Binding InstallUpdateCommand}" MinWidth="96" />
+            <CheckBox Content="Install automatically" IsChecked="{Binding AutoInstallUpdates, Mode=TwoWay}" FontSize="11" Foreground="{StaticResource TextSecondary}" Margin="0,0,12,0" />
+            <Button Content="Install" Command="{Binding InstallUpdateCommand}" MinWidth="72" MinHeight="26" Padding="10,3" />
           </StackPanel>
-          <TextBlock Text="{Binding UpdateStripeText}" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE896;" FontSize="13" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <TextBlock Text="{Binding UpdateStripeText}" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          </StackPanel>
         </DockPanel>
       </Border>
 
@@ -145,8 +148,8 @@
                           <TextBlock Text="{Binding MagicDnsName}" VerticalAlignment="Center" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
                           <TextBox x:Name="AliasInput" Grid.Column="1" Text="{Binding MagicDnsAlias, Mode=OneWay}" Margin="0,0,8,0" />
                           <Button Grid.Column="2" Content="Save" Tag="{Binding}" Click="SetParticipantAlias_Click" Margin="0,0,8,0" />
-                          <Button Grid.Column="3" Content="Admin" Tag="{Binding}" Click="ToggleAdmin_Click" Margin="0,0,8,0" />
-                          <Button Grid.Column="4" Content="Remove" Tag="{Binding}" Click="RemoveParticipant_Click" />
+                          <Button Grid.Column="3" Content="Admin" Tag="{Binding}" Click="ToggleAdmin_Click" Margin="0,0,8,0" Visibility="{Binding IsSelf, Converter={StaticResource InverseBoolToVisibility}}" />
+                          <Button Grid.Column="4" Content="Remove" Tag="{Binding}" Click="RemoveParticipant_Click" Visibility="{Binding IsSelf, Converter={StaticResource InverseBoolToVisibility}}" />
                         </Grid>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>

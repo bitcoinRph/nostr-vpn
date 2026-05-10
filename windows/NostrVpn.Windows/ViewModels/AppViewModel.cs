@@ -795,6 +795,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
 
     private void ApplyState(NativeAppState state, bool syncDrafts)
     {
+        TagSelfParticipants(state);
         State = state;
         InviteQr = _core.QrMatrix(state.ActiveNetworkInvite);
         if (syncDrafts)
@@ -802,6 +803,20 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             SyncDrafts(state);
         }
         CommandManager.InvalidateRequerySuggested();
+    }
+
+    private static void TagSelfParticipants(NativeAppState state)
+    {
+        var ownNpub = state.OwnNpub;
+        foreach (var network in state.Networks)
+        {
+            foreach (var participant in network.Participants)
+            {
+                participant.IsSelf =
+                    string.Equals(participant.MeshState, "local", StringComparison.OrdinalIgnoreCase)
+                    || (!string.IsNullOrEmpty(ownNpub) && participant.Npub == ownNpub);
+            }
+        }
     }
 
     private void SyncDrafts(NativeAppState state)
