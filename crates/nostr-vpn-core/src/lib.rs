@@ -21,17 +21,13 @@ pub use config::DEFAULT_RELAYS;
 
 /// Underlay UDP MTU the daemon targets for the encrypted FIPS frame.
 ///
-/// 1280 is the IPv6 minimum and the value fips-core's NAT-traversal
-/// adoption path uses by default. Keeping the primary transport at the
-/// same value means any session that gets promoted onto a NAT-traversed
-/// link silently keeps working — the encrypted wire image is sized to
-/// fit, regardless of which transport the next-hop happens to be.
-///
-/// Bumping this requires the matching change to NAT-traversal transport
-/// inheritance (see fips-core `Node::adopt_established_traversal`) so
-/// adopted sockets pick up the same framing budget instead of falling
-/// back to the 1280 default and dropping every full-sized datagram.
-pub const MESH_UNDERLAY_UDP_MTU: u16 = 1420;
+/// Keep the default at the IPv6-safe 1280-byte wire budget until the
+/// mesh has blackhole-safe active PMTU probing. LAN-sized budgets work
+/// on some direct paths, but a global 1420-byte encrypted datagram can
+/// silently break NAT-traversed or nested-tunnel routes. This mirrors
+/// Tailscale's policy: safe first-contact MTU, higher only with path
+/// evidence or an explicit operator override.
+pub const MESH_UNDERLAY_UDP_MTU: u16 = 1280;
 
 /// Tunnel-side MTU: maximum IPv4/IPv6 packet a TUN device hands to the daemon
 /// for encryption + transit. Equals `MESH_UNDERLAY_UDP_MTU` minus the 106-byte
@@ -40,4 +36,4 @@ pub const MESH_UNDERLAY_UDP_MTU: u16 = 1420;
 /// COORDS warmup tag and any per-link variance. Single source of truth —
 /// every TUN config, every UdpConfig, every Wintun adapter, every linux
 /// `ip link set mtu` should derive from this.
-pub const MESH_TUNNEL_MTU: u16 = 1290;
+pub const MESH_TUNNEL_MTU: u16 = 1150;

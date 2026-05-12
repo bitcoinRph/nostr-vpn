@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Restored the private mesh default MTU budget to the IPv6-safe
+  `MESH_UNDERLAY_UDP_MTU=1280` / `MESH_TUNNEL_MTU=1150`. Larger
+  LAN-sized frames can work on direct Ethernet/Wi-Fi paths, but should
+  be enabled only after blackhole-safe per-path probing or an explicit
+  operator override; making 1420 the global default is too optimistic
+  for NAT traversal and nested tunnels.
+
 ## 4.0.11 - 2026-05-11
 
 ### Changed
