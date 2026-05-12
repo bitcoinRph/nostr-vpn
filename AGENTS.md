@@ -3,6 +3,10 @@
 Notes for AI coding agents working in this repo. Pair with the user's
 global `~/.claude/CLAUDE.md` instructions.
 
+## Development notes
+
+For nvpn performance work, build only the daemon (`cargo build -p nostr-vpn-cli --bin nvpn --release`), install/ad-hoc-sign that binary on each test machine, then compare `iperf3` over LAN/Tailscale/nvpn in both directions (`-R`) on macOS and Linux.
+
 ## Before tagging a release
 
 The release workflow (`.github/workflows/release.yml`) is triggered by
