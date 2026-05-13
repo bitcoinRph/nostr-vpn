@@ -23,6 +23,8 @@ All notable changes to this project are documented in this file.
 
 - `just release-gate`, CI, and local release verification now run the routed
   FIPS Docker e2e in addition to format, clippy, and Rust tests.
+- `just release-gate`, CI, and local release verification now run a local
+  `nvpn update` CLI e2e against a file-backed release manifest and archive.
 
 ## 4.0.14 - 2026-05-13
 

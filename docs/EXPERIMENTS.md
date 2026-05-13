@@ -3,6 +3,24 @@
 Running notes for nvpn/FIPS performance and reliability work. Keep entries
 short enough to compare later: date, build/commit, setup, result, and decision.
 
+## 2026-05-13 - `nvpn update` CLI e2e release gate
+
+Setup:
+- Added a local updater fixture that writes a file-backed release manifest and
+  tarball containing a fake `nvpn` executable for the current platform target.
+- The script runs `nvpn update --check`, then `nvpn update --force --path` into
+  an artifact directory so the real daemon/CLI binary is never overwritten.
+
+Result:
+- `./scripts/e2e-update-cli.sh` passed locally.
+- `NVPN_RELEASE_GATE_DOCKER_E2E=0 ./scripts/release-gate.sh` passed with the
+  new updater e2e included after fmt, clippy, and workspace tests.
+
+Decision:
+- Keep the CLI updater e2e in the release gate as a cheap guard. The existing
+  desktop updater e2e scripts still cover macOS/Linux/Windows GUI update flows
+  separately, but they do not exercise the `nvpn update` CLI command.
+
 ## 2026-05-13 - routed FIPS fallback for stale pending sessions
 
 Setup:

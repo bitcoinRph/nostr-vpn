@@ -8,6 +8,7 @@ node scripts/sync-versions.mjs
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+./scripts/e2e-update-cli.sh
 
 case "${NVPN_RELEASE_GATE_DOCKER_E2E:-1}" in
   0|false|FALSE|False|no|NO|No|off|OFF|Off)
