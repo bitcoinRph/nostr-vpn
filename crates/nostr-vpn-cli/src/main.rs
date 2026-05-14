@@ -1431,8 +1431,7 @@ async fn run_wg_upstream_windows_replace_default(
         .await
         .context("bring up Windows WG upstream and swap default route")?;
     println!(
-        "wg-upstream-test: handshake completed, default route now via {}, \
-         bypass for {} via captured underlay",
+        "wg-upstream-test: handshake completed, default route now via {}, upstream {}",
         handle.iface,
         handle.upstream.ip()
     );
