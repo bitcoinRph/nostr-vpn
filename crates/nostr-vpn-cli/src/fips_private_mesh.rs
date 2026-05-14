@@ -66,6 +66,8 @@ const FIPS_TUN_READ_BURST: usize = 64;
 const FIPS_MESH_SEND_BURST: usize = 64;
 #[cfg(target_os = "windows")]
 const WINDOWS_FIPS_TUN_READ_BURST: usize = 64;
+#[cfg(target_os = "windows")]
+const WINDOWS_FIPS_TUN_WRITE_BURST: usize = 64;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use boringtun::device::{Error as TunError, tun::TunSocket};
@@ -449,6 +451,19 @@ impl FipsPrivateMeshRuntime {
     pub(crate) async fn recv_mesh_event(&self) -> Result<Option<FipsPrivateMeshEvent>> {
         loop {
             let Some(message) = self.endpoint.recv().await else {
+                return Ok(None);
+            };
+
+            if let Some(event) = self.endpoint_message_to_mesh_event(message).await? {
+                return Ok(Some(event));
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) async fn try_recv_mesh_event(&self) -> Result<Option<FipsPrivateMeshEvent>> {
+        loop {
+            let Some(message) = self.endpoint.try_recv() else {
                 return Ok(None);
             };
 
@@ -2697,15 +2712,36 @@ fn spawn_windows_fips_mesh_recv_task(
                 Ok(Some(FipsPrivateMeshEvent::Packet(packet))) => {
                     // Hot path; write to Wintun inline and don't forward
                     // upstream — see linux/macos branch for rationale.
+                    let mut packets = Vec::with_capacity(WINDOWS_FIPS_TUN_WRITE_BURST);
+                    packets.push(packet.bytes);
+                    while packets.len() < WINDOWS_FIPS_TUN_WRITE_BURST {
+                        match mesh.try_recv_mesh_event().await {
+                            Ok(Some(FipsPrivateMeshEvent::Packet(packet))) => {
+                                packets.push(packet.bytes);
+                            }
+                            Ok(Some(event)) => {
+                                if event_tx.send(event).await.is_err() {
+                                    return;
+                                }
+                            }
+                            Ok(None) => break,
+                            Err(error) => {
+                                eprintln!("fips: failed to drain Windows tunnel packets: {error}");
+                                break;
+                            }
+                        }
+                    }
                     if windows_fips_packet_debug_enabled() {
-                        eprintln!(
-                            "fips: Windows mesh -> Wintun {} bytes {}",
-                            packet.bytes.len(),
-                            describe_ip_packet(&packet.bytes)
-                        );
+                        for packet in &packets {
+                            eprintln!(
+                                "fips: Windows mesh -> Wintun {} bytes {}",
+                                packet.len(),
+                                describe_ip_packet(packet)
+                            );
+                        }
                     }
                     if let Err(error) =
-                        crate::windows_tunnel::write_tunnel_packets(&session, &[packet.bytes])
+                        crate::windows_tunnel::write_tunnel_packets(&session, &packets)
                     {
                         eprintln!("fips: failed to write Windows tunnel packet: {error}");
                     }

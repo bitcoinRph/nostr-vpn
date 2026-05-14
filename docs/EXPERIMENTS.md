@@ -3,6 +3,45 @@
 Running notes for nvpn/FIPS performance and reliability work. Keep entries
 short enough to compare later: date, build/commit, setup, result, and decision.
 
+## 2026-05-14 - Windows/Linux direct-LAN parity check
+
+Setup:
+- Ubuntu-dev and win11-dev on Vader's direct LAN, not routed through the nvpn
+  mesh: Ubuntu `192.168.122.103:55140`, Windows `192.168.122.147:55141`.
+  `tcpdump` confirmed FIPS UDP directly between those endpoints.
+- Both nvpn peers used the LAN MTU profile with tunnel MTU 1290. The test
+  tunnel routes were Ubuntu `10.44.99.179/32` and Windows
+  `10.44.132.184/32`.
+- Baselines on the same VMs were Windows WireGuardNT against Ubuntu BoringTun
+  and Ubuntu kernel WireGuard.
+
+Results:
+- Baseline BoringTun/WireGuardNT: Windows to Linux about 572-649 Mbit/s,
+  Linux to Windows about 1.26-1.42 Gbit/s.
+- Baseline kernel WireGuard/WireGuardNT: Windows to Linux about
+  573-603 Mbit/s, Linux to Windows about 728-765 Mbit/s.
+- Initial nvpn direct-LAN samples were about 193/237/203/330 Mbit/s
+  Windows to Linux for 1/2/4/8 streams, and about 237/290/223/222 Mbit/s
+  Linux to Windows.
+- A Windows mesh-receive burst drain that batches ready FIPS packets into one
+  Wintun write improved Linux to Windows to about 357/410/479/350 Mbit/s for
+  1/2/4/8 streams. Windows to Linux stayed in the same broad band at about
+  276/283/267/279 Mbit/s.
+- A Windows send-side batch/drain experiment hurt Windows to Linux throughput
+  and was reverted.
+- Profiling with `FIPS_PERF=1 NVPN_PIPELINE_TRACE=1` was too expensive for
+  headline throughput, but showed the remaining Windows sender gap clearly:
+  Windows uses the FIPS core Tokio per-datagram UDP send path, with
+  millisecond endpoint command waits under load, while Linux uses the raw
+  batched/GSO sender path.
+
+Decision:
+- Keep the Windows receive-side Wintun write batching because it materially
+  improves the Linux-to-Windows direction without changing protocol format.
+- Do not keep send-side batching in nvpn. The next real Windows-to-Linux parity
+  work belongs in FIPS core: a Windows UDP sender path closer to the Unix
+  worker/connected send architecture, or a deeper native/kernel transport.
+
 ## 2026-05-13 - `nvpn update` CLI e2e release gate
 
 Setup:
