@@ -13,6 +13,10 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Bumped FIPS to 0.3.6 so FSP rekey initiators retain and resend the final
+  rekey `SessionMsg3`. This prevents one lost final rekey packet from leaving
+  peers on different session keys and causing AEAD recovery churn during
+  long-lived nvpn connections.
 - macOS and Linux service installation now copies the daemon to a stable
   service-owned path before writing the launchd plist or systemd unit. This
   keeps development builds from rewriting the running service executable under

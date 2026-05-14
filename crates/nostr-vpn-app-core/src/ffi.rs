@@ -364,9 +364,9 @@ impl NativeAppRuntime {
         } else {
             daemon_state.map_or_else(
                 || {
-                    active_network
-                        .map(|network| remote_network_participant_count(network, &own_pubkey_hex))
-                        .unwrap_or(0)
+                    active_network.map_or(0, |network| {
+                        remote_network_participant_count(network, &own_pubkey_hex)
+                    })
                 },
                 |state| state.expected_peer_count,
             )

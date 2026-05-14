@@ -3,6 +3,23 @@
 Running notes for nvpn/FIPS performance and reliability work. Keep entries
 short enough to compare later: date, build/commit, setup, result, and decision.
 
+## 2026-05-14 - FSP rekey continuity fix
+
+Setup:
+- Pi, Windows VM, Linux VM, MacBook, and mini daemons were already on the
+  stale-FMP-session drain fixes. Pi/Windows 90 second continuity runs still
+  showed occasional loss near the default FSP rekey interval.
+
+Result:
+- FIPS 0.3.6 adds retained/resendable final `SessionMsg3` handling for FSP
+  rekey, mirroring the initial XK establishment repair path. The FIPS unit
+  suite passed with 1152 tests, plus the targeted rekey resend and
+  decrypt-failure recovery tests.
+
+Decision:
+- Bump nvpn to `fips-endpoint` 0.3.6 and redeploy the daemons before treating
+  any remaining Pi/Windows or Mac/mini continuity loss as a different bug.
+
 ## 2026-05-14 - Windows/Linux direct-LAN parity check
 
 Setup:
