@@ -64,6 +64,8 @@ const MESH_MAX_MTU: u16 = 9000;
 const FIPS_TUN_READ_BURST: usize = 64;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const FIPS_MESH_SEND_BURST: usize = 64;
+#[cfg(target_os = "windows")]
+const WINDOWS_FIPS_TUN_READ_BURST: usize = 64;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use boringtun::device::{Error as TunError, tun::TunSocket};
@@ -2370,31 +2372,33 @@ impl FipsPrivateTunnelRuntime {
             crate::windows_tunnel::apply_windows_routes(interface_index, &config.route_targets)?;
 
         let stop = Arc::new(AtomicBool::new(false));
-        let (packet_tx, mut packet_rx) = mpsc::channel::<Vec<u8>>(1024);
+        let (packet_tx, mut packet_rx) = mpsc::channel::<Vec<Vec<u8>>>(1024);
         let (event_tx, event_rx) = mpsc::channel::<FipsPrivateMeshEvent>(1024);
         let tun_read_thread =
             spawn_windows_fips_tun_read_thread(stop.clone(), session.clone(), packet_tx);
         let mesh_send_task = {
             let mesh = Arc::clone(&mesh);
             tokio::spawn(async move {
-                while let Some(packet) = packet_rx.recv().await {
-                    let debug = windows_fips_packet_debug_enabled();
-                    if debug {
-                        eprintln!(
-                            "fips: Windows Wintun -> mesh {} bytes {}",
-                            packet.len(),
-                            describe_ip_packet(&packet)
-                        );
-                    }
-                    match mesh.send_tunnel_packet_owned(packet).await {
-                        Ok(true) => {}
-                        Ok(false) => {
-                            if debug {
-                                eprintln!("fips: Windows mesh route miss");
-                            }
+                while let Some(packets) = packet_rx.recv().await {
+                    for packet in packets {
+                        let debug = windows_fips_packet_debug_enabled();
+                        if debug {
+                            eprintln!(
+                                "fips: Windows Wintun -> mesh {} bytes {}",
+                                packet.len(),
+                                describe_ip_packet(&packet)
+                            );
                         }
-                        Err(error) => {
-                            eprintln!("fips: failed to send Windows tunnel packet: {error}");
+                        match mesh.send_tunnel_packet_owned(packet).await {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                if debug {
+                                    eprintln!("fips: Windows mesh route miss");
+                                }
+                            }
+                            Err(error) => {
+                                eprintln!("fips: failed to send Windows tunnel packet: {error}");
+                            }
                         }
                     }
                 }
@@ -2627,7 +2631,7 @@ fn start_windows_fips_wintun(
 fn spawn_windows_fips_tun_read_thread(
     stop: Arc<AtomicBool>,
     session: Arc<Session>,
-    packet_tx: mpsc::Sender<Vec<u8>>,
+    packet_tx: mpsc::Sender<Vec<Vec<u8>>>,
 ) -> ThreadJoinHandle<()> {
     thread::spawn(move || {
         while !stop.load(Ordering::Relaxed) {
@@ -2640,6 +2644,7 @@ fn spawn_windows_fips_tun_read_thread(
                     break;
                 }
             };
+            let mut batch = Vec::with_capacity(WINDOWS_FIPS_TUN_READ_BURST);
             let payload = packet.bytes().to_vec();
             drop(packet);
             if windows_fips_packet_debug_enabled() {
@@ -2649,7 +2654,31 @@ fn spawn_windows_fips_tun_read_thread(
                     describe_ip_packet(&payload)
                 );
             }
-            if packet_tx.blocking_send(payload).is_err() {
+            batch.push(payload);
+            while batch.len() < WINDOWS_FIPS_TUN_READ_BURST {
+                match session.try_receive() {
+                    Ok(Some(packet)) => {
+                        let payload = packet.bytes().to_vec();
+                        drop(packet);
+                        if windows_fips_packet_debug_enabled() {
+                            eprintln!(
+                                "fips: Windows Wintun read {} bytes {}",
+                                payload.len(),
+                                describe_ip_packet(&payload)
+                            );
+                        }
+                        batch.push(payload);
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        if !stop.load(Ordering::Relaxed) {
+                            eprintln!("fips: Windows Wintun receive failed: {error}");
+                        }
+                        return;
+                    }
+                }
+            }
+            if packet_tx.blocking_send(batch).is_err() {
                 break;
             }
         }
