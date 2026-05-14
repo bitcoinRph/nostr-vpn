@@ -441,7 +441,7 @@ fn refresh_now(app: &AppRef) {
     render(app);
 }
 
-fn dispatch(app: &AppRef, action: NativeAppAction) {
+fn dispatch(app: &AppRef, action: NativeAppAction) -> NativeAppState {
     let settle_service = matches!(
         &action,
         NativeAppAction::InstallSystemService
@@ -453,17 +453,19 @@ fn dispatch(app: &AppRef, action: NativeAppAction) {
         if let Some(enabled) = patch.launch_on_startup {
             if let Err(error) = configure_launch_on_startup(enabled) {
                 set_notice(app, error);
-                return;
+                return app.borrow().state.clone();
             }
         }
     }
     let core = app.borrow().core.clone();
     let state = core.dispatch(action);
+    let result = state.clone();
     set_state(app, state);
     render(app);
     if settle_service {
         start_service_settlement_polling(app);
     }
+    result
 }
 
 fn set_state(app: &AppRef, state: NativeAppState) {
@@ -736,11 +738,13 @@ fn import_invite(app: &AppRef, invite: String) {
     }
     {
         let mut model = app.borrow_mut();
-        model.page = Page::Share;
         model.drafts.invite.clear();
         model.notice.clear();
     }
-    dispatch(app, NativeAppAction::ImportNetworkInvite { invite });
+    let state = dispatch(app, NativeAppAction::ImportNetworkInvite { invite });
+    if active_network(&state).is_some() {
+        set_page(app, Page::Share);
+    }
 }
 
 fn create_network(app: &AppRef, name: String) {
@@ -2468,7 +2472,9 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     cli.set_sensitive(state.cli_install_supported);
     {
         let app = app.clone();
-        cli.connect_clicked(move |_| dispatch(&app, NativeAppAction::InstallCli));
+        cli.connect_clicked(move |_| {
+            dispatch(&app, NativeAppAction::InstallCli);
+        });
     }
     cli_row.append(&cli);
     let check_update_button = icon_text_button("Check Updates", "view-refresh-symbolic");
@@ -2491,7 +2497,9 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     uninstall_cli.set_sensitive(state.cli_install_supported && state.cli_installed);
     {
         let app = app.clone();
-        uninstall_cli.connect_clicked(move |_| dispatch(&app, NativeAppAction::UninstallCli));
+        uninstall_cli.connect_clicked(move |_| {
+            dispatch(&app, NativeAppAction::UninstallCli);
+        });
     }
     cli_row.append(&uninstall_cli);
     system.append(&cli_row);
@@ -2511,7 +2519,9 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         );
         {
             let app = app.clone();
-            service.connect_clicked(move |_| dispatch(&app, NativeAppAction::InstallSystemService));
+            service.connect_clicked(move |_| {
+                dispatch(&app, NativeAppAction::InstallSystemService);
+            });
         }
         service_row.append(&service);
 
@@ -2550,7 +2560,9 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         {
             let app = app.clone();
             uninstall
-                .connect_clicked(move |_| dispatch(&app, NativeAppAction::UninstallSystemService));
+                .connect_clicked(move |_| {
+                    dispatch(&app, NativeAppAction::UninstallSystemService);
+                });
         }
         service_row.append(&uninstall);
         system.append(&service_row);
