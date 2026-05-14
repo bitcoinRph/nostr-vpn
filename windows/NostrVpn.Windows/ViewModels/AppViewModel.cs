@@ -53,9 +53,6 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     private bool _autoInstallUpdates;
     private string _updateVersion = "";
     private QrMatrix _inviteQr = new();
-    private static readonly Brush HeaderOffBrush = new SolidColorBrush(Color.FromRgb(240, 232, 255));
-    private static readonly Brush HeaderOkBrush = new SolidColorBrush(Color.FromRgb(18, 161, 80));
-    private static readonly Brush HeaderWarnBrush = new SolidColorBrush(Color.FromRgb(217, 119, 6));
     private static readonly Brush HeaderDangerBrush = new SolidColorBrush(Color.FromRgb(220, 38, 38));
     private static readonly Brush TextSecondaryBrush = new SolidColorBrush(Color.FromRgb(104, 113, 124));
 
@@ -374,13 +371,6 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             return "Off";
         }
     }
-    public Brush HeaderStatusBrush => State.ExitNodeBlocked
-        ? HeaderDangerBrush
-        : State.ExitNodeActive || State.VpnActive
-            ? HeaderOkBrush
-            : State.VpnEnabled
-                ? HeaderWarnBrush
-                : HeaderOffBrush;
     public Brush VpnStatusBrush => State.ExitNodeBlocked ? HeaderDangerBrush : TextSecondaryBrush;
     public string ThisDeviceCopyValue => !string.IsNullOrWhiteSpace(State.OwnNpub) ? State.OwnNpub : State.TunnelIp;
     public Visibility NoNearbyInvitesNoticeVisibility => State.NearbyDiscoveryActive && State.LanPeers.Count == 0
@@ -959,7 +949,6 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(HeroSubtitle));
         OnPropertyChanged(nameof(VpnButtonText));
         OnPropertyChanged(nameof(VpnStatusText));
-        OnPropertyChanged(nameof(HeaderStatusBrush));
         OnPropertyChanged(nameof(VpnStatusBrush));
         OnPropertyChanged(nameof(UpdateStripeText));
         OnPropertyChanged(nameof(ThisDeviceCopyValue));

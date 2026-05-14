@@ -46,12 +46,9 @@
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
-          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-            <Ellipse Width="42" Height="42" Fill="{Binding HeaderStatusBrush}" />
-            <StackPanel Margin="12,0,0,0">
-              <TextBlock Text="{Binding ActiveNetworkName}" FontSize="26" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" />
-              <TextBlock Text="{Binding VpnStatusText}" Foreground="{Binding VpnStatusBrush}" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="{Binding ActiveNetworkName}" FontSize="26" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" />
+            <TextBlock Text="{Binding VpnStatusText}" Foreground="{Binding VpnStatusBrush}" TextTrimming="CharacterEllipsis" />
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
             <Button Style="{StaticResource PrimaryButton}" Command="{Binding ToggleVpnCommand}" Content="{Binding VpnButtonText}" />
