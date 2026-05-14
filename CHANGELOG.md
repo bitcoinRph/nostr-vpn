@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.16 - 2026-05-15
+
 ### Added
 
 - `nvpn wg-upstream-test --scoped-host` now works on Windows using the
@@ -17,6 +19,10 @@ All notable changes to this project are documented in this file.
   rekey `SessionMsg3`. This prevents one lost final rekey packet from leaving
   peers on different session keys and causing AEAD recovery churn during
   long-lived nvpn connections.
+- Bumped FIPS to 0.3.7 so discovery can restart stale pending FSP sessions with
+  fresh routes, stale previous-epoch drain traffic does not trigger recovery
+  rekeys, and reply-learned discovery fans out through live peers even when
+  tree/bloom state has a candidate.
 - macOS and Linux service installation now copies the daemon to a stable
   service-owned path before writing the launchd plist or systemd unit. This
   keeps development builds from rewriting the running service executable under

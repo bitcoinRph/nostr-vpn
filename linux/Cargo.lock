@@ -1045,9 +1045,9 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "fips-core"
-version = "0.3.1"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c3bb4a18cbd7ed3a21fdbc0ffd3b945eb2dd80c5b279bc2ca02cb790b3fbac2"
+checksum = "387223650e4d191938e53966fc76b66eba3efae697fb01be49a22f5812cdaef0"
 dependencies = [
  "bluer",
  "crossbeam-channel",
@@ -1061,6 +1061,7 @@ dependencies = [
  "nostr 0.44.2",
  "nostr-sdk 0.44.1",
  "portable-atomic",
+ "procfs",
  "rand 0.10.1",
  "ring",
  "rtnetlink",
@@ -1082,9 +1083,9 @@ dependencies = [
 
 [[package]]
 name = "fips-endpoint"
-version = "0.3.1"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d35b45056248b9a07db1eac12b6002df0e5a9cf5e96081e4e3fc4302e2776984"
+checksum = "9058587e54bfb69e3e9a7e3e503733efebc3625b631babe40343634c6e1db1af"
 dependencies = [
  "fips-core",
 ]
@@ -2543,7 +2544,7 @@ dependencies = [
 
 [[package]]
 name = "nostr-vpn-app-core"
-version = "4.0.15"
+version = "4.0.16"
 dependencies = [
  "anyhow",
  "base64",
@@ -2566,7 +2567,7 @@ dependencies = [
 
 [[package]]
 name = "nostr-vpn-core"
-version = "4.0.15"
+version = "4.0.16"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2590,7 +2591,7 @@ dependencies = [
 
 [[package]]
 name = "nostr-vpn-linux"
-version = "4.0.15"
+version = "4.0.16"
 dependencies = [
  "gio",
  "glib",
@@ -2946,6 +2947,27 @@ dependencies = [
  "syn 2.0.106",
  "version_check",
  "yansi",
+]
+
+[[package]]
+name = "procfs"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25485360a54d6861439d60facef26de713b1e126bf015ec8f98239467a2b82f7"
+dependencies = [
+ "bitflags",
+ "procfs-core",
+ "rustix",
+]
+
+[[package]]
+name = "procfs-core"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6401bf7b6af22f78b563665d15a22e9aef27775b79b149a66ca022468a4e405"
+dependencies = [
+ "bitflags",
+ "hex",
 ]
 
 [[package]]
