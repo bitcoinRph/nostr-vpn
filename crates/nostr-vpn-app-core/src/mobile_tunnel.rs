@@ -25,6 +25,17 @@ const DEFAULT_MOBILE_MTU: u16 = 1280;
 const TUNNEL_CHANNEL_CAPACITY: usize = 1024;
 const FIPS_NOSTR_DISCOVERY_APP: &str = "fips-overlay-v1";
 
+/// Authenticated FIPS peer cap on mobile. fips's default is 128, which is
+/// fine on AC-powered desktops but wasteful on phones once Open discovery
+/// starts pulling in random nvpn nodes who have nothing to say to us at
+/// the data plane (the roster gate drops their packets anyway).
+const MOBILE_MAX_FIPS_PEERS: usize = 32;
+/// Pre-handshake connection cap on mobile (~2x peer cap matches fips's
+/// default ratio of 256:128).
+const MOBILE_MAX_FIPS_CONNECTIONS: usize = 64;
+/// Active-link cap on mobile (matches MOBILE_MAX_FIPS_CONNECTIONS).
+const MOBILE_MAX_FIPS_LINKS: usize = 64;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MobileTunnelConfig {
@@ -528,6 +539,15 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
     // sandbox accepts it but we don't need control on mobile either —
     // there's no daemon to talk to.
     config.node.control.enabled = false;
+    // Cap concurrent FIPS peers on mobile. With Open discovery the global
+    // overlay can keep introducing new peers; on phones we'd rather drop
+    // ambient connection attempts than burn battery talking to strangers
+    // who can't put anything on our tun anyway. Desktop nodes keep fips's
+    // default of 128 because they're typically on AC power and uncapped
+    // bandwidth.
+    config.node.limits.max_peers = MOBILE_MAX_FIPS_PEERS;
+    config.node.limits.max_connections = MOBILE_MAX_FIPS_CONNECTIONS;
+    config.node.limits.max_links = MOBILE_MAX_FIPS_LINKS;
     let nostr_enabled = !mobile.peers.is_empty();
     config.node.discovery.nostr.enabled = nostr_enabled;
     config.node.discovery.nostr.advertise = false;
@@ -822,6 +842,11 @@ mod tests {
         assert!(!udp.advertise_on_nostr());
         assert!(!udp.is_public());
         assert_eq!(config.peers.len(), 1);
+        // Mobile peer caps are clamped well below fips's defaults so Open
+        // discovery doesn't burn battery on ambient connections.
+        assert_eq!(config.node.limits.max_peers, MOBILE_MAX_FIPS_PEERS);
+        assert_eq!(config.node.limits.max_connections, MOBILE_MAX_FIPS_CONNECTIONS);
+        assert_eq!(config.node.limits.max_links, MOBILE_MAX_FIPS_LINKS);
     }
 
     #[test]

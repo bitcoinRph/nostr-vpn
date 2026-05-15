@@ -181,6 +181,25 @@ assert_peer_online_via_fips() {
   fi
 }
 
+# Asserts the transit hop is doing its job WITHOUT becoming a roster
+# participant. Pins the security boundary the user cares about: even though
+# Charlie ferries Alice<->Bob FIPS frames, he must never appear in Alice's
+# or Bob's data-plane roster. If a future change accidentally makes Open
+# discovery promote transit hops to peers, this assertion fires.
+assert_peer_absent_from_roster() {
+  local status="$1"
+  local peer_key="$2"
+  local label="$3"
+  if jq -e --arg peer_key "$peer_key" '
+    .daemon.state.peers
+    | any(.participant_pubkey == $peer_key or .fips_endpoint_npub == $peer_key)
+  ' >/dev/null <<<"$status"; then
+    echo "fips routed udp e2e failed: $label exposed transit hop as a data-plane peer" >&2
+    printf '%s\n' "$status" >&2
+    exit 1
+  fi
+}
+
 resolve_magic_dns() {
   local node="$1"
   local name="$2"
@@ -383,6 +402,15 @@ CHARLIE_STATUS="$("${COMPOSE[@]}" exec -T node-c nvpn status --json --discover-s
 
 assert_peer_online_via_fips "$ALICE_STATUS" "$BOB_NPUB" "alice"
 assert_peer_online_via_fips "$BOB_STATUS" "$ALICE_NPUB" "bob"
+
+# Charlie carries the FIPS-overlay traffic between Alice and Bob (direct
+# A<->B underlay UDP is blocked above) but must NOT appear in either
+# node's data-plane roster: Open FIPS discovery promotes Charlie to a
+# transit-only neighbor, and the roster gate in
+# `FipsMeshRuntime::receive_endpoint_data*` keeps anything Charlie ships
+# off Alice's and Bob's tun.
+assert_peer_absent_from_roster "$ALICE_STATUS" "$CHARLIE_NPUB" "alice"
+assert_peer_absent_from_roster "$BOB_STATUS" "$CHARLIE_NPUB" "bob"
 
 BOB_TUNNEL_IP="$(resolve_magic_dns node-a bob.nvpn)"
 ALICE_TUNNEL_IP="$(resolve_magic_dns node-b alice.nvpn)"
