@@ -130,6 +130,7 @@ private struct AddNetworkPage: View {
 private struct DevicesPage: View {
     @ObservedObject var model: AppModel
     @State private var addDevicePresented = false
+    @State private var pendingNetworkRemoval: NetworkState?
 
     var body: some View {
         ScrollView {
@@ -161,6 +162,14 @@ private struct DevicesPage: View {
                             )
                         }
                     }
+                    Button(role: .destructive) {
+                        pendingNetworkRemoval = network
+                    } label: {
+                        Label("Delete network", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 8)
                 } else {
                     NoticeCard(text: "No network")
                 }
@@ -181,6 +190,23 @@ private struct DevicesPage: View {
                         }
                     }
             }
+        }
+        .confirmationDialog(
+            "Delete \(pendingNetworkRemoval?.displayName ?? "network")?",
+            isPresented: Binding(
+                get: { pendingNetworkRemoval != nil },
+                set: { if !$0 { pendingNetworkRemoval = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingNetworkRemoval
+        ) { network in
+            Button("Delete", role: .destructive) {
+                model.dispatch(NativeActions.removeNetwork(network.id), status: "Deleting network")
+                pendingNetworkRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingNetworkRemoval = nil }
+        } message: { _ in
+            Text("Removes the network from this device. You can rejoin later with the invite.")
         }
     }
 
@@ -296,10 +322,10 @@ private struct JoinNetworkCard: View {
 
             DisclosureGroup("Add manually", isExpanded: $manualExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Enter the admin's Device ID and the network ID. They must add your Device ID too.")
+                    Text("Both sides have to add each other. Get the admin's Device ID and the network ID from them, paste below, then send a join request. The admin must also add your Device ID via their Add device page before the pairing completes.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField("Admin Device ID (npub1…)", text: $manualAdminId)
+                    TextField("Admin Device ID", text: $manualAdminId)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textFieldStyle(.roundedBorder)
@@ -396,6 +422,7 @@ private struct AddDeviceSheet: View {
                 InviteToMyNetworkCard(model: model)
 
                 if let network = model.activeNetwork {
+                    ManualPairingInfoCard(model: model, network: network)
                     AddDeviceCard(network: network) { npub, alias in
                         model.dispatch(
                             NativeActions.addParticipant(networkId: network.id, npub: npub, alias: alias),
@@ -407,6 +434,39 @@ private struct AddDeviceSheet: View {
             .padding()
         }
         .background(AppColors.background)
+    }
+}
+
+/// Shown to the admin in the Add Device sheet so they can dictate
+/// (text/Signal/etc.) the two values another device needs to join
+/// manually: the admin's own Device ID + the network ID. The other
+/// device pastes both into Join Network → Add manually. Both sides
+/// then have to add each other's Device IDs for the pairing to
+/// complete — same flow as scanning an invite, just typed by hand.
+private struct ManualPairingInfoCard: View {
+    @ObservedObject var model: AppModel
+    let network: NetworkState
+
+    var body: some View {
+        AppCard {
+            Text("For manual join")
+                .font(.headline)
+            Text("If the other device can't scan or paste an invite, share these two values. They'll enter them under Join Network → Add manually. You still need to add their Device ID below for the pairing to complete.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Your Device ID")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                CopyLine(value: model.state.ownNpub, model: model)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Network ID")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                CopyLine(value: network.networkId, model: model)
+            }
+        }
     }
 }
 
@@ -607,7 +667,6 @@ private struct SettingsPage: View {
         ScrollView {
             LazyVStack(spacing: 14) {
                 DeviceSettingsCard(model: model)
-                NetworksCard(model: model)
                 DiagnosticsCard(state: model.state)
             }
             .padding()
@@ -619,41 +678,197 @@ private struct SettingsPage: View {
 private struct ParticipantRow: View {
     @ObservedObject var model: AppModel
     let participant: ParticipantState
+    @State private var detailPresented = false
 
     var body: some View {
-        AppCard {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(connectivityTint(participant, state: model.state))
-                    .frame(width: 12, height: 12)
-                VStack(alignment: .leading, spacing: 4) {
+        Button {
+            detailPresented = true
+        } label: {
+            AppCard {
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(connectivityTint(participant, state: model.state))
+                        .frame(width: 12, height: 12)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text(deviceName(participant, state: model.state))
+                                .font(.headline)
+                                .lineLimit(1)
+                            if participant.isAdmin {
+                                Pill("Admin", tint: AppColors.accent)
+                            }
+                            if isSelf(participant, state: model.state) {
+                                Pill("This device", tint: AppColors.ok)
+                            }
+                            if participant.offersExitNode {
+                                Pill("Exit", tint: .orange)
+                            }
+                            if isFipsRouted(participant, state: model.state) {
+                                Pill("Routed", tint: .secondary)
+                            }
+                        }
+                        Text(deviceSubtitle(participant, state: model.state))
+                            .foregroundStyle(.secondary)
+                        Text(deviceStatus(participant, state: model.state))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $detailPresented) {
+            NavigationStack {
+                DeviceDetailSheet(model: model, participant: participant)
+                    .navigationTitle(deviceName(participant, state: model.state))
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { detailPresented = false }
+                        }
+                    }
+            }
+        }
+    }
+}
+
+private struct DeviceDetailSheet: View {
+    @ObservedObject var model: AppModel
+    let participant: ParticipantState
+    @State private var aliasDraft: String = ""
+    @State private var pendingRemove = false
+
+    private var isMe: Bool { isSelf(participant, state: model.state) }
+    private var network: NetworkState? { model.activeNetwork }
+    private var localIsAdmin: Bool { network?.localIsAdmin ?? false }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                AppCard {
                     HStack(spacing: 8) {
-                        Text(deviceName(participant, state: model.state))
-                            .font(.headline)
-                            .lineLimit(1)
+                        Circle()
+                            .fill(connectivityTint(participant, state: model.state))
+                            .frame(width: 12, height: 12)
+                        Text(deviceStatus(participant, state: model.state))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
                         if participant.isAdmin {
                             Pill("Admin", tint: AppColors.accent)
                         }
-                        if isSelf(participant, state: model.state) {
+                        if isMe {
                             Pill("This device", tint: AppColors.ok)
                         }
                         if participant.offersExitNode {
                             Pill("Exit", tint: .orange)
                         }
-                        if isFipsRouted(participant, state: model.state) {
-                            Pill("Routed", tint: .secondary)
-                        }
                     }
-                    Text(deviceSubtitle(participant, state: model.state))
-                        .foregroundStyle(.secondary)
-                    Text(deviceStatus(participant, state: model.state))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
-                Spacer()
-                Button("Copy") {
-                    model.copy(participant.npub)
+
+                AppCard {
+                    Text("Identity")
+                        .font(.headline)
+                    if !participant.magicDnsName.isEmpty {
+                        labelValueRow("Magic DNS", participant.magicDnsName)
+                    }
+                    labelValueRow("Device ID", participant.npub, copyable: true)
+                    if !participant.tunnelIp.isEmpty {
+                        labelValueRow("Tunnel IP", participant.tunnelIp, copyable: true)
+                    }
+                    if !participant.fipsTransportAddr.isEmpty {
+                        labelValueRow("Endpoint", participant.fipsTransportAddr)
+                    }
                 }
+
+                if localIsAdmin && !isMe, let network {
+                    AppCard {
+                        Text("Manage")
+                            .font(.headline)
+                        TextField("Alias", text: $aliasDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .onAppear { aliasDraft = participant.magicDnsAlias }
+                        Button {
+                            model.dispatch(
+                                NativeActions.setParticipantAlias(npub: participant.npub, alias: aliasDraft),
+                                status: "Saving alias"
+                            )
+                        } label: {
+                            Label("Save alias", systemImage: "checkmark")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            if participant.isAdmin {
+                                model.dispatch(
+                                    NativeActions.removeAdmin(networkId: network.id, npub: participant.npub),
+                                    status: "Removing admin"
+                                )
+                            } else {
+                                model.dispatch(
+                                    NativeActions.addAdmin(networkId: network.id, npub: participant.npub),
+                                    status: "Granting admin"
+                                )
+                            }
+                        } label: {
+                            Label(participant.isAdmin ? "Remove admin" : "Make admin", systemImage: participant.isAdmin ? "person.fill.badge.minus" : "person.fill.badge.plus")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button(role: .destructive) {
+                            pendingRemove = true
+                        } label: {
+                            Label("Remove from network", systemImage: "trash")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .confirmationDialog(
+                        "Remove \(deviceName(participant, state: model.state))?",
+                        isPresented: $pendingRemove,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Remove", role: .destructive) {
+                            model.dispatch(
+                                NativeActions.removeParticipant(networkId: network.id, npub: participant.npub),
+                                status: "Removing device"
+                            )
+                            pendingRemove = false
+                        }
+                        Button("Cancel", role: .cancel) { pendingRemove = false }
+                    } message: {
+                        Text("This removes the device from the network's roster. They keep the network locally but won't be in this roster anymore.")
+                    }
+                }
+            }
+            .padding()
+        }
+        .background(AppColors.background)
+    }
+
+    private func labelValueRow(_ label: String, _ value: String, copyable: Bool = false) -> some View {
+        HStack(alignment: .top) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 90, alignment: .leading)
+            Text(value)
+                .font(.callout)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Spacer(minLength: 4)
+            if copyable {
+                Button {
+                    model.copy(value)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
         }
     }
@@ -677,10 +892,10 @@ private struct AddDeviceCard: View {
         AppCard {
             Text("Add by Device ID")
                 .font(.headline)
-            Text("Manual pairing: enter the other device's ID (starts with npub1). They also need to add yours.")
+            Text("Manual pairing: enter the other device's Device ID. They also need to add yours.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            TextField("npub1…", text: $deviceId)
+            TextField("Device ID", text: $deviceId)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
@@ -882,93 +1097,6 @@ private struct WireGuardSettingsCard: View {
 
     private func sync() {
         config = model.state.wireguardExitConfig
-    }
-}
-
-private struct NetworksCard: View {
-    @ObservedObject var model: AppModel
-    @State private var newNetwork = ""
-    @State private var pendingRemoval: NetworkState?
-
-    var body: some View {
-        AppCard {
-            Text("Networks")
-                .font(.headline)
-            if let network = model.activeNetwork {
-                HStack {
-                    Text(network.displayName)
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text("active")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button(role: .destructive) {
-                        pendingRemoval = network
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.borderless)
-                }
-                CopyLine(value: network.networkId, model: model)
-                Toggle("Join requests", isOn: Binding(
-                    get: { network.joinRequestsEnabled },
-                    set: { enabled in
-                        model.dispatch(
-                            NativeActions.setJoinRequests(networkId: network.id, enabled: enabled),
-                            status: "Saving"
-                        )
-                    }
-                ))
-                .disabled(!network.localIsAdmin)
-            }
-            ForEach(model.state.networks.filter { !$0.enabled }) { network in
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(network.displayName)
-                            .font(.subheadline.weight(.semibold))
-                        Text("\(network.onlineCount) of \(network.expectedCount) connected")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Activate") {
-                        model.dispatch(NativeActions.setNetworkEnabled(network.id, true), status: "Activating")
-                    }
-                    Button(role: .destructive) {
-                        pendingRemoval = network
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-            HStack {
-                TextField("New network", text: $newNetwork)
-                    .textFieldStyle(.roundedBorder)
-                Button("Add") {
-                    model.dispatch(NativeActions.addNetwork(newNetwork), status: "Adding network")
-                    newNetwork = ""
-                }
-                .disabled(newNetwork.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .confirmationDialog(
-            "Remove \(pendingRemoval?.displayName ?? "network")?",
-            isPresented: Binding(
-                get: { pendingRemoval != nil },
-                set: { if !$0 { pendingRemoval = nil } }
-            ),
-            titleVisibility: .visible,
-            presenting: pendingRemoval
-        ) { network in
-            Button("Remove", role: .destructive) {
-                model.dispatch(NativeActions.removeNetwork(network.id), status: "Removing network")
-                pendingRemoval = nil
-            }
-            Button("Cancel", role: .cancel) { pendingRemoval = nil }
-        } message: { _ in
-            Text("This deletes the network from this device. You can rejoin later with the invite.")
-        }
     }
 }
 

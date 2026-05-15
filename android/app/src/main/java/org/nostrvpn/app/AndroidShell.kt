@@ -93,6 +93,7 @@ internal fun NostrVpnApp(
     var page by remember { mutableStateOf(Page.Devices) }
     var showAddDevice by remember { mutableStateOf(false) }
     var showAddNetwork by remember { mutableStateOf(false) }
+    var pendingNetworkRemoval by remember { mutableStateOf<NetworkState?>(null) }
     val network = state.activeNetwork
     Scaffold(
         containerColor = Color(0xFFF6F7F8),
@@ -136,7 +137,14 @@ internal fun NostrVpnApp(
                 addNetworkBody(state, scanQr, dispatch)
             } else {
                 when (page) {
-                    Page.Devices -> devicesPage(state, network, scanQr, dispatch, onAddDevice = { showAddDevice = true })
+                    Page.Devices -> devicesPage(
+                        state,
+                        network,
+                        scanQr,
+                        dispatch,
+                        onAddDevice = { showAddDevice = true },
+                        onDeleteNetwork = { pendingNetworkRemoval = network },
+                    )
                     Page.ExitNodes -> exitNodesPage(state, network, dispatch)
                     Page.Settings -> settingsPage(state, network, dispatch)
                 }
@@ -158,6 +166,24 @@ internal fun NostrVpnApp(
             scanQr = scanQr,
             dispatch = dispatch,
             onDismiss = { showAddNetwork = false },
+        )
+    }
+    pendingNetworkRemoval?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingNetworkRemoval = null },
+            title = { Text("Delete ${target.name.ifBlank { "network" }}?") },
+            text = { Text("Removes the network from this device. You can rejoin later with the invite.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    dispatch(NativeActions.removeNetwork(target.id))
+                    pendingNetworkRemoval = null
+                }) {
+                    Text("Delete", color = Color(0xFFB00020))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingNetworkRemoval = null }) { Text("Cancel") }
+            },
         )
     }
 }
@@ -304,9 +330,10 @@ private fun NavIcon(page: Page, selected: Boolean) {
 private fun androidx.compose.foundation.lazy.LazyListScope.devicesPage(
     state: AppState,
     network: NetworkState,
-    scanQr: () -> Unit,
+    @Suppress("UNUSED_PARAMETER") scanQr: () -> Unit,
     dispatch: (JSONObject) -> Unit,
     onAddDevice: () -> Unit,
+    onDeleteNetwork: () -> Unit,
 ) {
     if (network.localIsAdmin) {
         item {
@@ -319,7 +346,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.devicesPage(
         }
     }
     items(sortedParticipants(network.participants, state), key = { it.pubkeyHex.ifBlank { it.npub } }) { participant ->
-        ParticipantRow(state, participant)
+        ParticipantRow(state, participant, network = network, dispatch = dispatch)
     }
     items(network.inboundJoinRequests, key = { it.requesterNpub }) { request ->
         AppCard {
@@ -339,6 +366,16 @@ private fun androidx.compose.foundation.lazy.LazyListScope.devicesPage(
                     Text("Accept")
                 }
             }
+        }
+    }
+    item {
+        OutlinedButton(
+            onClick = onDeleteNetwork,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+        ) {
+            Text("Delete network", color = Color(0xFFB00020))
         }
     }
 }
@@ -458,7 +495,7 @@ private fun NetworkSetupCard(
             val adminInvalid = adminTrim.isNotEmpty() && !isValidDeviceId(adminTrim)
             val canSubmit = adminTrim.isNotEmpty() && meshTrim.isNotEmpty() && !adminInvalid
             Text(
-                "Enter the admin's Device ID and the network ID. They must add your Device ID too.",
+                "Both sides have to add each other. Get the admin's Device ID and the network ID from them, paste below, then send a join request. The admin must also add your Device ID via their Add device page before the pairing completes.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Muted,
             )
@@ -467,7 +504,7 @@ private fun NetworkSetupCard(
                 onValueChange = { manualAdminId = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                label = { Text("Admin Device ID (npub1…)") },
+                label = { Text("Admin Device ID") },
                 isError = adminInvalid,
                 supportingText = if (adminInvalid) {
                     { Text("Not a valid device ID") }
@@ -600,9 +637,21 @@ private fun AddDevicesDialog(
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
+                Text("For manual join", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "If the other device can't scan or paste an invite, share these two values. They'll enter them under Join Network → Add manually. You still need to add their Device ID below for the pairing to complete.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Muted,
+                )
+                Text("Your Device ID", style = MaterialTheme.typography.bodySmall, color = Muted)
+                CopyLine(state.ownNpub)
+                Text("Network ID", style = MaterialTheme.typography.bodySmall, color = Muted)
+                CopyLine(network.networkId)
+
+                Spacer(modifier = Modifier.height(8.dp))
                 Text("Add by Device ID", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Manual pairing: enter the other device's ID (starts with npub1). They also need to add yours.",
+                    "Manual pairing: enter the other device's Device ID. They also need to add yours.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Muted,
                 )
@@ -715,10 +764,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.exitNodesPage(
 
 private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
     state: AppState,
-    network: NetworkState?,
+    @Suppress("UNUSED_PARAMETER") network: NetworkState?,
     dispatch: (JSONObject) -> Unit,
 ) {
     item { DeviceSettingsCard(state, dispatch) }
-    item { NetworksCard(state, network, dispatch) }
     item { DiagnosticsCard(state) }
 }

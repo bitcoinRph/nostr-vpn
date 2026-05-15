@@ -533,7 +533,12 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
     config.node.discovery.nostr.advertise = false;
     config.node.discovery.nostr.policy = NostrDiscoveryPolicy::ConfiguredOnly;
     config.node.discovery.nostr.share_local_candidates = mobile.share_local_candidates;
-    config.node.discovery.nostr.app = format!("{FIPS_NOSTR_DISCOVERY_APP}:{scope}");
+    // Leave the relay-side `app` at fips-core's default ("fips-overlay-v1");
+    // see fips_private_mesh::fips_endpoint_config for the rationale (the relay
+    // `protocol` tag is publicly visible, so per-network apps would let any
+    // observer count members of each private network). The mesh id is still
+    // used as the LAN `discovery_scope` and inside FIPS handshake payloads.
+    let _ = scope;
     if !mobile.nostr_relays.is_empty() {
         config
             .node
@@ -791,10 +796,8 @@ mod tests {
             config.node.discovery.nostr.policy,
             NostrDiscoveryPolicy::ConfiguredOnly
         );
-        assert_eq!(
-            config.node.discovery.nostr.app,
-            format!("{FIPS_NOSTR_DISCOVERY_APP}:nostr-vpn:test")
-        );
+        // The mesh id must NOT appear in the publicly visible relay app tag.
+        assert_eq!(config.node.discovery.nostr.app, FIPS_NOSTR_DISCOVERY_APP);
         assert_eq!(
             config.node.discovery.nostr.advert_relays,
             vec!["wss://relay.example".to_string()]

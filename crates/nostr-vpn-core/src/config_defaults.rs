@@ -17,6 +17,18 @@ pub(crate) fn default_relays() -> Vec<String> {
         .collect()
 }
 
+/// Derive a deterministic mesh id from a network's participants.
+///
+/// Length is 8 hex chars / 32 bits. This is a disambiguation token,
+/// not a security secret — peers who already know each other (admin
+/// + invitee) just need to land on the same mesh slot. With ~32 bits
+/// of entropy the birthday collision threshold is ~65k networks, more
+/// than enough for nvpn's user base. Going shorter (e.g. 4 chars / 16
+/// bits) starts colliding around a few hundred networks globally.
+///
+/// Existing networks created on prior versions kept the old 16-char
+/// hex id; nothing in the runtime cares about the length, so they
+/// continue to work side-by-side with new 8-char ids.
 pub fn derive_network_id_from_participants(participants: &[String]) -> String {
     let mut normalized: Vec<String> = participants.to_vec();
     normalized.sort();
@@ -29,7 +41,7 @@ pub fn derive_network_id_from_participants(participants: &[String]) -> String {
     }
 
     let digest = hasher.finalize();
-    hex::encode(digest)[..16].to_string()
+    hex::encode(digest)[..8].to_string()
 }
 
 pub fn normalize_runtime_network_id(value: &str) -> String {

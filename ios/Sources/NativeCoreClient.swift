@@ -162,6 +162,22 @@ enum NativeActions {
         ]
     }
 
+    static func setParticipantAlias(npub: String, alias: String) -> [String: Any] {
+        ["type": "set_participant_alias", "npub": npub, "alias": alias]
+    }
+
+    static func addAdmin(networkId: String, npub: String) -> [String: Any] {
+        ["type": "add_admin", "networkId": networkId, "npub": npub]
+    }
+
+    static func removeAdmin(networkId: String, npub: String) -> [String: Any] {
+        ["type": "remove_admin", "networkId": networkId, "npub": npub]
+    }
+
+    static func removeParticipant(networkId: String, npub: String) -> [String: Any] {
+        ["type": "remove_participant", "networkId": networkId, "npub": npub]
+    }
+
     static func acceptJoinRequest(networkId: String, requesterNpub: String) -> [String: Any] {
         [
             "type": "accept_join_request",

@@ -18,6 +18,13 @@ fn network_id_derivation_is_order_independent() {
 }
 
 #[test]
+fn derived_network_id_is_short_hex_disambiguator() {
+    let id = derive_network_id_from_participants(&["a".to_string(), "b".to_string()]);
+    assert_eq!(id.len(), 8);
+    assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
 fn generated_config_auto_populates_keys() {
     let config = AppConfig::generated();
 

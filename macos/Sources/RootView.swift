@@ -715,11 +715,11 @@ struct RootView: View {
         let invalid = !trimmed.isEmpty && !isValidDeviceId(trimmed)
         return surface {
             sectionHeader("Add by Device ID", systemImage: "person.crop.circle.badge.plus")
-            Text("Manual pairing: enter the other device's ID (starts with npub1). They also need to add yours.")
+            Text("Manual pairing: enter the other device's Device ID. They also need to add yours.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
-                TextField("npub1…", text: $addByDeviceIdInput)
+                TextField("Device ID", text: $addByDeviceIdInput)
                     .textFieldStyle(.roundedBorder)
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)

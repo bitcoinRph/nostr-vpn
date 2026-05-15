@@ -5,6 +5,8 @@ import android.content.ClipboardManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,10 +58,19 @@ internal fun networkTitle(network: NetworkState?): String =
     network?.name?.ifBlank { "Private network" } ?: "No network"
 
 @Composable
-internal fun ParticipantRow(state: AppState, participant: ParticipantState) {
+internal fun ParticipantRow(
+    state: AppState,
+    participant: ParticipantState,
+    network: NetworkState? = null,
+    dispatch: ((JSONObject) -> Unit)? = null,
+) {
     val isSelf = participant.isSelf(state)
+    var detailOpen by remember { mutableStateOf(false) }
     AppCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.clickable { detailOpen = true },
+        ) {
             Dot(selected = if (isSelf) state.vpnActive else participant.reachable)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -78,8 +89,103 @@ internal fun ParticipantRow(state: AppState, participant: ParticipantState) {
                 Text(participant.subtitle(isSelf), color = Muted, maxLines = 1)
                 Text(participant.statusLabel(state), color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            CopyButton(participant.npub)
+            Text("›", color = Muted)
         }
+    }
+    if (detailOpen) {
+        DeviceDetailDialog(
+            state = state,
+            participant = participant,
+            network = network,
+            dispatch = dispatch,
+            onDismiss = { detailOpen = false },
+        )
+    }
+}
+
+@Composable
+private fun DeviceDetailDialog(
+    state: AppState,
+    participant: ParticipantState,
+    network: NetworkState?,
+    dispatch: ((JSONObject) -> Unit)?,
+    onDismiss: () -> Unit,
+) {
+    val isSelf = participant.isSelf(state)
+    val canManage = network?.localIsAdmin == true && !isSelf && dispatch != null
+    var aliasDraft by remember { mutableStateOf(participant.magicDnsAlias) }
+    var pendingRemove by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(participant.displayName(state)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(participant.statusLabel(state), color = Muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (isSelf) Pill("This device", Color(0xFFECFDF5), Ok)
+                    if (participant.isAdmin) Pill("Admin", Color(0xFFF5F3FF), Accent)
+                    if (participant.offersExitNode) Pill("Exit", Color(0xFFFFF7ED), Color(0xFFA16207))
+                }
+                if (participant.magicDnsName.isNotBlank()) {
+                    Text("Magic DNS", style = MaterialTheme.typography.labelMedium, color = Muted)
+                    Text(participant.magicDnsName)
+                }
+                Text("Device ID", style = MaterialTheme.typography.labelMedium, color = Muted)
+                CopyLine(participant.npub)
+                if (participant.tunnelIp.isNotBlank()) {
+                    Text("Tunnel IP", style = MaterialTheme.typography.labelMedium, color = Muted)
+                    CopyLine(participant.tunnelIp)
+                }
+                if (canManage && network != null && dispatch != null) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = aliasDraft,
+                        onValueChange = { aliasDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Alias") },
+                    )
+                    Button(onClick = {
+                        dispatch(JSONObject().put("type", "set_participant_alias")
+                            .put("npub", participant.npub).put("alias", aliasDraft))
+                    }) { Text("Save alias") }
+                    OutlinedButton(onClick = {
+                        val type = if (participant.isAdmin) "remove_admin" else "add_admin"
+                        dispatch(JSONObject().put("type", type)
+                            .put("networkId", network.id).put("npub", participant.npub))
+                    }) {
+                        Text(if (participant.isAdmin) "Remove admin" else "Make admin")
+                    }
+                    OutlinedButton(onClick = { pendingRemove = true }) {
+                        Text("Remove from network")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        },
+    )
+    if (pendingRemove && canManage && network != null && dispatch != null) {
+        AlertDialog(
+            onDismissRequest = { pendingRemove = false },
+            title = { Text("Remove ${participant.displayName(state)}?") },
+            text = { Text("This removes the device from the network's roster. They keep the network locally but won't be in this roster anymore.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    dispatch(JSONObject().put("type", "remove_participant")
+                        .put("networkId", network.id).put("npub", participant.npub))
+                    pendingRemove = false
+                    onDismiss()
+                }) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemove = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -96,7 +202,7 @@ internal fun AddParticipantForm(network: NetworkState, dispatch: (JSONObject) ->
             onValueChange = { deviceId = it },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            label = { Text("npub1…") },
+            label = { Text("Device ID") },
             isError = showError,
             supportingText = if (showError) {
                 { Text("Not a valid device ID") }
@@ -303,89 +409,6 @@ internal fun WireGuardSettingsCard(state: AppState, dispatch: (JSONObject) -> Un
         }) {
             Text("Save")
         }
-    }
-}
-
-@Composable
-internal fun NetworksCard(state: AppState, network: NetworkState?, dispatch: (JSONObject) -> Unit) {
-    var newNetwork by remember { mutableStateOf("") }
-    var pendingRemoval by remember { mutableStateOf<NetworkState?>(null) }
-    AppCard {
-        Text("Networks", style = MaterialTheme.typography.titleMedium)
-        network?.let {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(it.name.ifBlank { "Private network" }, fontWeight = FontWeight.SemiBold)
-                    Text("active", color = Muted)
-                }
-                OutlinedButton(onClick = { pendingRemoval = it }) {
-                    Text("Remove")
-                }
-            }
-            Text(it.networkId, color = Muted, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = it.joinRequestsEnabled,
-                    onCheckedChange = { enabled ->
-                        dispatch(
-                            JSONObject()
-                                .put("type", "set_network_join_requests_enabled")
-                                .put("networkId", it.id)
-                                .put("enabled", enabled),
-                        )
-                    },
-                    enabled = it.localIsAdmin,
-                )
-                Text("Join requests")
-            }
-        }
-        state.networks.filter { !it.enabled }.forEach { saved ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(saved.name.ifBlank { "Private network" }, fontWeight = FontWeight.SemiBold)
-                    Text("${saved.onlineCount} of ${saved.expectedCount} connected", color = Muted)
-                }
-                Button(onClick = { dispatch(NativeActions.setNetworkEnabled(saved.id, true)) }) {
-                    Text("Activate")
-                }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { pendingRemoval = saved }) {
-                    Text("Remove")
-                }
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = newNetwork,
-                onValueChange = { newNetwork = it },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                label = { Text("New network") },
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(enabled = newNetwork.isNotBlank(), onClick = {
-                dispatch(NativeActions.addNetwork(newNetwork.trim()))
-                newNetwork = ""
-            }) {
-                Text("Add")
-            }
-        }
-    }
-    pendingRemoval?.let { target ->
-        AlertDialog(
-            onDismissRequest = { pendingRemoval = null },
-            title = { Text("Remove ${target.name.ifBlank { "network" }}?") },
-            text = { Text("This deletes the network from this device. You can rejoin later with the invite.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    dispatch(NativeActions.removeNetwork(target.id))
-                    pendingRemoval = null
-                }) { Text("Remove") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingRemoval = null }) { Text("Cancel") }
-            },
-        )
     }
 }
 

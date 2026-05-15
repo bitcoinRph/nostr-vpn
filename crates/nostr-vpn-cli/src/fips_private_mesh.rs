@@ -369,7 +369,6 @@ impl FipsPrivateMeshRuntime {
         let scope = format!("nostr-vpn:{}", network_id.as_ref().trim());
         let endpoint_peers = fips_endpoint_peers_from_mesh(&peers, Vec::new());
         let config = fips_endpoint_config(
-            &scope,
             &endpoint_peers,
             None,
             private_mesh_mtu_from_app(None),
@@ -955,7 +954,6 @@ struct FipsEndpointPeerTransportConfig {
 }
 
 fn fips_endpoint_config(
-    scope: &str,
     peers: &[FipsEndpointPeerTransportConfig],
     transport: Option<&FipsEndpointTransportConfig>,
     mesh_mtu: MeshMtu,
@@ -977,7 +975,13 @@ fn fips_endpoint_config(
     config.node.discovery.nostr.share_local_candidates = transport
         .map(|transport| transport.share_local_candidates)
         .unwrap_or(false);
-    config.node.discovery.nostr.app = format!("{FIPS_NOSTR_DISCOVERY_APP}:{scope}");
+    // Leave the relay-side `app` at fips-core's default ("fips-overlay-v1").
+    // We deliberately do NOT bake the per-network mesh id into it: the relay
+    // `protocol` tag is publicly visible, so per-network apps would let any
+    // observer count members of each private network. The mesh id is still
+    // used as the LAN `discovery_scope` (mDNS-only, doesn't leave the
+    // physical LAN) and is enforced cryptographically inside FIPS handshake
+    // payloads.
     let bind_addr = transport.map(fips_udp_bind_addr);
     let external_addr = transport.and_then(fips_udp_external_addr);
     if let Some(transport) = transport {
@@ -1270,7 +1274,6 @@ impl FipsPrivateTunnelRuntime {
             share_local_candidates: config.share_local_candidates,
         };
         let endpoint_config = fips_endpoint_config(
-            &scope,
             &config.endpoint_peers,
             Some(&transport),
             config.mesh_mtu,
@@ -2367,7 +2370,6 @@ impl FipsPrivateTunnelRuntime {
             share_local_candidates: config.share_local_candidates,
         };
         let endpoint_config = fips_endpoint_config(
-            &scope,
             &config.endpoint_peers,
             Some(&transport),
             config.mesh_mtu,
@@ -3336,7 +3338,6 @@ mod tests {
         .expect("peer config");
         let endpoint_peers = fips_endpoint_peers_from_mesh(&[peer], Vec::new());
         let config = fips_endpoint_config(
-            "nostr-vpn:test",
             &endpoint_peers,
             None,
             super::resolve_private_mesh_mtu(None, None, None),
@@ -3352,10 +3353,8 @@ mod tests {
             fips_endpoint::NostrDiscoveryPolicy::ConfiguredOnly
         );
         assert!(!config.node.discovery.nostr.share_local_candidates);
-        assert_eq!(
-            config.node.discovery.nostr.app,
-            format!("{FIPS_NOSTR_DISCOVERY_APP}:nostr-vpn:test")
-        );
+        // The mesh id must NOT appear in the publicly visible relay app tag.
+        assert_eq!(config.node.discovery.nostr.app, FIPS_NOSTR_DISCOVERY_APP);
         let udp = match config.transports.udp {
             fips_endpoint::TransportInstances::Single(udp) => udp,
             _ => panic!("expected one UDP transport"),
@@ -3387,7 +3386,6 @@ mod tests {
 
         let endpoint_peers = fips_endpoint_peers_from_mesh(&[peer], Vec::new());
         let config = fips_endpoint_config(
-            "nostr-vpn:test",
             &endpoint_peers,
             Some(&transport),
             super::resolve_private_mesh_mtu(None, None, None),
@@ -3400,10 +3398,7 @@ mod tests {
             fips_endpoint::NostrDiscoveryPolicy::ConfiguredOnly
         );
         assert!(config.node.discovery.nostr.share_local_candidates);
-        assert_eq!(
-            config.node.discovery.nostr.app,
-            format!("{FIPS_NOSTR_DISCOVERY_APP}:nostr-vpn:test")
-        );
+        assert_eq!(config.node.discovery.nostr.app, FIPS_NOSTR_DISCOVERY_APP);
         assert_eq!(
             config.node.discovery.nostr.stun_servers,
             vec!["stun:stun.example.org:3478".to_string()]
@@ -3451,7 +3446,6 @@ mod tests {
         };
 
         let config = fips_endpoint_config(
-            "nostr-vpn:test",
             &endpoint_peers,
             Some(&transport),
             super::resolve_private_mesh_mtu(None, None, None),

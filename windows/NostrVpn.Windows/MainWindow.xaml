@@ -288,7 +288,7 @@
               <Border Style="{StaticResource Card}" Margin="0,8,0,0">
                 <StackPanel>
                   <TextBlock Text="Add by Device ID" FontWeight="SemiBold" Margin="0,0,0,4" />
-                  <TextBlock Text="Manual pairing: enter the other device's ID (starts with npub1). They also need to add yours." Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                  <TextBlock Text="Manual pairing: enter the other device's Device ID. They also need to add yours." Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
                   <Grid>
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="*" />
