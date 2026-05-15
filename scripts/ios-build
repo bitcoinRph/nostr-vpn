@@ -170,10 +170,21 @@ run_ios_upload() {
   echo "finishes processing (typically 5-15 minutes)."
 }
 
+run_ios_attach_internal() {
+  # Apple's altool --upload-app drops the IPA into App Store Connect but does
+  # NOT attach the resulting build to any TestFlight tester group. Without
+  # this the build sits in "Builds" forever and never appears in the
+  # internal-testers' TestFlight app — the entire reason we ran the upload.
+  # Polls until the latest build is VALID, then attaches it to the
+  # internal-testers group.
+  python3 "$ROOT/scripts/testflight-attach-internal.py"
+}
+
 run_ios_testflight() {
   run_ios_archive
   run_ios_export
   run_ios_upload
+  run_ios_attach_internal
 }
 
 case "${1:-}" in
@@ -183,6 +194,7 @@ case "${1:-}" in
   ios-archive) run_ios_archive ;;
   ios-export) run_ios_export ;;
   ios-upload) run_ios_upload ;;
+  ios-attach-internal) run_ios_attach_internal ;;
   ios-testflight|ios-release-artifacts) run_ios_testflight ;;
   -h|--help|help|"") usage ;;
   *)
