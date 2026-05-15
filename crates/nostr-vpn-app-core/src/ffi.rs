@@ -1736,7 +1736,7 @@ impl NativeAppRuntime {
 
     /// Cache the version of the bundled `nvpn` CLI — i.e. the version that
     /// `service install --force` would deploy. Compared against the installed
-    /// daemon binary version to decide whether a repair is actually needed.
+    /// daemon binary version to decide whether a service update is needed.
     fn refresh_expected_service_binary_version(&mut self) {
         #[derive(Deserialize)]
         struct VersionView {
