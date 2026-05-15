@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/release_common.sh"
+
+load_release_env "$ROOT"
+load_appstoreconnect_defaults
+resolve_shared_build_metadata "$ROOT"
+
+IOS_DIR="$ROOT/ios"
+DIST_DIR="$ROOT/dist/ios"
+ARCHIVE_PATH="$DIST_DIR/NostrVpnIos.xcarchive"
+EXPORT_DIR="$DIST_DIR/export"
+EXPORT_OPTIONS="$DIST_DIR/ExportOptions.plist"
+PROJECT="$IOS_DIR/NostrVpnIos.xcodeproj"
+SCHEME="${NVPN_IOS_SCHEME:-NostrVpnIos}"
+CONFIGURATION="${NVPN_IOS_CONFIGURATION:-Release}"
+MIN_VERSION="${NVPN_IOS_MIN_VERSION:-17.0}"
+TEAM_ID="${NVPN_IOS_TEAM_ID:-J8PPJKD7TA}"
+BUNDLE_ID="${NVPN_IOS_BUNDLE_ID:-to.iris.nvpn}"
+PACKET_TUNNEL_BUNDLE_ID="${NVPN_IOS_PACKET_TUNNEL_BUNDLE_ID:-to.iris.nvpn.PacketTunnel}"
+PROVISIONING_ENV="$DIST_DIR/provisioning.env"
+
+usage() {
+  cat <<'EOF'
+usage: ./scripts/ios-build <command>
+
+commands:
+  ios-rust              build Rust app-core for ios-sim + iphoneos
+  ios-xcframework       build the app-core xcframework
+  ios-project           regenerate the Xcode project from project.yml
+  ios-archive           archive the app for the App Store (Release config)
+  ios-export            export an IPA from the archive (App Store distribution)
+  ios-upload            upload the exported IPA to App Store Connect
+  ios-testflight        archive + export + upload (full TestFlight ship)
+  ios-release-artifacts alias for ios-testflight
+
+env (read from .env.release.local or shell):
+  NVPN_ASC_AUTH_KEY_PATH         App Store Connect API key .p8
+  NVPN_ASC_AUTH_KEY_ID           Key ID
+  NVPN_ASC_AUTH_KEY_ISSUER_ID    Issuer ID
+  NVPN_IOS_TEAM_ID               Apple developer team id (default J8PPJKD7TA)
+  NVPN_IOS_BUNDLE_ID             App bundle id (default to.iris.nvpn)
+EOF
+}
+
+require_var NVPN_ASC_AUTH_KEY_PATH
+require_var NVPN_ASC_AUTH_KEY_ID
+require_var NVPN_ASC_AUTH_KEY_ISSUER_ID
+
+run_ios_rust() {
+  "$ROOT/tools/run-ios" rust
+}
+
+run_ios_xcframework() {
+  "$ROOT/tools/run-ios" xcframework
+}
+
+run_ios_project() {
+  "$ROOT/tools/run-ios" project
+}
+
+ensure_profiles() {
+  ensure_dir "$DIST_DIR"
+  NVPN_IOS_PROFILES_ENV_PATH="$PROVISIONING_ENV" "$ROOT/scripts/ios-profiles" ensure
+}
+
+write_export_options() {
+  local app_uuid="$1"
+  local tunnel_uuid="$2"
+  cat >"$EXPORT_OPTIONS" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key>
+  <string>app-store-connect</string>
+  <key>destination</key>
+  <string>export</string>
+  <key>teamID</key>
+  <string>$TEAM_ID</string>
+  <key>signingStyle</key>
+  <string>manual</string>
+  <key>signingCertificate</key>
+  <string>Apple Distribution</string>
+  <key>uploadSymbols</key>
+  <true/>
+  <key>uploadBitcode</key>
+  <false/>
+  <key>provisioningProfiles</key>
+  <dict>
+    <key>$BUNDLE_ID</key>
+    <string>$app_uuid</string>
+    <key>$PACKET_TUNNEL_BUNDLE_ID</key>
+    <string>$tunnel_uuid</string>
+  </dict>
+</dict>
+</plist>
+EOF
+}
+
+run_ios_archive() {
+  ensure_profiles
+  ensure_dir "$DIST_DIR"
+  rm -rf "$ARCHIVE_PATH"
+
+  run_ios_rust
+  run_ios_xcframework
+  run_ios_project
+
+  # Use automatic signing for the archive itself with -allowProvisioningUpdates
+  # so xcodebuild applies whichever profile Xcode finds for each target. The
+  # explicit per-target profile mapping happens at export time via
+  # exportOptionsPlist, which is where Apple expects you to pin profiles for
+  # App Store submission.
+  xcodebuild \
+    -project "$PROJECT" \
+    -scheme "$SCHEME" \
+    -configuration "$CONFIGURATION" \
+    -destination "generic/platform=iOS" \
+    -archivePath "$ARCHIVE_PATH" \
+    -allowProvisioningUpdates \
+    DEVELOPMENT_TEAM="$TEAM_ID" \
+    archive
+}
+
+run_ios_export() {
+  ensure_dir "$EXPORT_DIR"
+  rm -rf "$EXPORT_DIR"
+  mkdir -p "$EXPORT_DIR"
+
+  # shellcheck disable=SC1090
+  source "$PROVISIONING_ENV"
+  : "${NVPN_IOS_PROVISIONING_PROFILE_UUID:?profile uuid not set}"
+  : "${NVPN_IOS_PACKET_TUNNEL_PROVISIONING_PROFILE_UUID:?packet tunnel profile uuid not set}"
+
+  write_export_options \
+    "$NVPN_IOS_PROVISIONING_PROFILE_UUID" \
+    "$NVPN_IOS_PACKET_TUNNEL_PROVISIONING_PROFILE_UUID"
+
+  xcodebuild \
+    -exportArchive \
+    -archivePath "$ARCHIVE_PATH" \
+    -exportPath "$EXPORT_DIR" \
+    -exportOptionsPlist "$EXPORT_OPTIONS" \
+    -allowProvisioningUpdates
+}
+
+ipa_path() {
+  find "$EXPORT_DIR" -maxdepth 1 -name '*.ipa' -type f | head -n 1
+}
+
+run_ios_upload() {
+  local ipa
+  ipa="$(ipa_path)"
+  if [[ -z "$ipa" ]]; then
+    echo "No IPA found in $EXPORT_DIR; run ios-export first" >&2
+    exit 1
+  fi
+  echo "Uploading $ipa to App Store Connect (TestFlight Internal)..."
+  xcrun altool --upload-app \
+    --type ios \
+    --file "$ipa" \
+    --apiKey "$NVPN_ASC_AUTH_KEY_ID" \
+    --apiIssuer "$NVPN_ASC_AUTH_KEY_ISSUER_ID"
+  echo "Upload submitted. Build will appear in TestFlight Internal once Apple"
+  echo "finishes processing (typically 5-15 minutes)."
+}
+
+run_ios_testflight() {
+  run_ios_archive
+  run_ios_export
+  run_ios_upload
+}
+
+case "${1:-}" in
+  ios-rust) run_ios_rust ;;
+  ios-xcframework) run_ios_xcframework ;;
+  ios-project) run_ios_project ;;
+  ios-archive) run_ios_archive ;;
+  ios-export) run_ios_export ;;
+  ios-upload) run_ios_upload ;;
+  ios-testflight|ios-release-artifacts) run_ios_testflight ;;
+  -h|--help|help|"") usage ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

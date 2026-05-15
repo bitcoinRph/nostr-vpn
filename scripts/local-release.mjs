@@ -66,7 +66,7 @@ Options:
   --release-tree <name>    htree release tree name (default: releases/nostr-vpn)
   --stage-dir <path>       Directory used for staged release metadata
   --env-file <path>        Extra dotenv file to load (repeatable)
-  --only <csv>             Limit steps to platform-versions,verify,macos,linux,windows,android
+  --only <csv>             Limit steps to platform-versions,verify,macos,ios,linux,windows,android
   --skip <csv>             Skip steps by name
   --allow-partial          Stage/publish even if a selected platform build fails
   --help                   Show this help
@@ -702,6 +702,21 @@ function buildMacosArtifacts({ tag, dryRun, builtLines }) {
   builtLines.push('Built signed and notarized Apple Silicon macOS DMG and updater archive locally.')
 }
 
+function buildIosArtifacts({ tag, dryRun, builtLines }) {
+  if (process.platform !== 'darwin') {
+    throw new SkipStepError('Skipping iOS artifacts because the host is not macOS.')
+  }
+  const env = {
+    ...process.env,
+    NVPN_RELEASE_TAG: tag,
+  }
+  // ios-build runs ios-profiles ensure (which needs ASC creds), then archive,
+  // then export, then altool upload. Output is TestFlight Internal — no
+  // download artifact ends up in dist/.
+  run('bash', [join(repoRoot, 'scripts', 'ios-build'), 'ios-testflight'], { env, dryRun })
+  builtLines.push(`Uploaded iOS ${tag} to App Store Connect (TestFlight Internal).`)
+}
+
 /**
  * Sync platform-native version metadata (xcodeproj MARKETING_VERSION, Android
  * versionName/versionCode, linux crate's [package].version) to the Cargo
@@ -926,6 +941,7 @@ function main() {
     ['platform-versions', () => syncPlatformVersions({ tag, dryRun: options.dryRun, builtLines })],
     ['verify', () => runVerify({ dryRun: options.dryRun, builtLines })],
     ['macos', () => buildMacosArtifacts({ tag, dryRun: options.dryRun, builtLines })],
+    ['ios', () => buildIosArtifacts({ tag, dryRun: options.dryRun, builtLines })],
     ['android', () => buildAndroidArtifacts({ env, tag, dryRun: options.dryRun, builtLines })],
     ['linux', () => buildLinuxArtifacts({ env, tag, dryRun: options.dryRun, builtLines })],
     ['windows', () => buildWindowsArtifacts({ env, tag, dryRun: options.dryRun, builtLines })],
