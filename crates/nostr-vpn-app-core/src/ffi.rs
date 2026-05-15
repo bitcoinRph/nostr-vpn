@@ -686,6 +686,13 @@ impl NativeAppRuntime {
                 ensure_success("nvpn uninstall-cli", &output)
             }
             NativeAppAction::InstallSystemService => {
+                // Preserve "VPN was on" across the service swap: --force tears
+                // down the old daemon and starts a fresh one, which by default
+                // comes up disconnected. Without restoring, the user sees the
+                // VPN switch flip to OFF every time they update the service —
+                // doubly bad after an in-app update where they didn't ask to
+                // disconnect.
+                let was_vpn_on = self.vpn_enabled || self.vpn_active;
                 let output = self.run_nvpn_service_action([
                     "service",
                     "install",
@@ -696,7 +703,15 @@ impl NativeAppRuntime {
                 ensure_success("nvpn service install", &output)?;
                 self.invalidate_service_status();
                 self.recover_from_startup_error()?;
-                self.refresh_service_status()
+                self.refresh_service_status()?;
+                if was_vpn_on && !self.vpn_active {
+                    // Best-effort: ignore connect_vpn errors so a transient
+                    // race (new daemon not quite ready yet) doesn't surface
+                    // as a "service install failed" message — the install
+                    // itself succeeded.
+                    let _ = self.connect_vpn();
+                }
+                Ok(())
             }
             NativeAppAction::UninstallSystemService => {
                 let output = self.run_nvpn_service_action([

@@ -43,6 +43,9 @@ struct RootView: View {
     var body: some View {
         VStack(spacing: 0) {
             headerBar
+            if manager.serviceUpdateRecommended {
+                serviceUpdateStripe
+            }
             if manager.updateAvailable {
                 updateStripe
             }
@@ -77,6 +80,43 @@ struct RootView: View {
         .padding(.trailing, 18)
         .frame(height: 44)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var serviceUpdateStripe: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.orange)
+            Text(serviceUpdateStripeText)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 12)
+            Button {
+                manager.installService()
+            } label: {
+                Text(manager.serviceSettling ? "Updating…" : "Update")
+            }
+            .controlSize(.small)
+            .disabled(!state.serviceSupported || manager.actionInFlight || manager.serviceSettling)
+        }
+        .padding(.leading, 104)
+        .padding(.trailing, 18)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .underPageBackgroundColor))
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    private var serviceUpdateStripeText: String {
+        let installed = state.serviceBinaryVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        let expected = state.expectedServiceBinaryVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        if installed.isEmpty || expected.isEmpty {
+            return "Background service needs update to match the app"
+        }
+        return "Background service is on v\(installed); update to match app v\(expected)"
     }
 
     private var updateStripe: some View {
@@ -1109,14 +1149,14 @@ struct RootView: View {
             HStack(spacing: 8) {
                 badge(state.serviceInstalled ? "Service installed" : "Service missing", style: state.serviceInstalled ? .ok : .warn)
                 badge(state.serviceRunning ? "Running" : "Stopped", style: state.serviceRunning ? .ok : .muted)
-                if manager.serviceRepairRecommended {
-                    badge("Repair available", style: .warn)
+                if manager.serviceUpdateRecommended {
+                    badge("Update available", style: .warn)
                 }
                 badge(state.cliInstalled ? "CLI installed" : "CLI missing", style: state.cliInstalled ? .ok : .muted)
                 badge(manager.updateAvailable ? "Update \(manager.updateVersion)" : "Up to date", style: manager.updateAvailable ? .warn : .ok)
             }
 
-            if manager.serviceRepairRecommended || !state.serviceStatusDetail.isEmpty || !manager.updateStatus.isEmpty {
+            if manager.serviceUpdateRecommended || !state.serviceStatusDetail.isEmpty || !manager.updateStatus.isEmpty {
                 Text(firstNonEmpty(manager.updateStatus, state.serviceStatusDetail, fallback: ""))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1127,7 +1167,7 @@ struct RootView: View {
                 Button {
                     manager.installService()
                 } label: {
-                    Label(serviceInstallButtonTitle, systemImage: manager.serviceRepairRecommended ? "wrench.and.screwdriver" : "arrow.down.to.line")
+                    Label(serviceInstallButtonTitle, systemImage: manager.serviceUpdateRecommended ? "arrow.up.circle" : "arrow.down.to.line")
                 }
                 .disabled(!state.serviceSupported || manager.actionInFlight || manager.serviceSettling)
 
@@ -1410,8 +1450,8 @@ struct RootView: View {
     }
 
     private var serviceInstallButtonTitle: String {
-        if manager.serviceRepairRecommended {
-            return "Repair Service"
+        if manager.serviceUpdateRecommended {
+            return "Update Service"
         }
         return state.serviceInstalled ? "Reinstall Service" : "Install Service"
     }

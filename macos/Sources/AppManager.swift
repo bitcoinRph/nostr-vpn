@@ -78,8 +78,8 @@ final class AppManager: ObservableObject {
         state.networks.filter { !$0.enabled }
     }
 
-    var serviceRepairRecommended: Bool {
-        Self.serviceRepairRecommended(in: state)
+    var serviceUpdateRecommended: Bool {
+        Self.serviceUpdateRecommended(in: state)
     }
 
     var vpnSwitchEnabled: Bool {
@@ -104,8 +104,8 @@ final class AppManager: ObservableObject {
         if state.vpnEnabled {
             return state.vpnStatus.isEmpty ? "Turning on" : state.vpnStatus
         }
-        if Self.serviceRepairRecommended(in: state) {
-            return "Service needs repair"
+        if Self.serviceUpdateRecommended(in: state) {
+            return "Background service needs update"
         }
         return "Off"
     }
@@ -139,7 +139,7 @@ final class AppManager: ObservableObject {
             }.value
             await MainActor.run {
                 self.state = nextState
-                self.maybePromptServiceRepair(nextState)
+                self.maybePromptServiceUpdate(nextState)
             }
         }
     }
@@ -165,7 +165,7 @@ final class AppManager: ObservableObject {
                 self.state = nextState
                 self.actionInFlight = false
                 self.actionStatus = nextState.error.isEmpty ? successStatus : nextState.error
-                self.maybePromptServiceRepair(nextState)
+                self.maybePromptServiceUpdate(nextState)
                 if nextState.error.isEmpty, !successStatus.isEmpty {
                     self.clearActionStatus(after: 3)
                 }
@@ -452,8 +452,8 @@ final class AppManager: ObservableObject {
     }
 
     func installService() {
-        let installing = serviceRepairRecommended ? "Repairing service" : state.serviceInstalled ? "Reinstalling service" : "Installing service"
-        let installed = serviceRepairRecommended ? "Service repaired" : state.serviceInstalled ? "Service reinstalled" : "Service installed"
+        let installing = serviceUpdateRecommended ? "Updating service" : state.serviceInstalled ? "Reinstalling service" : "Installing service"
+        let installed = serviceUpdateRecommended ? "Service updated" : state.serviceInstalled ? "Service reinstalled" : "Service installed"
         dispatch(.installSystemService, status: installing, successStatus: installed, settleService: true)
     }
 
@@ -688,7 +688,7 @@ final class AppManager: ObservableObject {
                 }.value
                 await MainActor.run {
                     self.state = nextState
-                    self.maybePromptServiceRepair(nextState)
+                    self.maybePromptServiceUpdate(nextState)
                 }
             }
             await MainActor.run {
@@ -711,16 +711,16 @@ final class AppManager: ObservableObject {
         }
     }
 
-    private func maybePromptServiceRepair(_ nextState: NativeAppState) {
-        guard Self.serviceRepairRecommended(in: nextState), !actionInFlight else {
+    private func maybePromptServiceUpdate(_ nextState: NativeAppState) {
+        guard Self.serviceUpdateRecommended(in: nextState), !actionInFlight else {
             return
         }
         if actionStatus.isEmpty {
-            actionStatus = "Background service needs repair"
+            actionStatus = "Background service needs update"
         }
     }
 
-    private static func serviceRepairRecommended(in state: NativeAppState) -> Bool {
+    private static func serviceUpdateRecommended(in state: NativeAppState) -> Bool {
         state.serviceInstalled
             && !state.serviceBinaryVersion.isEmpty
             && !state.expectedServiceBinaryVersion.isEmpty

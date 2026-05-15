@@ -1485,8 +1485,8 @@ fn build_network_hero(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         },
         if state.mesh_ready { "ok" } else { "muted" },
     ));
-    if service_repair_recommended(state) {
-        badges.append(&badge("Repair", "warn"));
+    if service_update_recommended(state) {
+        badges.append(&badge("Update", "warn"));
     }
     if state.exit_node_blocked {
         badges.append(&badge("Internet blocked", "bad"));
@@ -2414,8 +2414,8 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         },
         if state.cli_installed { "ok" } else { "muted" },
     ));
-    if service_repair_recommended(state) {
-        status_row.append(&badge("Repair available", "warn"));
+    if service_update_recommended(state) {
+        status_row.append(&badge("Update available", "warn"));
     }
     if service_settling {
         status_row.append(&badge("Settling", "muted"));
@@ -2508,8 +2508,8 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         let service_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         service_row.set_halign(gtk::Align::Start);
         let service = icon_text_button(
-            if service_repair_recommended(state) {
-                "Repair Service"
+            if service_update_recommended(state) {
+                "Update Service"
             } else if state.service_installed {
                 "Reinstall Service"
             } else {
@@ -3478,7 +3478,7 @@ fn first_non_empty(values: &[&str]) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn service_repair_recommended(state: &NativeAppState) -> bool {
+fn service_update_recommended(state: &NativeAppState) -> bool {
     state.service_installed
         && !state.service_binary_version.is_empty()
         && !state.expected_service_binary_version.is_empty()
