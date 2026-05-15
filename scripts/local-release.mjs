@@ -53,8 +53,13 @@ Build local Rust/native release artifacts, stage a hashtree release directory,
 and optionally publish it.
 
 Options:
-  --publish                 Publish the staged release tree with htree
-  --cargo-publish           Publish Rust crates to crates.io after staging/publishing
+  --publish                 Publish the staged release tree with htree (also
+                            runs scripts/publish.sh to ship the Rust crates
+                            unless --skip-cargo-publish is given)
+  --cargo-publish           Force publishing Rust crates to crates.io even
+                            without --publish (e.g. to retry a partial release)
+  --skip-cargo-publish      With --publish, stage and publish the htree tree
+                            but don't push the crates to crates.io
   --dry-run                 Print the plan without running build or publish commands
   --skip-verify            Skip fmt/clippy/test verification
   --tag <tag>              Release tag (defaults to workspace version, for example v4.0.0)
@@ -75,6 +80,7 @@ function parseArgs(argv) {
     dryRun: false,
     publish: false,
     cargoPublish: false,
+    skipCargoPublish: false,
     skipVerify: false,
     releaseTree: null,
     stageDir: null,
@@ -97,6 +103,9 @@ function parseArgs(argv) {
         break
       case '--cargo-publish':
         options.cargoPublish = true
+        break
+      case '--skip-cargo-publish':
+        options.skipCargoPublish = true
         break
       case '--dry-run':
         options.dryRun = true
@@ -967,7 +976,15 @@ function main() {
     console.log(`Staged ${tag} at ${stageDir}`)
   }
 
-  if (options.cargoPublish) {
+  // A "publish" is supposed to ship the whole release: the htree tree AND
+  // the Rust crates on crates.io. Anything that ends up only half-shipped
+  // forces us to remember to re-run the cargo half later, which we forget.
+  // Default cargo publish on whenever --publish is set; --skip-cargo-publish
+  // is the explicit opt-out, --cargo-publish still lets you publish crates
+  // without doing the htree publish (e.g. retrying a partial release).
+  const shouldPublishCrates =
+    options.cargoPublish || (options.publish && !options.skipCargoPublish)
+  if (shouldPublishCrates) {
     publishRustCrates({ dryRun: options.dryRun })
   }
 }
