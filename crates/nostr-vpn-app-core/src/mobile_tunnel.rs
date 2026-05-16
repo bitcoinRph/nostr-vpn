@@ -36,6 +36,12 @@ const DEFAULT_MOBILE_MTU: u16 = 1280;
 const TUNNEL_CHANNEL_CAPACITY: usize = 1024;
 #[cfg(test)]
 const FIPS_NOSTR_DISCOVERY_APP: &str = "fips-overlay-v1";
+const FIPS_DISCOVERY_BACKOFF_BASE_SECS: u64 = 30;
+const FIPS_DISCOVERY_BACKOFF_MAX_SECS: u64 = 300;
+const FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS: u64 = 5;
+const MOBILE_NOSTR_OPEN_DISCOVERY_MAX_PENDING: usize = 4;
+const MOBILE_NOSTR_FAILURE_STREAK_THRESHOLD: u32 = 2;
+const FIPS_NOSTR_STARTUP_SWEEP_MAX_AGE_SECS: u64 = 300;
 
 /// Authenticated FIPS peer cap on mobile. fips's default is 128, which is
 /// fine on AC-powered desktops but wasteful on phones once Open discovery
@@ -988,6 +994,12 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
     // Unix worker thread pools. Mobile traffic is latency-sensitive at tunnel
     // bring-up, so keep the shared core on its inline crypto/send path.
     config.node.worker_pools_enabled = false;
+    // Keep open/public discovery available but paced. Phones can easily wake
+    // several stale peers at once; failed route lookups and ambient adverts
+    // must back off instead of leaning on public transit nodes indefinitely.
+    config.node.discovery.backoff_base_secs = FIPS_DISCOVERY_BACKOFF_BASE_SECS;
+    config.node.discovery.backoff_max_secs = FIPS_DISCOVERY_BACKOFF_MAX_SECS;
+    config.node.discovery.forward_min_interval_secs = FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS;
     // Cap concurrent FIPS peers on mobile. With Open discovery the global
     // overlay can keep introducing new peers; on phones we'd rather drop
     // ambient connection attempts than burn battery talking to strangers
@@ -1008,6 +1020,10 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
     // by roster downstream. See fips_private_mesh::fips_endpoint_config for the
     // full rationale and security model.
     config.node.discovery.nostr.policy = NostrDiscoveryPolicy::Open;
+    config.node.discovery.nostr.open_discovery_max_pending =
+        MOBILE_NOSTR_OPEN_DISCOVERY_MAX_PENDING;
+    config.node.discovery.nostr.failure_streak_threshold = MOBILE_NOSTR_FAILURE_STREAK_THRESHOLD;
+    config.node.discovery.nostr.startup_sweep_max_age_secs = FIPS_NOSTR_STARTUP_SWEEP_MAX_AGE_SECS;
     config.node.discovery.nostr.share_local_candidates = mobile.share_local_candidates;
     config.node.discovery.lan.enabled = mobile.share_local_candidates && nostr_enabled;
     // Leave the relay-side `app` at fips-core's default ("fips-overlay-v1");
@@ -1321,6 +1337,18 @@ mod tests {
         config
             .validate()
             .expect("mobile FIPS config should validate");
+        assert_eq!(
+            config.node.discovery.backoff_base_secs,
+            FIPS_DISCOVERY_BACKOFF_BASE_SECS
+        );
+        assert_eq!(
+            config.node.discovery.backoff_max_secs,
+            FIPS_DISCOVERY_BACKOFF_MAX_SECS
+        );
+        assert_eq!(
+            config.node.discovery.forward_min_interval_secs,
+            FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS
+        );
         assert!(config.node.discovery.nostr.enabled);
         assert!(config.node.discovery.nostr.advertise);
         assert!(config.node.discovery.nostr.share_local_candidates);
@@ -1328,6 +1356,18 @@ mod tests {
         assert_eq!(
             config.node.discovery.nostr.policy,
             NostrDiscoveryPolicy::Open
+        );
+        assert_eq!(
+            config.node.discovery.nostr.open_discovery_max_pending,
+            MOBILE_NOSTR_OPEN_DISCOVERY_MAX_PENDING
+        );
+        assert_eq!(
+            config.node.discovery.nostr.failure_streak_threshold,
+            MOBILE_NOSTR_FAILURE_STREAK_THRESHOLD
+        );
+        assert_eq!(
+            config.node.discovery.nostr.startup_sweep_max_age_secs,
+            FIPS_NOSTR_STARTUP_SWEEP_MAX_AGE_SECS
         );
         // The mesh id must NOT appear in the publicly visible relay app tag.
         assert_eq!(config.node.discovery.nostr.app, FIPS_NOSTR_DISCOVERY_APP);
