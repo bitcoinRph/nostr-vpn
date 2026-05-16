@@ -91,12 +91,19 @@ async fn flush_pending_fips_roster_recipients(
     }
 }
 
-/// Snapshot the runtime's authenticated peer transport addresses and update
-/// the on-disk recent peers cache. Public (non-LAN) endpoints get rotated in;
-/// the FIPS layer filters out LAN addresses before they reach disk.
+/// Snapshot the runtime's authenticated peer transport addresses, update
+/// the on-disk recent-peers cache, and — when something actually changed —
+/// hand fips the refreshed peer hint list via `update_peers` so the new
+/// addresses race the existing ones in the next dial cycle without
+/// restarting the endpoint. Public (non-LAN) endpoints get rotated into
+/// the cache; the FIPS layer filters out LAN addresses before they reach
+/// disk.
 #[cfg(feature = "embedded-fips")]
-fn update_recent_peers_from_runtime(
+async fn update_recent_peers_from_runtime(
     runtime: &crate::fips_private_mesh::FipsPrivateTunnelRuntime,
+    app: &nostr_vpn_core::config::AppConfig,
+    network_id: &str,
+    own_pubkey: Option<&str>,
     recent_peers: &mut nostr_vpn_core::recent_peers::RecentPeerEndpoints,
     recent_peers_path: &std::path::Path,
     now: u64,
@@ -111,14 +118,32 @@ fn update_recent_peers_from_runtime(
     if recent_peers.prune_stale(now, crate::recent_peers_store::RECENT_PEERS_TTL_SECS) {
         changed = true;
     }
-    if changed
-        && let Err(error) =
-            crate::recent_peers_store::write_recent_peers(recent_peers_path, recent_peers)
+    if !changed {
+        return;
+    }
+    if let Err(error) =
+        crate::recent_peers_store::write_recent_peers(recent_peers_path, recent_peers)
     {
         eprintln!(
             "daemon: failed to write recent peers cache {}: {error}",
             recent_peers_path.display()
         );
+    }
+    match crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+        app,
+        network_id,
+        runtime.iface().to_string(),
+        own_pubkey,
+        Some(recent_peers),
+    ) {
+        Ok(refreshed) => {
+            if let Err(error) = runtime.update_peers(&refreshed.endpoint_peers).await {
+                eprintln!("fips: update_peers (cache refresh) failed: {error}");
+            }
+        }
+        Err(error) => {
+            eprintln!("fips: rebuilding peer hint list failed: {error}");
+        }
     }
 }
 
@@ -213,8 +238,13 @@ pub(crate) async fn connect_vpn(args: ConnectArgs) -> Result<()> {
     crate::fips_private_mesh::purge_legacy_fips_endpoint_cache(&config_path);
     #[cfg(feature = "embedded-fips")]
     let mut fips_tunnel_runtime = {
-        let config =
-            fips_tunnel_config_from_app(&app, &network_id, iface.clone(), own_pubkey.as_deref())?;
+        let config = fips_tunnel_config_from_app(
+            &app,
+            &network_id,
+            iface.clone(),
+            own_pubkey.as_deref(),
+            None,
+        )?;
         let runtime = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
         println!("connect: FIPS private mesh on {}", runtime.iface());
         Some(runtime)
@@ -384,19 +414,23 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
     }
     #[cfg(feature = "embedded-fips")]
     let mut fips_tunnel_runtime = if fips_private_runtime_active(&app, true, expected_peers) {
-        let extra_static = recent_peers.as_static_peer_endpoints();
-        let config = fips_tunnel_config_from_app_with_extra_static(
+        let seeded_endpoint_count = recent_peers
+            .as_static_peer_endpoints_with_seen_at()
+            .iter()
+            .map(|(_, eps)| eps.len())
+            .sum::<usize>();
+        let config = fips_tunnel_config_from_app(
             &app,
             &network_id,
             iface.clone(),
             own_pubkey.as_deref(),
-            &extra_static,
+            Some(&recent_peers),
         )?;
         let runtime = crate::fips_private_mesh::FipsPrivateTunnelRuntime::start(config).await?;
         eprintln!(
             "daemon: FIPS private mesh on {} (seeded {} recently-connected peer endpoint(s))",
             runtime.iface(),
-            extra_static.iter().map(|(_, eps)| eps.len()).sum::<usize>(),
+            seeded_endpoint_count,
         );
         Some(runtime)
     } else {
@@ -505,10 +539,14 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                         }
                         update_recent_peers_from_runtime(
                             runtime,
+                            &app,
+                            &network_id,
+                            own_pubkey.as_deref(),
                             &mut recent_peers,
                             &recent_peers_path,
                             now,
-                        );
+                        )
+                        .await;
                         flush_pending_fips_roster_recipients(
                             runtime,
                             &app,
@@ -540,10 +578,14 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                     }
                     update_recent_peers_from_runtime(
                         runtime,
+                        &app,
+                        &network_id,
+                        own_pubkey.as_deref(),
                         &mut recent_peers,
                         &recent_peers_path,
                         now,
-                    );
+                    )
+                    .await;
                     flush_pending_fips_roster_recipients(
                         runtime,
                         &app,

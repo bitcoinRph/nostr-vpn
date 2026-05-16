@@ -367,7 +367,7 @@ impl FipsPrivateMeshRuntime {
         peers: Vec<FipsMeshPeerConfig>,
     ) -> Result<Self> {
         let scope = format!("nostr-vpn:{}", network_id.as_ref().trim());
-        let endpoint_peers = fips_endpoint_peers_from_mesh(&peers, Vec::new());
+        let endpoint_peers = fips_endpoint_peers_from_mesh(&peers, Vec::new(), Vec::new());
         let config = fips_endpoint_config(&endpoint_peers, None, private_mesh_mtu_from_app(None));
         Self::bind_with_config(identity_nsec, scope, peers, config, Vec::new()).await
     }
@@ -922,6 +922,44 @@ impl FipsPrivateMeshRuntime {
     pub(crate) async fn shutdown(self) -> Result<(), FipsEndpointError> {
         self.endpoint.shutdown().await
     }
+
+    /// Hand the latest peer roster to fips without restarting the endpoint.
+    ///
+    /// The wrapper translates nvpn's intermediate hint shape
+    /// ([`FipsEndpointPeerTransportConfig`]) into `fips_endpoint::PeerConfig`
+    /// (carrying `seen_at_ms` per address) and calls
+    /// [`fips_endpoint::FipsEndpoint::update_peers`]. fips diffs new vs old,
+    /// initiates connections for fresh npubs, drops retry entries for
+    /// removed ones, and refreshes address hints in place for the rest.
+    pub(crate) async fn update_peers(
+        &self,
+        endpoint_peers: &[FipsEndpointPeerTransportConfig],
+    ) -> Result<fips_endpoint::UpdatePeersOutcome> {
+        let peers: Vec<FipsPeerConfig> = endpoint_peers
+            .iter()
+            .map(|peer| FipsPeerConfig {
+                npub: peer.npub.clone(),
+                alias: None,
+                addresses: peer
+                    .addresses
+                    .iter()
+                    .map(|hint| {
+                        let mut addr = PeerAddress::new("udp", hint.addr.clone());
+                        if let Some(seen_at_ms) = hint.seen_at_ms {
+                            addr = addr.with_seen_at_ms(seen_at_ms);
+                        }
+                        addr
+                    })
+                    .collect(),
+                connect_policy: ConnectPolicy::AutoConnect,
+                auto_reconnect: true,
+            })
+            .collect();
+        self.endpoint
+            .update_peers(peers)
+            .await
+            .context("fips: update_peers rejected by endpoint")
+    }
 }
 
 fn control_frame_source_pubkey(
@@ -960,10 +998,22 @@ struct FipsEndpointTransportConfig {
     share_local_candidates: bool,
 }
 
+/// Address hint carried through nvpn's intermediate config types before
+/// being lowered into a fips `PeerAddress`. `seen_at_ms` is the
+/// most-recent observation timestamp (Unix ms) when we have one — set for
+/// recent-peers cache entries, `None` for operator-supplied static hints.
+/// fips's dialer ranks candidates by this field descending, so cached
+/// addresses sort ahead of unstamped hints in the same try-everything pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FipsEndpointPeerTransportConfig {
-    npub: String,
-    addresses: Vec<String>,
+pub(crate) struct FipsPeerAddressHint {
+    pub(crate) addr: String,
+    pub(crate) seen_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FipsEndpointPeerTransportConfig {
+    pub(crate) npub: String,
+    pub(crate) addresses: Vec<FipsPeerAddressHint>,
 }
 
 fn fips_endpoint_config(
@@ -1035,7 +1085,13 @@ fn fips_endpoint_config(
             addresses: peer
                 .addresses
                 .iter()
-                .map(|address| PeerAddress::new("udp", address.clone()))
+                .map(|hint| {
+                    let mut addr = PeerAddress::new("udp", hint.addr.clone());
+                    if let Some(seen_at_ms) = hint.seen_at_ms {
+                        addr = addr.with_seen_at_ms(seen_at_ms);
+                    }
+                    addr
+                })
                 .collect(),
             connect_policy: ConnectPolicy::AutoConnect,
             auto_reconnect: true,
@@ -1046,7 +1102,8 @@ fn fips_endpoint_config(
 
 fn fips_endpoint_peers_from_mesh(
     mesh_peers: &[FipsMeshPeerConfig],
-    static_peer_endpoints: Vec<(String, Vec<String>)>,
+    operator_static_endpoints: Vec<(String, Vec<String>)>,
+    recent_peer_endpoints: Vec<(String, Vec<(String, u64)>)>,
 ) -> Vec<FipsEndpointPeerTransportConfig> {
     let mut peers = HashMap::<String, FipsEndpointPeerTransportConfig>::new();
     for peer in mesh_peers {
@@ -1059,7 +1116,9 @@ fn fips_endpoint_peers_from_mesh(
             });
     }
 
-    for (npub, addresses) in static_peer_endpoints {
+    // Operator-configured hints have no freshness signal — fips sorts
+    // them after any address we've actually observed.
+    for (npub, addresses) in operator_static_endpoints {
         let npub = normalize_fips_endpoint_npub(&npub);
         let peer = peers
             .entry(npub.clone())
@@ -1067,18 +1126,59 @@ fn fips_endpoint_peers_from_mesh(
                 npub,
                 addresses: Vec::new(),
             });
-        peer.addresses.extend(
-            addresses
-                .into_iter()
-                .map(|address| address.trim().to_string())
-                .filter(|address| !address.is_empty()),
-        );
+        for raw in addresses {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            peer.addresses.push(FipsPeerAddressHint {
+                addr: trimmed.to_string(),
+                seen_at_ms: None,
+            });
+        }
+    }
+
+    // Recent-peers cache entries arrive with `last_success_at_ms` so the
+    // fips dialer ranks them ahead of unstamped operator hints in the
+    // same try-everything pass.
+    for (npub, addresses) in recent_peer_endpoints {
+        let npub = normalize_fips_endpoint_npub(&npub);
+        let peer = peers
+            .entry(npub.clone())
+            .or_insert_with(|| FipsEndpointPeerTransportConfig {
+                npub,
+                addresses: Vec::new(),
+            });
+        for (addr, seen_at_ms) in addresses {
+            let trimmed = addr.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // Same (npub, addr) from multiple sources: keep the freshest
+            // timestamp. The dedup pass below collapses duplicates.
+            if let Some(existing) = peer
+                .addresses
+                .iter_mut()
+                .find(|hint| hint.addr == trimmed)
+            {
+                existing.seen_at_ms = match (existing.seen_at_ms, Some(seen_at_ms)) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (None, Some(b)) => Some(b),
+                    (a, _) => a,
+                };
+                continue;
+            }
+            peer.addresses.push(FipsPeerAddressHint {
+                addr: trimmed.to_string(),
+                seen_at_ms: Some(seen_at_ms),
+            });
+        }
     }
 
     let mut peers = peers.into_values().collect::<Vec<_>>();
     for peer in &mut peers {
-        peer.addresses.sort();
-        peer.addresses.dedup();
+        peer.addresses.sort_by(|a, b| a.addr.cmp(&b.addr));
+        peer.addresses.dedup_by(|a, b| a.addr == b.addr);
     }
     peers.sort_by(|left, right| left.npub.cmp(&right.npub));
     peers
@@ -1126,7 +1226,7 @@ pub(crate) struct FipsPrivateTunnelConfig {
     pub(crate) nostr_relays: Vec<String>,
     pub(crate) share_local_candidates: bool,
     pub(crate) peers: Vec<FipsMeshPeerConfig>,
-    endpoint_peers: Vec<FipsEndpointPeerTransportConfig>,
+    pub(crate) endpoint_peers: Vec<FipsEndpointPeerTransportConfig>,
     pub(crate) route_targets: Vec<String>,
     pub(crate) local_advertised_routes: Vec<String>,
     pub(crate) wireguard_exit: WireGuardExitConfig,
@@ -1142,16 +1242,7 @@ impl FipsPrivateTunnelConfig {
         network_id: &str,
         iface: impl Into<String>,
         own_pubkey: Option<&str>,
-    ) -> Result<Self> {
-        Self::from_app_with_extra_static_endpoints(app, network_id, iface, own_pubkey, &[])
-    }
-
-    pub(crate) fn from_app_with_extra_static_endpoints(
-        app: &AppConfig,
-        network_id: &str,
-        iface: impl Into<String>,
-        own_pubkey: Option<&str>,
-        extra_static_peer_endpoints: &[(String, Vec<String>)],
+        recent_peers: Option<&nostr_vpn_core::recent_peers::RecentPeerEndpoints>,
     ) -> Result<Self> {
         let mut peers = Vec::new();
         let mut route_targets = Vec::new();
@@ -1197,17 +1288,18 @@ impl FipsPrivateTunnelConfig {
         }
         peers.sort_by(|left, right| left.participant_pubkey.cmp(&right.participant_pubkey));
         peers.dedup_by(|left, right| left.participant_pubkey == right.participant_pubkey);
-        let mut combined_static = app.fips_static_peer_endpoints();
-        // Recently-successful endpoints from disk are merged alongside the
-        // operator-configured `fips_peer_endpoints` list. FIPS dedupes
-        // addresses per-peer inside `fips_endpoint_peers_from_mesh`, so
-        // overlap with manual entries is harmless. The retry path
-        // (`initiate_peer_retry_connection`) prefers fresh Nostr adverts
-        // over either source when a relay is reachable, so stale recent
-        // entries can't wedge a peer the way the historical
-        // daemon.fips-cache.json did.
-        combined_static.extend(extra_static_peer_endpoints.iter().cloned());
-        let endpoint_peers = fips_endpoint_peers_from_mesh(&peers, combined_static);
+        // Address hints feed into fips's unified `PeerConfig.addresses`:
+        //   * operator-configured `fips_peer_endpoints` (unstamped)
+        //   * recent-peers cache entries (stamped with `last_success_at`)
+        // fips's dialer races every hint in parallel, ranked by `seen_at_ms`
+        // descending — recent observations naturally beat unstamped hints,
+        // and a fresh nostr advert beats both because it's stamped at fetch.
+        let operator_static = app.fips_static_peer_endpoints();
+        let recent_peer_endpoints = recent_peers
+            .map(|cache| cache.as_static_peer_endpoints_with_seen_at())
+            .unwrap_or_default();
+        let endpoint_peers =
+            fips_endpoint_peers_from_mesh(&peers, operator_static, recent_peer_endpoints);
         route_targets.sort();
         route_targets.dedup();
 
@@ -1409,6 +1501,17 @@ impl FipsPrivateTunnelRuntime {
 
     pub(crate) fn authenticated_peer_transport_addrs(&self) -> Vec<(String, String)> {
         self.mesh.authenticated_peer_transport_addrs()
+    }
+
+    /// Forward a refreshed peer roster + address hints to fips without
+    /// restarting the endpoint. Daemon heartbeat path: when the
+    /// recent-peers cache or active-network roster changes, build the
+    /// merged hint list and call this so fips can diff + apply.
+    pub(crate) async fn update_peers(
+        &self,
+        endpoint_peers: &[FipsEndpointPeerTransportConfig],
+    ) -> Result<fips_endpoint::UpdatePeersOutcome> {
+        self.mesh.update_peers(endpoint_peers).await
     }
 
     pub(crate) fn requires_endpoint_restart(&self, config: &FipsPrivateTunnelConfig) -> bool {
@@ -2504,6 +2607,17 @@ impl FipsPrivateTunnelRuntime {
         self.mesh.authenticated_peer_transport_addrs()
     }
 
+    /// Forward a refreshed peer roster + address hints to fips without
+    /// restarting the endpoint. Daemon heartbeat path: when the
+    /// recent-peers cache or active-network roster changes, build the
+    /// merged hint list and call this so fips can diff + apply.
+    pub(crate) async fn update_peers(
+        &self,
+        endpoint_peers: &[FipsEndpointPeerTransportConfig],
+    ) -> Result<fips_endpoint::UpdatePeersOutcome> {
+        self.mesh.update_peers(endpoint_peers).await
+    }
+
     pub(crate) fn requires_endpoint_restart(&self, config: &FipsPrivateTunnelConfig) -> bool {
         self.config.identity_nsec != config.identity_nsec
             || self.config.network_id != config.network_id
@@ -2851,6 +2965,13 @@ impl FipsPrivateTunnelRuntime {
 
     pub(crate) fn authenticated_peer_transport_addrs(&self) -> Vec<(String, String)> {
         Vec::new()
+    }
+
+    pub(crate) async fn update_peers(
+        &self,
+        _endpoint_peers: &[FipsEndpointPeerTransportConfig],
+    ) -> Result<fips_endpoint::UpdatePeersOutcome> {
+        Ok(fips_endpoint::UpdatePeersOutcome::default())
     }
 
     pub(crate) fn requires_endpoint_restart(&self, _config: &FipsPrivateTunnelConfig) -> bool {
@@ -3215,9 +3336,14 @@ mod tests {
         ];
         app.exit_node = bob_pubkey.clone();
 
-        let config =
-            FipsPrivateTunnelConfig::from_app(&app, network_id, "utun-test", Some(&alice_pubkey))
-                .expect("fips tunnel config");
+        let config = FipsPrivateTunnelConfig::from_app(
+            &app,
+            network_id,
+            "utun-test",
+            Some(&alice_pubkey),
+            None,
+        )
+        .expect("fips tunnel config");
         let bob_peer = config
             .peers
             .iter()
@@ -3384,7 +3510,7 @@ mod tests {
             vec!["10.44.1.2/32".to_string()],
         )
         .expect("peer config");
-        let endpoint_peers = fips_endpoint_peers_from_mesh(&[peer], Vec::new());
+        let endpoint_peers = fips_endpoint_peers_from_mesh(&[peer], Vec::new(), Vec::new());
         let config = fips_endpoint_config(
             &endpoint_peers,
             None,
@@ -3432,7 +3558,7 @@ mod tests {
             share_local_candidates: true,
         };
 
-        let endpoint_peers = fips_endpoint_peers_from_mesh(&[peer], Vec::new());
+        let endpoint_peers = fips_endpoint_peers_from_mesh(&[peer], Vec::new(), Vec::new());
         let config = fips_endpoint_config(
             &endpoint_peers,
             Some(&transport),
@@ -3483,6 +3609,7 @@ mod tests {
         let endpoint_peers = fips_endpoint_peers_from_mesh(
             std::slice::from_ref(&mesh_peer),
             vec![(charlie_npub.clone(), vec!["10.203.0.12:51820".to_string()])],
+            Vec::new(),
         );
         let transport = FipsEndpointTransportConfig {
             listen_port: 51820,
@@ -3545,8 +3672,11 @@ mod tests {
             vec!["10.44.1.2/32".to_string()],
         )
         .expect("roster peer config");
-        let endpoint_peers =
-            fips_endpoint_peers_from_mesh(std::slice::from_ref(&mesh_peer), Vec::new());
+        let endpoint_peers = fips_endpoint_peers_from_mesh(
+            std::slice::from_ref(&mesh_peer),
+            Vec::new(),
+            Vec::new(),
+        );
         let config = fips_endpoint_config(
             &endpoint_peers,
             None,

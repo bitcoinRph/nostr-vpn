@@ -2620,8 +2620,13 @@ async fn refresh_fips_tunnel_config(
     network_id: &str,
     own_pubkey: Option<&str>,
 ) -> Result<()> {
-    let config =
-        fips_tunnel_config_from_app(app, network_id, runtime.iface().to_string(), own_pubkey)?;
+    let config = fips_tunnel_config_from_app(
+        app,
+        network_id,
+        runtime.iface().to_string(),
+        own_pubkey,
+        None,
+    )?;
     runtime.apply_config(config).await
 }
 
@@ -2631,26 +2636,15 @@ fn fips_tunnel_config_from_app(
     network_id: &str,
     iface: impl Into<String>,
     own_pubkey: Option<&str>,
+    recent_peers: Option<&nostr_vpn_core::recent_peers::RecentPeerEndpoints>,
 ) -> Result<crate::fips_private_mesh::FipsPrivateTunnelConfig> {
-    fips_tunnel_config_from_app_with_extra_static(app, network_id, iface, own_pubkey, &[])
-}
-
-#[cfg(feature = "embedded-fips")]
-fn fips_tunnel_config_from_app_with_extra_static(
-    app: &AppConfig,
-    network_id: &str,
-    iface: impl Into<String>,
-    own_pubkey: Option<&str>,
-    extra_static_peer_endpoints: &[(String, Vec<String>)],
-) -> Result<crate::fips_private_mesh::FipsPrivateTunnelConfig> {
-    let mut config =
-        crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app_with_extra_static_endpoints(
-            app,
-            network_id,
-            iface,
-            own_pubkey,
-            extra_static_peer_endpoints,
-        )?;
+    let mut config = crate::fips_private_mesh::FipsPrivateTunnelConfig::from_app(
+        app,
+        network_id,
+        iface,
+        own_pubkey,
+        recent_peers,
+    )?;
     // Daemon no longer pre-discovers a public endpoint. fips-core's
     // build_overlay_advert performs its own STUN observation and advertises
     // <reflexive_ip>:<listen_port> directly; if that's wrong (e.g. symmetric
@@ -2686,7 +2680,7 @@ async fn sync_fips_private_runtime(
         .as_ref()
         .map(|runtime| runtime.iface().to_string())
         .unwrap_or_else(|| iface.to_string());
-    let config = fips_tunnel_config_from_app(app, network_id, config_iface, own_pubkey)?;
+    let config = fips_tunnel_config_from_app(app, network_id, config_iface, own_pubkey, None)?;
 
     let restart = runtime
         .as_ref()

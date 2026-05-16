@@ -135,6 +135,36 @@ impl RecentPeerEndpoints {
         out
     }
 
+    /// Snapshot with per-address freshness preserved. fips's dialer ranks
+    /// `PeerAddress` candidates by `seen_at_ms` descending — by handing it
+    /// the cache's `last_success_at_ms` we let recently-working endpoints
+    /// race ahead of unstamped operator-supplied hints in the same pass,
+    /// without any source-aware preference logic.
+    ///
+    /// `last_success_at` is stored in seconds; the returned value is in
+    /// milliseconds to match fips's `PeerAddress::seen_at_ms` unit.
+    pub fn as_static_peer_endpoints_with_seen_at(&self) -> Vec<(String, Vec<(String, u64)>)> {
+        let mut out: Vec<(String, Vec<(String, u64)>)> = self
+            .entries
+            .iter()
+            .filter_map(|(participant, endpoints)| {
+                let mut addrs: Vec<(String, u64)> = endpoints
+                    .iter()
+                    .map(|entry| (entry.addr.clone(), entry.last_success_at.saturating_mul(1000)))
+                    .collect();
+                addrs.sort_by(|a, b| a.0.cmp(&b.0));
+                addrs.dedup_by(|a, b| a.0 == b.0);
+                if addrs.is_empty() {
+                    None
+                } else {
+                    Some((participant.clone(), addrs))
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
     pub fn to_json_pretty(&self) -> serde_json::Result<String> {
         let snapshot = SerializedRecentPeers {
             version: CURRENT_VERSION,
