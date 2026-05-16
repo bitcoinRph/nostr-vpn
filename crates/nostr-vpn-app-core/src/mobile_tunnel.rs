@@ -23,6 +23,7 @@ use tokio::task::JoinHandle;
 
 const DEFAULT_MOBILE_MTU: u16 = 1280;
 const TUNNEL_CHANNEL_CAPACITY: usize = 1024;
+#[cfg(test)]
 const FIPS_NOSTR_DISCOVERY_APP: &str = "fips-overlay-v1";
 
 /// Authenticated FIPS peer cap on mobile. fips's default is 128, which is
@@ -33,7 +34,7 @@ const MOBILE_MAX_FIPS_PEERS: usize = 32;
 /// Pre-handshake connection cap on mobile (~2x peer cap matches fips's
 /// default ratio of 256:128).
 const MOBILE_MAX_FIPS_CONNECTIONS: usize = 64;
-/// Active-link cap on mobile (matches MOBILE_MAX_FIPS_CONNECTIONS).
+/// Active-link cap on mobile (matches `MOBILE_MAX_FIPS_CONNECTIONS`).
 const MOBILE_MAX_FIPS_LINKS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -845,7 +846,10 @@ mod tests {
         // Mobile peer caps are clamped well below fips's defaults so Open
         // discovery doesn't burn battery on ambient connections.
         assert_eq!(config.node.limits.max_peers, MOBILE_MAX_FIPS_PEERS);
-        assert_eq!(config.node.limits.max_connections, MOBILE_MAX_FIPS_CONNECTIONS);
+        assert_eq!(
+            config.node.limits.max_connections,
+            MOBILE_MAX_FIPS_CONNECTIONS
+        );
         assert_eq!(config.node.limits.max_links, MOBILE_MAX_FIPS_LINKS);
     }
 

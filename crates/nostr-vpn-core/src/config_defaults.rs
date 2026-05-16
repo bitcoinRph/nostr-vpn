@@ -21,10 +21,10 @@ pub(crate) fn default_relays() -> Vec<String> {
 ///
 /// Length is 8 hex chars / 32 bits. This is a disambiguation token,
 /// not a security secret — peers who already know each other (admin
-/// + invitee) just need to land on the same mesh slot. With ~32 bits
-/// of entropy the birthday collision threshold is ~65k networks, more
-/// than enough for nvpn's user base. Going shorter (e.g. 4 chars / 16
-/// bits) starts colliding around a few hundred networks globally.
+/// and invitee) just need to land on the same mesh slot. With ~32
+/// bits of entropy the birthday collision threshold is ~65k networks,
+/// more than enough for nvpn's user base. Going shorter (e.g. 4 chars
+/// / 16 bits) starts colliding around a few hundred networks globally.
 ///
 /// Existing networks created on prior versions kept the old 16-char
 /// hex id; nothing in the runtime cares about the length, so they

@@ -669,15 +669,11 @@ fn switching_active_network_swaps_participant_roster() {
 
     // Home is active by default.
     assert!(
-        config
-            .participant_pubkeys_hex()
-            .contains(&home_peer_hex),
+        config.participant_pubkeys_hex().contains(&home_peer_hex),
         "active roster should expose the home peer while home is active"
     );
     assert!(
-        !config
-            .participant_pubkeys_hex()
-            .contains(&work_peer_hex),
+        !config.participant_pubkeys_hex().contains(&work_peer_hex),
         "work peer must not leak into the active roster while work is inactive"
     );
 
@@ -687,15 +683,11 @@ fn switching_active_network_swaps_participant_roster() {
 
     // After the switch, only the new network's peer is "active".
     assert!(
-        !config
-            .participant_pubkeys_hex()
-            .contains(&home_peer_hex),
+        !config.participant_pubkeys_hex().contains(&home_peer_hex),
         "home peer must drop out of the active roster after switching to work"
     );
     assert!(
-        config
-            .participant_pubkeys_hex()
-            .contains(&work_peer_hex),
+        config.participant_pubkeys_hex().contains(&work_peer_hex),
         "work peer must be in the active roster after switching"
     );
 

@@ -13,7 +13,7 @@ fn note_success_records_public_endpoint() {
         "first observation of a public endpoint must be persisted"
     );
     assert!(
-        state.note_success(&participant, "203.0.113.20:51820", 1_000) == false,
+        !state.note_success(&participant, "203.0.113.20:51820", 1_000),
         "re-recording the same observation at the same timestamp is a no-op"
     );
 

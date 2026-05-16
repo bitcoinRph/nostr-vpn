@@ -256,10 +256,8 @@ fn manual_join_invite_with_admin_id_and_mesh_id_queues_join_request() {
 
     let mut config = AppConfig::generated();
     let parsed = parse_network_invite(&manual_invite).expect("manual invite parses");
-    apply_network_invite_to_active_network(&mut config, &parsed)
-        .expect("manual invite applies");
-    let queued = queue_active_network_join_request(&mut config)
-        .expect("join request queues");
+    apply_network_invite_to_active_network(&mut config, &parsed).expect("manual invite applies");
+    let queued = queue_active_network_join_request(&mut config).expect("join request queues");
 
     let network = config.active_network();
     assert!(queued, "join request should be queued for the admin");

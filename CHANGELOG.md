@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.21 - 2026-05-16
+
+### Added
+
+- macOS / Windows: split "Add network" and "Add device" into two
+  separate flows, matching the iOS / Android shells. Header dropdowns
+  now open a dedicated Add Network sheet/page (create + join with a
+  manual-pairing disclosure and nearby-invites strip); admins get a
+  separate "+ Add device" button on the Devices view that opens the
+  invite QR + manual pairing info + add-by-Device-ID flow.
+- Daemon: small disk-backed cache (`daemon.recent-peers.json`) of
+  recently-connected non-LAN FIPS peer endpoints so the service can
+  reconnect to peers across a restart without first reaching a Nostr
+  relay, as long as the peer's IP/port haven't moved.
+
+### Changed
+
+- All shells: tapping "Create" in Add Network now auto-dismisses the
+  sheet and navigates to the Devices tab so the user lands on the
+  newly-active network instead of being stranded on the Add Network
+  screen.
+- `fips-endpoint` bumped to 0.3.8 — picks up the runtime-mutable peer
+  list (`FipsEndpoint::update_peers`) and address recency-ranking
+  (`PeerAddress::seen_at_ms`) used by the recent-peers cache above.
+
 ## 4.0.20 - 2026-05-15
 
 ### Fixed
