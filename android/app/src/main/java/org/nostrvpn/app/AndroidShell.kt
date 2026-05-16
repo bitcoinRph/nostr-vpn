@@ -103,6 +103,7 @@ internal fun NostrVpnApp(
             MobileTopBar(
                 state = state,
                 network = network,
+                dispatch = dispatch,
                 onSelectNetwork = { shownNetworkId = it },
                 onAddNetwork = { showAddNetwork = true },
             )
@@ -202,6 +203,7 @@ internal fun NostrVpnApp(
 private fun MobileTopBar(
     state: AppState,
     network: NetworkState?,
+    dispatch: (JSONObject) -> Unit,
     onSelectNetwork: (String) -> Unit,
     onAddNetwork: () -> Unit,
 ) {
