@@ -155,7 +155,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     guard let base = raw.bindMemory(to: UInt8.self).baseAddress else {
                         return -1
                     }
-                    return nostr_vpn_mobile_tunnel_next_packet(handle, base, UInt(capacity), 1_000)
+                    return nostr_vpn_mobile_tunnel_next_packet(handle, base, UInt(capacity), 100)
                 }
             }
             guard let count else {
