@@ -8,11 +8,14 @@ VM_USER="${VM_USER:-ubuntu}"
 VM_PORT="${VM_PORT:-}"
 VM_DIR="${VM_DIR:-~/nostr-vpn}"
 BUILD_PROFILE="${BUILD_PROFILE:-debug}"
+NVPN_LINUX_RELEASE_TARGET="${NVPN_LINUX_RELEASE_TARGET:-auto}"
 NETWORK_ID="${NETWORK_ID:-utm-host-vm}"
 HOST_CONFIG="${HOST_CONFIG:-}"
 HOST_CONFIG_WAS_SET="${HOST_CONFIG_WAS_SET:-}"
 VM_CONFIG="${VM_CONFIG:-/home/${VM_USER}/.config/nvpn/config.toml}"
 REMOTE_VM_DIR=""
+LOCAL_CARGO_TARGET=""
+REMOTE_CARGO_TARGET=""
 
 SSH_TARGET="${VM_USER}@${VM_HOST}"
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new)
@@ -61,6 +64,41 @@ profile_dir() {
   fi
 }
 
+linux_release_target_for_platform() {
+  local os="$1"
+  local arch="$2"
+
+  [[ "$BUILD_PROFILE" == "release" ]] || return 0
+
+  case "$NVPN_LINUX_RELEASE_TARGET" in
+    ""|native|none)
+      return 0
+      ;;
+    auto)
+      case "$os/$arch" in
+        Linux/x86_64|Linux/amd64)
+          printf '%s\n' 'x86_64-unknown-linux-musl'
+          ;;
+        Linux/aarch64|Linux/arm64)
+          printf '%s\n' 'aarch64-unknown-linux-musl'
+          ;;
+      esac
+      ;;
+    *)
+      printf '%s\n' "$NVPN_LINUX_RELEASE_TARGET"
+      ;;
+  esac
+}
+
+resolve_local_cargo_target() {
+  linux_release_target_for_platform "$(uname -s)" "$(uname -m)"
+}
+
+cargo_target_linker_env_name() {
+  local target="$1"
+  printf 'CARGO_TARGET_%s_LINKER\n' "$(printf '%s' "$target" | tr '[:lower:]-' '[:upper:]_')"
+}
+
 resolve_target_base() {
   if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
     case "$CARGO_TARGET_DIR" in
@@ -77,7 +115,14 @@ resolve_target_base() {
 }
 
 local_nvpn_path() {
-  printf '%s/%s/nvpn' "$(resolve_target_base)" "$(profile_dir)"
+  local target_base
+  target_base="$(resolve_target_base)"
+
+  if [[ -n "$LOCAL_CARGO_TARGET" ]]; then
+    printf '%s/%s/%s/nvpn' "$target_base" "$LOCAL_CARGO_TARGET" "$(profile_dir)"
+  else
+    printf '%s/%s/nvpn' "$target_base" "$(profile_dir)"
+  fi
 }
 
 ssh_run() {
@@ -122,22 +167,57 @@ ensure_local_prereqs() {
   need_cmd rsync
 }
 
+ensure_local_target_prereqs() {
+  local target="$1"
+
+  [[ -n "$target" ]] || return 0
+
+  need_cmd rustup
+  if [[ "$target" == *-musl ]]; then
+    need_cmd musl-gcc
+  fi
+
+  log "stage: ensure local Rust target $target"
+  rustup target add "$target" >/dev/null
+}
+
 ensure_remote_prereqs() {
   log "stage: verify remote tooling"
   remote_login_shell "command -v cargo >/dev/null 2>&1 || { echo 'cargo is not installed on the remote host' >&2; exit 1; }"
 }
 
+ensure_remote_target_prereqs() {
+  local target="$1"
+
+  [[ -n "$target" ]] || return 0
+
+  log "stage: ensure remote Rust target $target"
+  remote_login_shell "command -v rustup >/dev/null 2>&1 || { echo 'rustup is required to install Rust target $target on the remote host' >&2; exit 1; }; rustup target add $(printf '%q' "$target") >/dev/null"
+
+  if [[ "$target" == *-musl ]]; then
+    remote_login_shell "command -v musl-gcc >/dev/null 2>&1 || { echo 'musl-gcc is required for $target on the remote host; install musl-tools or set NVPN_LINUX_RELEASE_TARGET=native' >&2; exit 1; }"
+  fi
+}
+
 build_local() {
   local cmd
-  cmd=(cargo build -p nvpn)
+  local env_args
+  env_args=()
+  cmd=(cargo build -p nvpn --bin nvpn)
   if [[ "$BUILD_PROFILE" == "release" ]]; then
     cmd+=(--release)
+  fi
+  if [[ -n "$LOCAL_CARGO_TARGET" ]]; then
+    cmd+=(--target "$LOCAL_CARGO_TARGET")
+    if [[ "$LOCAL_CARGO_TARGET" == *-musl ]]; then
+      env_args+=("$(cargo_target_linker_env_name "$LOCAL_CARGO_TARGET")=musl-gcc")
+    fi
   fi
 
   log "stage: build local"
   (
     cd "$ROOT_DIR"
-    "${cmd[@]}"
+    env "${env_args[@]}" "${cmd[@]}"
   )
 }
 
@@ -174,13 +254,32 @@ sync_repo() {
 
 build_remote() {
   local cmd
-  cmd="cd $(printf '%q' "$REMOTE_VM_DIR") && cargo build -p nvpn"
+  local env_prefix=""
+  if [[ "$REMOTE_CARGO_TARGET" == *-musl ]]; then
+    env_prefix="$(cargo_target_linker_env_name "$REMOTE_CARGO_TARGET")=musl-gcc "
+  fi
+
+  cmd="cd $(printf '%q' "$REMOTE_VM_DIR") && ${env_prefix}cargo build -p nvpn --bin nvpn"
   if [[ "$BUILD_PROFILE" == "release" ]]; then
     cmd+=" --release"
+  fi
+  if [[ -n "$REMOTE_CARGO_TARGET" ]]; then
+    cmd+=" --target $(printf '%q' "$REMOTE_CARGO_TARGET")"
   fi
 
   log "stage: build remote"
   remote_login_shell "$cmd"
+}
+
+resolve_remote_cargo_target() {
+  local platform
+  local os
+  local arch
+
+  platform="$(remote_login_shell "printf '%s %s\n' \"\$(uname -s)\" \"\$(uname -m)\"")"
+  os="${platform%% *}"
+  arch="${platform#* }"
+  linux_release_target_for_platform "$os" "$arch"
 }
 
 resolve_remote_target_base() {
@@ -190,7 +289,11 @@ resolve_remote_target_base() {
 resolve_remote_nvpn_path() {
   local target_base
   target_base="$(resolve_remote_target_base)"
-  printf '%s/%s/nvpn' "$target_base" "$(profile_dir)"
+  if [[ -n "$REMOTE_CARGO_TARGET" ]]; then
+    printf '%s/%s/%s/nvpn' "$target_base" "$REMOTE_CARGO_TARGET" "$(profile_dir)"
+  else
+    printf '%s/%s/nvpn' "$target_base" "$(profile_dir)"
+  fi
 }
 
 verify_local_nvpn() {
@@ -281,6 +384,8 @@ EOF
 main() {
   require_inputs
   ensure_local_prereqs
+  LOCAL_CARGO_TARGET="$(resolve_local_cargo_target)"
+  ensure_local_target_prereqs "$LOCAL_CARGO_TARGET"
   ensure_remote_prereqs
   build_local
 
@@ -291,6 +396,8 @@ main() {
 
   REMOTE_VM_DIR="$(resolve_remote_vm_dir)"
   sync_repo
+  REMOTE_CARGO_TARGET="$(resolve_remote_cargo_target)"
+  ensure_remote_target_prereqs "$REMOTE_CARGO_TARGET"
   build_remote
 
   remote_nvpn="$(resolve_remote_nvpn_path)"
