@@ -984,6 +984,10 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
     // sandbox accepts it but we don't need control on mobile either —
     // there's no daemon to talk to.
     config.node.control.enabled = false;
+    // iOS packet extensions can stall while starting FIPS's desktop-oriented
+    // Unix worker thread pools. Mobile traffic is latency-sensitive at tunnel
+    // bring-up, so keep the shared core on its inline crypto/send path.
+    config.node.worker_pools_enabled = false;
     // Cap concurrent FIPS peers on mobile. With Open discovery the global
     // overlay can keep introducing new peers; on phones we'd rather drop
     // ambient connection attempts than burn battery talking to strangers
