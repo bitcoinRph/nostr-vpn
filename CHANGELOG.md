@@ -4,6 +4,47 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.23 - 2026-05-16
+
+### Added
+
+- Mobile test kit for the shared Rust app core plus Android and iOS
+  debug builds, with simulator/device entry points for VPN dataplane,
+  reconnect, LAN discovery, roster transfer, and packet-tunnel changes.
+- iOS debug exit probe automation so an installed development build can
+  verify exit-node HTTPS loading and route behavior from inside the app.
+- ARMv6 musl daemon build helper for older Raspberry Pi targets, avoiding
+  glibc and architecture mismatches during fleet updates.
+
+### Changed
+
+- `fips-endpoint` bumped to 0.3.10. FIPS now races active peer path
+  refreshes without dropping the current session, bounds discovery retry
+  work per tick, refreshes stale same-path discovery peers, and recovers
+  stale FSP sessions after peer restarts/rekeys without a manual service
+  bounce.
+- Desktop and mobile share the same FIPS LAN path refresh and saved-peer
+  hint handoff logic, so Android and iOS can use the direct-path and
+  roster-refresh behavior already exercised by the daemon.
+- Open FIPS discovery and health probes are throttled so public discovery
+  attempts remain useful without flooding shared infrastructure.
+- Mobile FIPS handshakes and packet paths are more responsive: saved
+  hints seed mobile peers, reconnect handshakes are faster, iOS tunnel
+  startup keeps its manager alive, packet write latency is reduced, and
+  mobile can disable FIPS worker pools for lower device pressure.
+
+### Fixed
+
+- macOS WireGuard exit-node provider cleanup now keeps the physical
+  underlay default route alive, installs split /1 tunnel routes, adds an
+  unscoped endpoint bypass, and repairs stale scoped defaults instead of
+  leaving the machine with broken internet after toggling an exit node.
+- Xcode debug builds no longer try to link the preview injection dylib
+  path that caused `__preview.dylib` build failures.
+- Native apps now confirm destructive device removal, Android's top-bar
+  VPN toggle is usable again, and the macOS network picker header no
+  longer renders stale/incorrect state.
+
 ## 4.0.22 - 2026-05-16
 
 ### Fixed
