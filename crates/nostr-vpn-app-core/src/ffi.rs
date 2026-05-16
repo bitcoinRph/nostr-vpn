@@ -705,7 +705,12 @@ impl NativeAppRuntime {
                 self.invalidate_service_status();
                 self.recover_from_startup_error()?;
                 self.refresh_service_status()?;
-                if was_vpn_on && !self.vpn_active {
+                // Refresh the daemon state after the service swap before
+                // deciding whether to reconnect. Otherwise stale pre-bootout
+                // `vpn_active` can make us skip the restore and the next UI
+                // tick flips the VPN switch off.
+                let _ = self.refresh_status();
+                if was_vpn_on && !(self.vpn_enabled || self.vpn_active) {
                     // Best-effort: ignore connect_vpn errors so a transient
                     // race (new daemon not quite ready yet) doesn't surface
                     // as a "service install failed" message — the install
@@ -2866,6 +2871,148 @@ mod tests {
         assert!(state.vpn_enabled);
         assert!(state.vpn_active);
         assert_eq!(state.vpn_status, "VPN on");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn install_service_restores_vpn_after_refreshing_stale_state() {
+        use std::os::unix::fs::PermissionsExt;
+
+        #[cfg(target_os = "macos")]
+        #[derive(Debug)]
+        struct TestPrivilegedRunner {
+            calls_path: PathBuf,
+        }
+
+        #[cfg(target_os = "macos")]
+        impl PrivilegedCommandRunner for TestPrivilegedRunner {
+            fn run(&self, executable: String, args: Vec<String>) -> PrivilegedCommandOutput {
+                use std::io::Write;
+
+                let mut command = vec![format!("privileged:{executable}")];
+                command.extend(args);
+                if let Ok(mut calls) = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&self.calls_path)
+                {
+                    let _ = writeln!(calls, "{}", command.join(" "));
+                }
+
+                PrivilegedCommandOutput {
+                    success: true,
+                    cancelled: false,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                }
+            }
+        }
+
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-service-restore-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+        let calls_path = dir.join("calls.txt");
+        let resumed_path = dir.join("resumed");
+        let script_path = dir.join("nvpn");
+        let calls_literal = calls_path
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        let resumed_literal = resumed_path
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        let script = format!(
+            r#"#!/bin/sh
+CALLS="{calls_literal}"
+RESUMED="{resumed_literal}"
+printf '%s\n' "$*" >> "$CALLS"
+if [ "$1" = "service" ] && [ "$2" = "install" ]; then
+  exit 0
+fi
+if [ "$1" = "service" ] && [ "$2" = "status" ]; then
+  cat <<'JSON'
+{{"supported":true,"installed":true,"disabled":false,"loaded":true,"running":true,"pid":123,"label":"to.iris.nvpn.test","binary_version":"test"}}
+JSON
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  if [ -f "$RESUMED" ]; then
+    cat <<'JSON'
+{{"daemon":{{"running":true,"state":{{"updated_at":2,"binary_version":"test","local_endpoint":"","advertised_endpoint":"","listen_port":0,"vpn_enabled":true,"vpn_active":true,"vpn_status":"VPN on","expected_peer_count":1,"connected_peer_count":1,"mesh_ready":true,"peers":[]}}}}}}
+JSON
+  else
+    cat <<'JSON'
+{{"daemon":{{"running":true,"state":{{"updated_at":1,"binary_version":"test","local_endpoint":"","advertised_endpoint":"","listen_port":0,"vpn_enabled":false,"vpn_active":false,"vpn_status":"Paused","expected_peer_count":1,"connected_peer_count":0,"mesh_ready":false,"peers":[]}}}}}}
+JSON
+  fi
+  exit 0
+fi
+if [ "$1" = "resume" ]; then
+  touch "$RESUMED"
+  exit 0
+fi
+if [ "$1" = "start" ]; then
+  echo "unexpected elevated start" >&2
+  exit 42
+fi
+exit 0
+"#
+        );
+        fs::write(&script_path, script).expect("write fake nvpn");
+        let mut permissions = fs::metadata(&script_path)
+            .expect("fake nvpn metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script_path, permissions).expect("make fake nvpn executable");
+
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        runtime.last_error.clear();
+        runtime.config_path = dir.join("config.toml");
+        create_test_network(&mut runtime, "Home");
+        runtime
+            .config
+            .save(&runtime.config_path)
+            .expect("save test config");
+        runtime.nvpn_bin = Some(script_path);
+        runtime.daemon_running = true;
+        runtime.vpn_enabled = true;
+        runtime.vpn_active = true;
+        runtime.daemon_state = Some(DaemonRuntimeState {
+            vpn_enabled: true,
+            vpn_active: true,
+            vpn_status: "VPN on".to_string(),
+            expected_peer_count: 1,
+            connected_peer_count: 1,
+            ..DaemonRuntimeState::default()
+        });
+        #[cfg(target_os = "macos")]
+        {
+            runtime.privileged_command_runner = Some(PrivilegedCommandRunnerHandle(Arc::new(
+                TestPrivilegedRunner {
+                    calls_path: calls_path.clone(),
+                },
+            )));
+        }
+
+        runtime.dispatch(NativeAppAction::InstallSystemService);
+
+        let calls = fs::read_to_string(&calls_path).expect("read fake nvpn calls");
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        assert!(resumed_path.exists(), "service reinstall should resume VPN");
+        assert!(calls.contains("status --json --discover-secs 0 --config"));
+        assert!(calls.contains("resume --config"));
+        assert!(!calls.contains("start --daemon --connect"));
+        assert!(runtime.vpn_enabled);
+        assert!(runtime.vpn_active);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
