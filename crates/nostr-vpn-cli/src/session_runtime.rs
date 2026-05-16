@@ -765,6 +765,12 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                             .to_string()
                         };
                     }
+                    #[cfg(feature = "embedded-fips")]
+                    if let Some(runtime) = fips_tunnel_runtime.as_ref()
+                        && let Err(error) = broadcast_local_fips_capabilities(runtime, &app).await
+                    {
+                        eprintln!("fips: capabilities broadcast failed after network refresh: {error}");
+                    }
                 }
             }
             _ = state_interval.tick() => {

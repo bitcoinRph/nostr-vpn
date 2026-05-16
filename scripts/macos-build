@@ -293,9 +293,14 @@ run_macos_xcodeproj() {
 
 run_macos_build() {
   local host_arch
+  local built_app
   host_arch="$(uname -m)"
   run_macos_xcframework
   run_macos_xcodeproj
+  built_app="$BUILD_DIR/DerivedData/Build/Products/$XCODE_CONFIGURATION/$APP_NAME"
+  # A previously launched DerivedData app can acquire macOS access-control xattrs
+  # that make Xcode's later resource copies fail with Operation not permitted.
+  rm -rf "$built_app"
   xcodebuild \
     -project "$PROJECT" \
     -scheme "$SCHEME" \

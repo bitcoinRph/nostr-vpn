@@ -9,6 +9,20 @@ BUILD_DIR="$ROOT/macos/.build"
 XCODE_CONFIGURATION="${NVPN_MACOS_XCODE_CONFIGURATION:-Debug}"
 HOST_ARCH="$(uname -m)"
 
+terminate_running_app() {
+  if pgrep -x "Nostr VPN" >/dev/null 2>&1; then
+    pkill -TERM -x "Nostr VPN" >/dev/null 2>&1 || true
+    for _ in {1..30}; do
+      if ! pgrep -x "Nostr VPN" >/dev/null 2>&1; then
+        return 0
+      fi
+      sleep 0.1
+    done
+    pkill -x "Nostr VPN" >/dev/null 2>&1 || true
+  fi
+}
+
+terminate_running_app
 "$ROOT/scripts/macos-build" macos-build
 
 APP_PATH="$(
@@ -33,17 +47,6 @@ fi
 if [[ -z "${APP_PATH:-}" || ! -d "$APP_PATH" ]]; then
   echo "Built macOS app not found." >&2
   exit 1
-fi
-
-if pgrep -x "Nostr VPN" >/dev/null 2>&1; then
-  pkill -TERM -x "Nostr VPN" >/dev/null 2>&1 || true
-  for _ in {1..30}; do
-    if ! pgrep -x "Nostr VPN" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 0.1
-  done
-  pkill -x "Nostr VPN" >/dev/null 2>&1 || true
 fi
 
 touch "$APP_PATH"
