@@ -170,16 +170,12 @@ impl TrayRuntime {
             }
         };
 
-        let sni_registration = register_sni_object(
-            &connection,
-            &sni_info,
-            state.clone(),
-            sender.clone(),
-        )
-        .map_err(|error| {
-            *last_error.borrow_mut() = Some(format!("tray registration failed: {error}"));
-        })
-        .ok();
+        let sni_registration =
+            register_sni_object(&connection, &sni_info, state.clone(), sender.clone())
+                .map_err(|error| {
+                    *last_error.borrow_mut() = Some(format!("tray registration failed: {error}"));
+                })
+                .ok();
 
         let menu_registration = register_menu_object(
             &connection,
@@ -539,13 +535,7 @@ fn item(id: i32, label: &str, enabled: bool, command: TrayCommand) -> MenuNode {
     }
 }
 
-fn toggle_item(
-    id: i32,
-    label: &str,
-    enabled: bool,
-    on: bool,
-    command: TrayCommand,
-) -> MenuNode {
+fn toggle_item(id: i32, label: &str, enabled: bool, on: bool, command: TrayCommand) -> MenuNode {
     MenuNode {
         id,
         label: label.to_string(),
@@ -628,7 +618,10 @@ fn menu_properties(node: &MenuNode) -> HashMap<String, glib::Variant> {
     }
     if let Some(on) = node.toggle {
         properties.insert("toggle-type".to_string(), "checkmark".to_variant());
-        properties.insert("toggle-state".to_string(), (if on { 1i32 } else { 0i32 }).to_variant());
+        properties.insert(
+            "toggle-state".to_string(),
+            (if on { 1i32 } else { 0i32 }).to_variant(),
+        );
     }
     if !node.children.is_empty() {
         properties.insert("children-display".to_string(), "submenu".to_variant());
@@ -769,18 +762,21 @@ fn tray_icon(blocked: bool) -> glib::Variant {
     glib::Variant::array_from_iter_with_type(
         icon_type,
         [
-            tray_icon_pixmap(include_bytes!("../resources/nostr-vpn-tray-24.png"), blocked),
-            tray_icon_pixmap(include_bytes!("../resources/nostr-vpn-tray-48.png"), blocked),
+            tray_icon_pixmap(
+                include_bytes!("../resources/nostr-vpn-tray-24.png"),
+                blocked,
+            ),
+            tray_icon_pixmap(
+                include_bytes!("../resources/nostr-vpn-tray-48.png"),
+                blocked,
+            ),
         ],
     )
 }
 
 fn tray_icon_pixmap(bytes: &[u8], blocked: bool) -> glib::Variant {
-    let mut image = image::load_from_memory_with_format(
-        bytes,
-        image::ImageFormat::Png,
-    )
-    .expect("bundled tray icon is a valid PNG");
+    let mut image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+        .expect("bundled tray icon is a valid PNG");
     if blocked {
         draw_blocked_dot(&mut image);
     }

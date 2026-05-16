@@ -19,6 +19,7 @@ struct RootView: View {
     @State private var participantAliasDrafts: [String: String] = [:]
     @State private var savedNetworksExpanded = false
     @State private var pendingNetworkRemoval: NativeNetworkState?
+    @State private var pendingParticipantRemoval: PendingParticipantRemoval?
     @State private var addByDeviceIdInput = ""
     @State private var addByDeviceIdAlias = ""
     @State private var diagnosticsExpanded = false
@@ -673,7 +674,11 @@ struct RootView: View {
             .disabled(manager.actionInFlight)
             .help(participant.isAdmin ? "Remove admin" : "Make admin")
             Button(role: .destructive) {
-                manager.removeParticipant(networkId: network.id, npub: participant.npub)
+                pendingParticipantRemoval = PendingParticipantRemoval(
+                    networkId: network.id,
+                    npub: participant.npub,
+                    deviceName: deviceName(participant)
+                )
             } label: {
                 Label("Remove", systemImage: "trash")
             }
@@ -681,6 +686,24 @@ struct RootView: View {
             .help("Remove device")
         }
         .controlSize(.small)
+        .confirmationDialog(
+            "Remove \(pendingParticipantRemoval?.deviceName ?? "device")?",
+            isPresented: Binding(
+                get: { pendingParticipantRemoval != nil },
+                set: { if !$0 { pendingParticipantRemoval = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let target = pendingParticipantRemoval {
+                    manager.removeParticipant(networkId: target.networkId, npub: target.npub)
+                }
+                pendingParticipantRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingParticipantRemoval = nil }
+        } message: {
+            Text("This removes the device from the network's roster. They keep the network locally but won't be in this roster anymore.")
+        }
     }
 
     private func detailValueRow(_ title: String, _ value: String) -> some View {
@@ -1855,6 +1878,12 @@ struct RootView: View {
             return .muted
         }
     }
+}
+
+private struct PendingParticipantRemoval {
+    let networkId: String
+    let npub: String
+    let deviceName: String
 }
 
 struct InviteQRCodeView: View {

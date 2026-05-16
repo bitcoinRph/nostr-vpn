@@ -714,9 +714,11 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public Task RemoveParticipantAsync(NativeParticipantState participant)
     {
         var network = ActiveNetwork;
-        return network?.LocalIsAdmin == true
-            ? DispatchAsync(NativeActions.RemoveParticipant(network.Id, participant.Npub), "Removing device")
-            : Task.CompletedTask;
+        if (network?.LocalIsAdmin != true || participant.IsSelf)
+        {
+            return Task.CompletedTask;
+        }
+        return DispatchAsync(NativeActions.RemoveParticipant(network.Id, participant.Npub), "Removing device");
     }
 
     public Task ToggleAdminAsync(NativeParticipantState participant)

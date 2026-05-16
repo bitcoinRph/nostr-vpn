@@ -454,7 +454,7 @@ final class AppManager: ObservableObject {
     }
 
     func removeParticipant(networkId: String, npub: String) {
-        dispatch(.removeParticipant(networkId: networkId, npub: npub), status: "Removing participant")
+        dispatch(.removeParticipant(networkId: networkId, npub: npub), status: "Removing device")
     }
 
     func addNetwork(_ name: String) {

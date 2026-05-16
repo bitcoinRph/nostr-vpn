@@ -544,7 +544,9 @@ fn check_updates(app: &AppRef, manual: bool) {
             return;
         }
         if manual {
-            model.update_policy.note_manual_check_started(Instant::now());
+            model
+                .update_policy
+                .note_manual_check_started(Instant::now());
         }
         model.update.checking = true;
         if manual {
@@ -1151,20 +1153,13 @@ fn build_devices_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
                 let remove = gtk::Button::from_icon_name("edit-delete-symbolic");
                 remove.set_tooltip_text(Some("Remove device"));
                 remove.add_css_class("destructive-action");
-                {
-                    let app = app.clone();
-                    let network_id = network.id.clone();
-                    let npub = participant.npub.clone();
-                    remove.connect_clicked(move |_| {
-                        dispatch(
-                            &app,
-                            NativeAppAction::RemoveParticipant {
-                                network_id: network_id.clone(),
-                                npub: npub.clone(),
-                            },
-                        );
-                    });
-                }
+                connect_remove_participant_confirmation(
+                    &remove,
+                    app,
+                    network.id.clone(),
+                    participant.npub.clone(),
+                    device_name(participant),
+                );
                 participant_row.append(&remove);
             }
 
@@ -1374,20 +1369,13 @@ fn device_detail_card(
         let remove = gtk::Button::from_icon_name("edit-delete-symbolic");
         remove.set_tooltip_text(Some("Remove device"));
         remove.add_css_class("destructive-action");
-        {
-            let app = app.clone();
-            let network_id = network.id.clone();
-            let npub = participant.npub.clone();
-            remove.connect_clicked(move |_| {
-                dispatch(
-                    &app,
-                    NativeAppAction::RemoveParticipant {
-                        network_id: network_id.clone(),
-                        npub: npub.clone(),
-                    },
-                );
-            });
-        }
+        connect_remove_participant_confirmation(
+            &remove,
+            app,
+            network.id.clone(),
+            participant.npub.clone(),
+            device_name(&participant),
+        );
         row.append(&remove);
         manage.append(&row);
         detail.append(&manage);
@@ -2584,10 +2572,9 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         uninstall.set_sensitive(state.service_installed);
         {
             let app = app.clone();
-            uninstall
-                .connect_clicked(move |_| {
-                    dispatch(&app, NativeAppAction::UninstallSystemService);
-                });
+            uninstall.connect_clicked(move |_| {
+                dispatch(&app, NativeAppAction::UninstallSystemService);
+            });
         }
         service_row.append(&uninstall);
         system.append(&service_row);
@@ -2974,20 +2961,13 @@ fn device_row(
         let remove = gtk::Button::from_icon_name("edit-delete-symbolic");
         remove.set_tooltip_text(Some("Remove device"));
         remove.add_css_class("destructive-action");
-        {
-            let app = app.clone();
-            let network_id = network.id.clone();
-            let npub = participant.npub.clone();
-            remove.connect_clicked(move |_| {
-                dispatch(
-                    &app,
-                    NativeAppAction::RemoveParticipant {
-                        network_id: network_id.clone(),
-                        npub: npub.clone(),
-                    },
-                );
-            });
-        }
+        connect_remove_participant_confirmation(
+            &remove,
+            app,
+            network.id.clone(),
+            participant.npub.clone(),
+            device_name(participant),
+        );
         row.append(&remove);
     }
 
@@ -3072,6 +3052,44 @@ fn detail_row(parent: &gtk::Box, title: &str, value: &str) {
     value_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
     row.append(&value_label);
     parent.append(&row);
+}
+
+fn connect_remove_participant_confirmation(
+    button: &gtk::Button,
+    app: &AppRef,
+    network_id: String,
+    npub: String,
+    device_name: String,
+) {
+    let app = app.clone();
+    button.connect_clicked(move |_| {
+        confirm_remove_participant(&app, network_id.clone(), npub.clone(), device_name.clone());
+    });
+}
+
+fn confirm_remove_participant(app: &AppRef, network_id: String, npub: String, device_name: String) {
+    let dialog = adw::AlertDialog::new(
+        Some(&format!("Remove {device_name}?")),
+        Some("This removes the device from the network's roster. They keep the network locally but won't be in this roster anymore."),
+    );
+    dialog.add_responses(&[("cancel", "Cancel"), ("remove", "Remove")]);
+    dialog.set_close_response("cancel");
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+    {
+        let app = app.clone();
+        dialog.connect_response(Some("remove"), move |_, _| {
+            dispatch(
+                &app,
+                NativeAppAction::RemoveParticipant {
+                    network_id: network_id.clone(),
+                    npub: npub.clone(),
+                },
+            );
+        });
+    }
+    let window = app.borrow().window.clone();
+    dialog.present(Some(&window));
 }
 
 fn metric(title: &str, value: &str) -> gtk::Box {

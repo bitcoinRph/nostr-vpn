@@ -102,6 +102,15 @@ public partial class MainWindow : Window
     {
         if (sender is Button { Tag: NativeParticipantState participant })
         {
+            var name = string.IsNullOrWhiteSpace(participant.DisplayName) ? "this device" : participant.DisplayName;
+            var result = MessageBox.Show(
+                this,
+                "This removes the device from the network's roster. They keep the network locally but won't be in this roster anymore.",
+                $"Remove {name}?",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning,
+                MessageBoxResult.Cancel);
+            if (result != MessageBoxResult.OK) return;
             await ViewModel.RemoveParticipantAsync(participant);
         }
     }
