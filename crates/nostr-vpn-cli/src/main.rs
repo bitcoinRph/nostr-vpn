@@ -2844,6 +2844,9 @@ fn local_fips_endpoint_hints(
 
     if app.lan_discovery_enabled {
         for ip in local_ipv4_candidates {
+            if !ipv4_is_lan_endpoint_hint(ip) {
+                continue;
+            }
             endpoints.push(SocketAddrV4::new(ip, app.node.listen_port).to_string());
         }
     }
@@ -2860,7 +2863,9 @@ fn runtime_signal_ipv4_candidates(
 ) -> Vec<Ipv4Addr> {
     let tunnel_ipv4 = strip_cidr(tunnel_ip).parse::<Ipv4Addr>().ok();
     let mut ips = Vec::new();
-    if let Some(ip) = runtime_signal_ipv4(detected_ipv4, tunnel_ip) {
+    if let Some(ip) = runtime_signal_ipv4(detected_ipv4, tunnel_ip)
+        && ipv4_is_lan_endpoint_hint(ip)
+    {
         ips.push(ip);
     }
     for iface in netdev::get_interfaces() {
@@ -2873,13 +2878,11 @@ fn runtime_signal_ipv4_candidates(
                 || ip.is_loopback()
                 || ip.is_unspecified()
                 || ip.is_link_local()
+                || !ipv4_is_lan_endpoint_hint(ip)
             {
                 continue;
             }
-            let endpoint = SocketAddrV4::new(ip, 1).to_string();
-            if endpoint_is_local_only(&endpoint) {
-                ips.push(ip);
-            }
+            ips.push(ip);
         }
     }
     ips.sort();
@@ -2941,7 +2944,11 @@ fn endpoint_addr_ip(endpoint: &str) -> Option<IpAddr> {
 fn endpoint_hint_ip_is_unusable(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
-            ip.is_unspecified() || ip.is_loopback() || ip.is_link_local() || ip.is_multicast()
+            ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_multicast()
+                || ipv4_is_cgnat(ip)
         }
         IpAddr::V6(ip) => {
             ip.is_unspecified()
@@ -2950,6 +2957,17 @@ fn endpoint_hint_ip_is_unusable(ip: IpAddr) -> bool {
                 || ip.is_multicast()
         }
     }
+}
+
+#[cfg(feature = "embedded-fips")]
+fn ipv4_is_lan_endpoint_hint(ip: Ipv4Addr) -> bool {
+    ip.is_private()
+}
+
+#[cfg(feature = "embedded-fips")]
+fn ipv4_is_cgnat(ip: Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    octets[0] == 100 && (64..=127).contains(&octets[1])
 }
 
 #[cfg(feature = "embedded-fips")]

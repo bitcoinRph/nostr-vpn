@@ -77,6 +77,20 @@ fn local_fips_endpoint_hints_do_not_share_lan_when_disabled() {
 
 #[cfg(feature = "embedded-fips")]
 #[test]
+fn local_fips_endpoint_hints_do_not_share_cgnat_candidates() {
+    let mut app = AppConfig::generated();
+    app.node.endpoint = "127.0.0.1:1111".to_string();
+    app.node.listen_port = 51820;
+    app.node.tunnel_ip = "10.44.1.1/32".to_string();
+    app.lan_discovery_enabled = true;
+
+    let hints = local_fips_endpoint_hints(&app, vec![Ipv4Addr::new(100, 120, 94, 10)]);
+
+    assert!(hints.is_empty());
+}
+
+#[cfg(feature = "embedded-fips")]
+#[test]
 fn local_fips_endpoint_hints_do_not_share_loopback_when_lan_enabled() {
     let mut app = AppConfig::generated();
     app.node.endpoint = "127.0.0.1:1111".to_string();
@@ -126,6 +140,16 @@ fn runtime_signal_ipv4_candidates_keep_local_non_tunnel_addresses() {
 
     assert!(candidates.contains(&Ipv4Addr::new(192, 168, 50, 10)));
     assert!(!candidates.contains(&Ipv4Addr::new(10, 44, 1, 1)));
+    assert!(!candidates.contains(&Ipv4Addr::new(100, 120, 94, 10)));
+}
+
+#[cfg(feature = "embedded-fips")]
+#[test]
+fn runtime_signal_ipv4_candidates_drop_detected_cgnat_address() {
+    let candidates =
+        runtime_signal_ipv4_candidates(Some(Ipv4Addr::new(100, 120, 94, 10)), "10.44.1.1/32");
+
+    assert!(!candidates.contains(&Ipv4Addr::new(100, 120, 94, 10)));
 }
 
 #[cfg(feature = "embedded-fips")]

@@ -28,9 +28,7 @@ use std::io::IoSlice;
 use std::io::{self, Write};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::mem::ManuallyDrop;
-#[cfg(target_os = "linux")]
-use std::net::Ipv4Addr;
-use std::net::{IpAddr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
@@ -363,7 +361,11 @@ fn peer_endpoint_hint_addr(hint: &PeerEndpointHint) -> Option<String> {
 fn endpoint_hint_ip_is_unusable(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
-            ip.is_unspecified() || ip.is_loopback() || ip.is_link_local() || ip.is_multicast()
+            ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_multicast()
+                || ipv4_is_cgnat(ip)
         }
         IpAddr::V6(ip) => {
             ip.is_unspecified()
@@ -372,6 +374,11 @@ fn endpoint_hint_ip_is_unusable(ip: IpAddr) -> bool {
                 || ip.is_multicast()
         }
     }
+}
+
+fn ipv4_is_cgnat(ip: Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    octets[0] == 100 && (64..=127).contains(&octets[1])
 }
 
 fn endpoint_addr_ip(addr: &str) -> Option<IpAddr> {
@@ -3478,6 +3485,10 @@ mod tests {
         );
         assert_eq!(
             super::peer_endpoint_hint_addr(&PeerEndpointHint::udp("127.0.0.1:51820")),
+            None
+        );
+        assert_eq!(
+            super::peer_endpoint_hint_addr(&PeerEndpointHint::udp("100.120.94.10:51820")),
             None
         );
         assert_eq!(
