@@ -53,6 +53,12 @@ const FIPS_PEER_ONLINE_GRACE_SECS: u64 = 45;
 const FIPS_NOSTR_DISCOVERY_APP: &str = "fips-overlay-v1";
 const FIPS_LAN_DISCOVERY_SCOPE_PREFIX: &str = "nostr-vpn";
 const FIPS_PEER_CAPS_GRACE_SECS: u64 = 600;
+const FIPS_DISCOVERY_BACKOFF_BASE_SECS: u64 = 30;
+const FIPS_DISCOVERY_BACKOFF_MAX_SECS: u64 = 300;
+const FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS: u64 = 5;
+const FIPS_NOSTR_OPEN_DISCOVERY_MAX_PENDING: usize = 8;
+const FIPS_NOSTR_FAILURE_STREAK_THRESHOLD: u32 = 2;
+const FIPS_NOSTR_STARTUP_SWEEP_MAX_AGE_SECS: u64 = 300;
 const MESH_LAN_UNDERLAY_UDP_MTU: u16 = 1420;
 const MESH_LAN_TUNNEL_MTU: u16 = 1290;
 const MESH_MIN_UNDERLAY_UDP_MTU: u16 = 1280;
@@ -1065,6 +1071,12 @@ fn fips_endpoint_config(
     // first-contact EndpointData trigger discovery through those neighbors.
     config.node.routing.mode = RoutingMode::ReplyLearned;
     config.dns.enabled = false;
+    // nvpn keeps public/open discovery available as a fallback, but it should
+    // be polite to public transit nodes when stale roster peers or cached
+    // adverts cannot be reached.
+    config.node.discovery.backoff_base_secs = FIPS_DISCOVERY_BACKOFF_BASE_SECS;
+    config.node.discovery.backoff_max_secs = FIPS_DISCOVERY_BACKOFF_MAX_SECS;
+    config.node.discovery.forward_min_interval_secs = FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS;
     let advertise_udp = transport
         .map(|transport| transport.advertise_endpoint)
         .unwrap_or(false);
@@ -1082,6 +1094,9 @@ fn fips_endpoint_config(
     // but cannot inject anything that surfaces on the tun. See the
     // `inbound_endpoint_data_*` tests in `nostr-vpn-core::fips_mesh`.
     config.node.discovery.nostr.policy = NostrDiscoveryPolicy::Open;
+    config.node.discovery.nostr.open_discovery_max_pending = FIPS_NOSTR_OPEN_DISCOVERY_MAX_PENDING;
+    config.node.discovery.nostr.failure_streak_threshold = FIPS_NOSTR_FAILURE_STREAK_THRESHOLD;
+    config.node.discovery.nostr.startup_sweep_max_age_secs = FIPS_NOSTR_STARTUP_SWEEP_MAX_AGE_SECS;
     config.node.discovery.nostr.share_local_candidates = transport
         .map(|transport| transport.share_local_candidates)
         .unwrap_or(false);
@@ -3179,7 +3194,10 @@ fn unix_timestamp() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        ControlFragmentBuffer, FIPS_LAN_DISCOVERY_SCOPE_PREFIX, FIPS_NOSTR_DISCOVERY_APP,
+        ControlFragmentBuffer, FIPS_DISCOVERY_BACKOFF_BASE_SECS, FIPS_DISCOVERY_BACKOFF_MAX_SECS,
+        FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS, FIPS_LAN_DISCOVERY_SCOPE_PREFIX,
+        FIPS_NOSTR_DISCOVERY_APP, FIPS_NOSTR_FAILURE_STREAK_THRESHOLD,
+        FIPS_NOSTR_OPEN_DISCOVERY_MAX_PENDING, FIPS_NOSTR_STARTUP_SWEEP_MAX_AGE_SECS,
         FipsEndpointTransportConfig, FipsPrivateMeshRuntime, FipsPrivateTunnelConfig,
         control_frame_destination_npub, control_frame_source_pubkey, fips_endpoint_config,
         fips_endpoint_peers_from_mesh, fips_lan_discovery_scope, strip_cidr,
@@ -3718,11 +3736,35 @@ mod tests {
         assert!(!config.node.control.enabled);
         assert_eq!(config.node.routing.mode, RoutingMode::ReplyLearned);
         assert!(!config.dns.enabled);
+        assert_eq!(
+            config.node.discovery.backoff_base_secs,
+            FIPS_DISCOVERY_BACKOFF_BASE_SECS
+        );
+        assert_eq!(
+            config.node.discovery.backoff_max_secs,
+            FIPS_DISCOVERY_BACKOFF_MAX_SECS
+        );
+        assert_eq!(
+            config.node.discovery.forward_min_interval_secs,
+            FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS
+        );
         assert!(config.node.discovery.nostr.enabled);
         assert!(!config.node.discovery.nostr.advertise);
         assert_eq!(
             config.node.discovery.nostr.policy,
             fips_endpoint::NostrDiscoveryPolicy::Open
+        );
+        assert_eq!(
+            config.node.discovery.nostr.open_discovery_max_pending,
+            FIPS_NOSTR_OPEN_DISCOVERY_MAX_PENDING
+        );
+        assert_eq!(
+            config.node.discovery.nostr.failure_streak_threshold,
+            FIPS_NOSTR_FAILURE_STREAK_THRESHOLD
+        );
+        assert_eq!(
+            config.node.discovery.nostr.startup_sweep_max_age_secs,
+            FIPS_NOSTR_STARTUP_SWEEP_MAX_AGE_SECS
         );
         assert!(!config.node.discovery.nostr.share_local_candidates);
         assert!(!config.node.discovery.lan.enabled);
@@ -3777,6 +3819,14 @@ mod tests {
         assert_eq!(
             config.node.discovery.nostr.policy,
             fips_endpoint::NostrDiscoveryPolicy::Open
+        );
+        assert_eq!(
+            config.node.discovery.nostr.open_discovery_max_pending,
+            FIPS_NOSTR_OPEN_DISCOVERY_MAX_PENDING
+        );
+        assert_eq!(
+            config.node.discovery.nostr.failure_streak_threshold,
+            FIPS_NOSTR_FAILURE_STREAK_THRESHOLD
         );
         assert!(config.node.discovery.nostr.share_local_candidates);
         assert!(config.node.discovery.lan.enabled);
