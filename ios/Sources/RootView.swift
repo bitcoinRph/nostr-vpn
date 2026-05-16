@@ -39,7 +39,7 @@ struct RootView: View {
         .tint(.purple)
         .sheet(isPresented: $addNetworkPresented) {
             NavigationStack {
-                AddNetworkPage(model: model)
+                AddNetworkPage(model: model, onCreated: { addNetworkPresented = false })
                     .navigationTitle("Add Network")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
@@ -110,6 +110,11 @@ private struct NetworkSwitcher: View {
 /// create, join via invite, or pick up a nearby invite.
 private struct AddNetworkPage: View {
     @ObservedObject var model: AppModel
+    /// Called once the user lands on a network — used by the sheet
+    /// presentation to dismiss itself so the underlying Devices tab is
+    /// visible. The setup case (no active network) doesn't pass this:
+    /// the root view's `if activeNetwork == nil` flips on its own.
+    var onCreated: (() -> Void)? = nil
 
     var body: some View {
         ScrollView {
@@ -117,7 +122,7 @@ private struct AddNetworkPage: View {
                 if !model.state.error.isEmpty || !model.statusMessage.isEmpty {
                     NoticeCard(text: model.state.error.isEmpty ? model.statusMessage : model.state.error)
                 }
-                CreateNetworkCard(model: model)
+                CreateNetworkCard(model: model, onCreated: onCreated)
                 JoinNetworkCard(model: model)
                 NearbyCard(model: model)
             }
@@ -246,6 +251,7 @@ private struct ToolbarVpnSwitch: View {
 
 private struct CreateNetworkCard: View {
     @ObservedObject var model: AppModel
+    var onCreated: (() -> Void)? = nil
     @State private var networkName = "My Network"
 
     var body: some View {
@@ -262,6 +268,7 @@ private struct CreateNetworkCard: View {
                         status: "Creating network"
                     )
                     networkName = "My Network"
+                    onCreated?()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.actionInFlight)
