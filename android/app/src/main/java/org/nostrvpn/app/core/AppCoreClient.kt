@@ -41,6 +41,9 @@ object NativeActions {
     fun startNearbyDiscovery() = action("start_nearby_discovery")
     fun stopNearbyDiscovery() = action("stop_nearby_discovery")
     fun addNetwork(name: String) = action("add_network", "name" to name)
+    fun manualAddNetwork(adminNpub: String, meshNetworkId: String) =
+        action("manual_add_network", "adminNpub" to adminNpub, "meshNetworkId" to meshNetworkId)
+
     fun setNetworkEnabled(networkId: String, enabled: Boolean) =
         action("set_network_enabled", "networkId" to networkId, "enabled" to enabled)
 

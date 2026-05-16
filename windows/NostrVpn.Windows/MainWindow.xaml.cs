@@ -1,6 +1,8 @@
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using NostrVpn.Windows.Core;
 using NostrVpn.Windows.ViewModels;
@@ -34,6 +36,37 @@ public partial class MainWindow : Window
         {
             ViewModel.CopyText(npub);
         }
+    }
+
+    private void NetworkSwitcher_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement anchor)
+        {
+            return;
+        }
+        var menu = new ContextMenu
+        {
+            PlacementTarget = anchor,
+            Placement = PlacementMode.Top,
+        };
+        foreach (var network in ViewModel.InactiveNetworks)
+        {
+            var item = new MenuItem
+            {
+                Header = string.IsNullOrWhiteSpace(network.Name) ? "Private network" : network.Name,
+            };
+            var networkId = network.Id;
+            item.Click += (_, _) => ViewModel.ActivateInactiveNetworkCommand.Execute(networkId);
+            menu.Items.Add(item);
+        }
+        if (menu.Items.Count > 0)
+        {
+            menu.Items.Add(new Separator());
+        }
+        var addItem = new MenuItem { Header = "Add network" };
+        addItem.Click += (_, _) => ViewModel.ShowAddNetworkCommand.Execute(null);
+        menu.Items.Add(addItem);
+        menu.IsOpen = true;
     }
 
     private async void ToggleAdmin_Click(object sender, RoutedEventArgs e)
@@ -162,7 +195,7 @@ public partial class MainWindow : Window
             var name = string.IsNullOrWhiteSpace(network?.Name) ? "this network" : network!.Name;
             var result = MessageBox.Show(
                 this,
-                "This deletes the network from this device. You can rejoin later with the invite.",
+                "This deletes the network from this device.",
                 $"Remove {name}?",
                 MessageBoxButton.OKCancel,
                 MessageBoxImage.Warning,

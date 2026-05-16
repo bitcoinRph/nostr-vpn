@@ -30,11 +30,14 @@
           </Button>
         </StackPanel>
 
-        <Border DockPanel.Dock="Bottom" Background="#FFFFFF" CornerRadius="8" Padding="12">
-          <StackPanel>
-            <TextBlock Text="{Binding ActiveNetworkName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-            <TextBlock Text="{Binding HeroSubtitle}" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,3,0,0" />
-          </StackPanel>
+        <Border DockPanel.Dock="Bottom" Background="#FFFFFF" CornerRadius="8" Padding="12" Cursor="Hand" MouseLeftButtonUp="NetworkSwitcher_Click">
+          <DockPanel LastChildFill="True">
+            <TextBlock DockPanel.Dock="Right" FontFamily="Segoe MDL2 Assets" Text="&#xE70D;" FontSize="10" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="6,0,0,0" />
+            <StackPanel>
+              <TextBlock Text="{Binding ActiveNetworkName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding HeroSubtitle}" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,3,0,0" />
+            </StackPanel>
+          </DockPanel>
         </Border>
       </DockPanel>
     </Border>
@@ -76,36 +79,79 @@
             <TextBlock Text="{Binding Notice}" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" />
           </Border>
 
-          <Border Style="{StaticResource Card}" Visibility="{Binding HasActiveNetwork, Converter={StaticResource InverseBoolToVisibility}}">
-            <StackPanel>
-              <TextBlock Text="Create Network" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
-              <Grid>
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBox Text="{Binding NetworkNameInput, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" />
-                <Button Grid.Column="1" Content="Create" Command="{Binding CreateNetworkCommand}" />
-              </Grid>
-
-              <Border BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Margin="0,16,0,0" Padding="0,16,0,0">
-                <StackPanel>
-                  <TextBlock Text="Join Network" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
-                  <Grid>
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="*" />
-                      <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox Text="{Binding InviteInput, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" />
-                    <StackPanel Grid.Column="1" Orientation="Horizontal">
-                      <Button Content="Paste" Command="{Binding PasteInviteCommand}" Margin="0,0,8,0" />
-                      <Button Content="From QR file" Command="{Binding ImportQrImageCommand}" />
-                    </StackPanel>
-                  </Grid>
-                </StackPanel>
-              </Border>
-            </StackPanel>
-          </Border>
+          <StackPanel Visibility="{Binding HasActiveNetwork, Converter={StaticResource InverseBoolToVisibility}}">
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="Create Network" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBox Text="{Binding NetworkNameInput, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" />
+                  <Button Grid.Column="1" Content="Create" Command="{Binding CreateNetworkCommand}" />
+                </Grid>
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="Join Network" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBox Text="{Binding InviteInput, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" />
+                  <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Content="Paste" Command="{Binding PasteInviteCommand}" Margin="0,0,8,0" />
+                    <Button Content="From QR file" Command="{Binding ImportQrImageCommand}" />
+                  </StackPanel>
+                </Grid>
+                <Expander Header="Add manually" Margin="0,10,0,0" IsExpanded="{Binding ManualJoinExpanded, Mode=TwoWay}">
+                  <StackPanel Margin="0,8,0,0">
+                    <TextBlock Text="Both sides have to add each other. Get the admin's Device ID and the network ID from them, then have the admin add your Device ID on their Add device page." Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                    <TextBox Text="{Binding ManualJoinAdminId, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4">
+                      <TextBox.Style>
+                        <Style TargetType="TextBox">
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ManualJoinAdminInvalid}" Value="True">
+                              <Setter Property="BorderBrush" Value="{StaticResource Danger}" />
+                              <Setter Property="BorderThickness" Value="1" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </TextBox.Style>
+                    </TextBox>
+                    <TextBlock Text="Not a valid device ID" Foreground="{StaticResource Danger}" FontSize="11" Margin="0,0,0,4" Visibility="{Binding ManualJoinAdminErrorVisibility}" />
+                    <TextBox Text="{Binding ManualJoinMeshId, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,8" />
+                    <Button Content="Add" Command="{Binding ManualAddNetworkCommand}" HorizontalAlignment="Left" />
+                  </StackPanel>
+                </Expander>
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <DockPanel LastChildFill="True" Margin="0,0,0,10">
+                  <Button DockPanel.Dock="Right" Content="{Binding NearbyDiscoveryButtonText}" Command="{Binding ToggleNearbyDiscoveryCommand}" />
+                  <TextBlock Text="Nearby invites" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </DockPanel>
+                <ItemsControl ItemsSource="{Binding State.LanPeers}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <DockPanel Margin="0,0,0,8">
+                        <Button DockPanel.Dock="Right" Content="Join" Tag="{Binding Invite}" Click="JoinLanPeer_Click" />
+                        <StackPanel>
+                          <TextBlock Text="{Binding NodeName}" FontWeight="SemiBold" />
+                          <TextBlock Text="{Binding NetworkName}" Foreground="{StaticResource TextSecondary}" />
+                        </StackPanel>
+                      </DockPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="No nearby invites yet" Foreground="{StaticResource TextSecondary}" Visibility="{Binding NoNearbyInvitesNoticeVisibility}" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
 
           <StackPanel Visibility="{Binding Page, Converter={StaticResource PageVisibility}, ConverterParameter=Devices}">
             <Grid Visibility="{Binding HasActiveNetwork, Converter={StaticResource BoolToVisibility}}">
@@ -118,7 +164,7 @@
               <Border Grid.Column="0" Style="{StaticResource Card}">
                 <StackPanel>
                   <DockPanel LastChildFill="True">
-                    <Button DockPanel.Dock="Right" Command="{Binding ShowShareCommand}" Content="+" />
+                    <Button DockPanel.Dock="Right" Command="{Binding ShowAddDeviceCommand}" Content="+ Add device" Visibility="{Binding ActiveNetwork.LocalIsAdmin, Converter={StaticResource BoolToVisibility}}" />
                     <StackPanel>
                       <TextBlock Text="Devices" FontSize="18" FontWeight="SemiBold" />
                       <TextBlock Text="{Binding HeroSubtitle}" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,3,0,0" />
@@ -284,58 +330,6 @@
               </Border>
             </Grid>
 
-            <Expander Header="Manage Devices" Margin="0,4,0,14" Visibility="{Binding ActiveNetwork.LocalIsAdmin, Converter={StaticResource BoolToVisibility}}">
-              <Border Style="{StaticResource Card}" Margin="0,8,0,0">
-                <StackPanel>
-                  <TextBlock Text="Add by Device ID" FontWeight="SemiBold" Margin="0,0,0,4" />
-                  <TextBlock Text="Manual pairing: enter the other device's Device ID. They also need to add yours." Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
-                  <Grid>
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="*" />
-                      <ColumnDefinition Width="180" />
-                      <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox Text="{Binding ParticipantInput, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0">
-                      <TextBox.Style>
-                        <Style TargetType="TextBox">
-                          <Style.Triggers>
-                            <DataTrigger Binding="{Binding ParticipantInputInvalid}" Value="True">
-                              <Setter Property="BorderBrush" Value="{StaticResource Danger}" />
-                              <Setter Property="BorderThickness" Value="1" />
-                            </DataTrigger>
-                          </Style.Triggers>
-                        </Style>
-                      </TextBox.Style>
-                    </TextBox>
-                    <TextBox Grid.Column="1" Text="{Binding ParticipantAliasInput, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" />
-                    <Button Grid.Column="2" Content="Add" Command="{Binding AddParticipantCommand}" />
-                  </Grid>
-                  <TextBlock Text="Not a valid device ID" Foreground="{StaticResource Danger}" FontSize="11" Margin="0,4,0,0" Visibility="{Binding ParticipantInputErrorVisibility}" />
-
-                  <ItemsControl ItemsSource="{Binding ActiveNetwork.Participants}" Margin="0,12,0,0">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate>
-                        <Grid Margin="0,0,0,8">
-                          <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="170" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                          </Grid.ColumnDefinitions>
-                          <TextBlock Text="{Binding MagicDnsName}" VerticalAlignment="Center" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
-                          <TextBox x:Name="AliasInput" Grid.Column="1" Text="{Binding MagicDnsAlias, Mode=OneWay}" Margin="0,0,8,0" />
-                          <Button Grid.Column="2" Content="Save" Tag="{Binding}" Click="SetParticipantAlias_Click" Margin="0,0,8,0" />
-                          <Button Grid.Column="3" Content="Admin" Tag="{Binding}" Click="ToggleAdmin_Click" Margin="0,0,8,0" Visibility="{Binding IsSelf, Converter={StaticResource InverseBoolToVisibility}}" />
-                          <Button Grid.Column="4" Content="Remove" Tag="{Binding}" Click="RemoveParticipant_Click" Visibility="{Binding IsSelf, Converter={StaticResource InverseBoolToVisibility}}" />
-                        </Grid>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </StackPanel>
-              </Border>
-            </Expander>
-
             <ItemsControl ItemsSource="{Binding ActiveNetwork.InboundJoinRequests}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
@@ -353,31 +347,20 @@
             </ItemsControl>
           </StackPanel>
 
-          <StackPanel Visibility="{Binding Page, Converter={StaticResource PageVisibility}, ConverterParameter=Share}">
-            <Border Style="{StaticResource Card}" Visibility="{Binding HasActiveNetwork, Converter={StaticResource BoolToVisibility}}">
-              <Grid>
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="170" />
-                  <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <controls:QrCodeView Width="150" Height="150" Matrix="{Binding InviteQr}" />
-                <StackPanel Grid.Column="1" Margin="18,0,0,0">
-                  <TextBlock Text="Invite Devices" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
-                  <TextBlock Text="Your invite" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,0,0,4" />
-                  <TextBox Text="{Binding State.ActiveNetworkInvite, Mode=OneWay}" IsReadOnly="True" />
-                  <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                    <Button Content="Copy" Command="{Binding CopyInviteCommand}" Margin="0,0,8,0" />
-                    <Button Content="{Binding InviteBroadcastButtonText}" Command="{Binding ToggleInviteBroadcastCommand}" />
-                    <CheckBox Content="Join requests"
-                              IsChecked="{Binding ActiveNetwork.JoinRequestsEnabled, Mode=OneWay}"
-                              IsEnabled="{Binding ActiveNetwork.LocalIsAdmin}"
-                              Click="JoinRequests_Click"
-                              Margin="12,4,0,4" />
-                  </StackPanel>
-                </StackPanel>
-              </Grid>
+          <StackPanel Visibility="{Binding Page, Converter={StaticResource PageVisibility}, ConverterParameter=AddNetwork}">
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="Create Network" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBox Text="{Binding NetworkNameInput, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" />
+                  <Button Grid.Column="1" Content="Create" Command="{Binding CreateNetworkCommand}" />
+                </Grid>
+              </StackPanel>
             </Border>
-
             <Border Style="{StaticResource Card}">
               <StackPanel>
                 <TextBlock Text="Join Network" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
@@ -397,17 +380,38 @@
                   <TextBlock Text="{Binding ActiveNetworkJoinStatus}" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,10,0" />
                   <Button Content="Request Access" Command="{Binding RequestNetworkJoinCommand}" Visibility="{Binding CanRequestActiveNetworkJoin, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
-
-                <Border BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Margin="0,16,0,0" Padding="0,16,0,0">
-                  <DockPanel LastChildFill="True">
-                    <Button DockPanel.Dock="Right" Content="{Binding NearbyDiscoveryButtonText}" Command="{Binding ToggleNearbyDiscoveryCommand}" />
-                    <TextBlock Text="Nearby invites" FontWeight="SemiBold" VerticalAlignment="Center" />
-                  </DockPanel>
-                </Border>
+                <Expander Header="Add manually" Margin="0,10,0,0" IsExpanded="{Binding ManualJoinExpanded, Mode=TwoWay}">
+                  <StackPanel Margin="0,8,0,0">
+                    <TextBlock Text="Both sides have to add each other. Get the admin's Device ID and the network ID from them, then have the admin add your Device ID on their Add device page." Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                    <TextBox Text="{Binding ManualJoinAdminId, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4">
+                      <TextBox.Style>
+                        <Style TargetType="TextBox">
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ManualJoinAdminInvalid}" Value="True">
+                              <Setter Property="BorderBrush" Value="{StaticResource Danger}" />
+                              <Setter Property="BorderThickness" Value="1" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </TextBox.Style>
+                    </TextBox>
+                    <TextBlock Text="Not a valid device ID" Foreground="{StaticResource Danger}" FontSize="11" Margin="0,0,0,4" Visibility="{Binding ManualJoinAdminErrorVisibility}" />
+                    <TextBox Text="{Binding ManualJoinMeshId, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,8" />
+                    <Button Content="Add" Command="{Binding ManualAddNetworkCommand}" HorizontalAlignment="Left" />
+                  </StackPanel>
+                </Expander>
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <DockPanel LastChildFill="True" Margin="0,0,0,10">
+                  <Button DockPanel.Dock="Right" Content="{Binding NearbyDiscoveryButtonText}" Command="{Binding ToggleNearbyDiscoveryCommand}" />
+                  <TextBlock Text="Nearby invites" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </DockPanel>
                 <ItemsControl ItemsSource="{Binding State.LanPeers}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <DockPanel Margin="0,10,0,0">
+                      <DockPanel Margin="0,0,0,8">
                         <Button DockPanel.Dock="Right" Content="Join" Tag="{Binding Invite}" Click="JoinLanPeer_Click" />
                         <StackPanel>
                           <TextBlock Text="{Binding NodeName}" FontWeight="SemiBold" />
@@ -417,10 +421,89 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <TextBlock Text="No nearby invites yet"
-                           Foreground="{StaticResource TextSecondary}"
-                           Margin="0,10,0,0"
-                           Visibility="{Binding NoNearbyInvitesNoticeVisibility}" />
+                <TextBlock Text="No nearby invites yet" Foreground="{StaticResource TextSecondary}" Visibility="{Binding NoNearbyInvitesNoticeVisibility}" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel Visibility="{Binding Page, Converter={StaticResource PageVisibility}, ConverterParameter=AddDevice}">
+            <Border Style="{StaticResource Card}" Visibility="{Binding HasActiveNetwork, Converter={StaticResource BoolToVisibility}}">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="170" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <controls:QrCodeView Width="150" Height="150" Matrix="{Binding InviteQr}" />
+                <StackPanel Grid.Column="1" Margin="18,0,0,0">
+                  <TextBlock Text="Invite to my network" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
+                  <TextBlock Text="Share this code with another device to give it access to your network." Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,0,0,8" TextWrapping="Wrap" />
+                  <TextBox Text="{Binding State.ActiveNetworkInvite, Mode=OneWay}" IsReadOnly="True" />
+                  <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <Button Content="Copy" Command="{Binding CopyInviteCommand}" Margin="0,0,8,0" />
+                    <Button Content="{Binding InviteBroadcastButtonText}" Command="{Binding ToggleInviteBroadcastCommand}" />
+                    <CheckBox Content="Join requests"
+                              IsChecked="{Binding ActiveNetwork.JoinRequestsEnabled, Mode=OneWay}"
+                              IsEnabled="{Binding ActiveNetwork.LocalIsAdmin}"
+                              Click="JoinRequests_Click"
+                              Margin="12,4,0,4" />
+                  </StackPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Visibility="{Binding HasActiveNetwork, Converter={StaticResource BoolToVisibility}}">
+              <StackPanel>
+                <TextBlock Text="For manual join" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
+                <TextBlock Text="If the other device can't scan or paste an invite, share these two values. They'll enter them under Join Network → Add manually. You still need to add their Device ID below." Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,10" />
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="Your Device ID" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="1" Text="{Binding State.OwnNpub}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                  <Button Grid.Column="2" Content="Copy" Tag="{Binding State.OwnNpub}" Click="CopyPeer_Click" />
+                </Grid>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="Network ID" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="1" Text="{Binding ActiveNetwork.NetworkId}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                  <Button Grid.Column="2" Content="Copy" Command="{Binding CopyNetworkIdCommand}" />
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Visibility="{Binding ActiveNetwork.LocalIsAdmin, Converter={StaticResource BoolToVisibility}}">
+              <StackPanel>
+                <TextBlock Text="Add by Device ID" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
+                <TextBlock Text="Manual pairing: enter the other device's Device ID. They also need to add yours." Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="180" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBox Text="{Binding ParticipantInput, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0">
+                    <TextBox.Style>
+                      <Style TargetType="TextBox">
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding ParticipantInputInvalid}" Value="True">
+                            <Setter Property="BorderBrush" Value="{StaticResource Danger}" />
+                            <Setter Property="BorderThickness" Value="1" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </TextBox.Style>
+                  </TextBox>
+                  <TextBox Grid.Column="1" Text="{Binding ParticipantAliasInput, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" />
+                  <Button Grid.Column="2" Content="Add" Command="{Binding AddParticipantCommand}" />
+                </Grid>
+                <TextBlock Text="Not a valid device ID" Foreground="{StaticResource Danger}" FontSize="11" Margin="0,4,0,0" Visibility="{Binding ParticipantInputErrorVisibility}" />
               </StackPanel>
             </Border>
           </StackPanel>

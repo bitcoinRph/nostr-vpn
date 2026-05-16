@@ -172,7 +172,7 @@ internal fun NostrVpnApp(
         AlertDialog(
             onDismissRequest = { pendingNetworkRemoval = null },
             title = { Text("Delete ${target.name.ifBlank { "network" }}?") },
-            text = { Text("Removes the network from this device. You can rejoin later with the invite.") },
+            text = { Text("Removes the network from this device.") },
             confirmButton = {
                 TextButton(onClick = {
                     dispatch(NativeActions.removeNetwork(target.id))
@@ -476,12 +476,11 @@ private fun NetworkSetupCard(
             }
         }
 
-        // Manual join: build a synthetic invite from admin device id +
-        // mesh network id when the user doesn't have a copy/paste invite.
-        // The Rust core's parse_network_invite accepts a bare-JSON
-        // payload; we just hand it the JSON. Result is identical to
-        // importing an invite link: network is added locally with
-        // admin's npub, join request queued for the admin to accept.
+        // Manual join: hand off admin device id + mesh network id directly
+        // to the core's `manual_add_network` action. The core builds a
+        // synthetic NetworkInvite and runs it through the same parse +
+        // apply path as a regular invite — the network shows up locally
+        // with admin seeded and a join request is queued for them.
         Spacer(Modifier.height(8.dp))
         var manualExpanded by remember { mutableStateOf(false) }
         var manualAdminId by remember { mutableStateOf("") }
@@ -495,7 +494,7 @@ private fun NetworkSetupCard(
             val adminInvalid = adminTrim.isNotEmpty() && !isValidDeviceId(adminTrim)
             val canSubmit = adminTrim.isNotEmpty() && meshTrim.isNotEmpty() && !adminInvalid
             Text(
-                "Both sides have to add each other. Get the admin's Device ID and the network ID from them, paste below, then send a join request. The admin must also add your Device ID via their Add device page before the pairing completes.",
+                "Both sides have to add each other. Get the admin's Device ID and the network ID from them, then have the admin add your Device ID on their Add device page.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Muted,
             )
@@ -522,32 +521,17 @@ private fun NetworkSetupCard(
             Button(
                 enabled = canSubmit,
                 onClick = {
-                    val invite = manualInviteJson(adminTrim, meshTrim)
-                    if (invite != null) {
-                        dispatch(NativeActions.importInvite(invite))
-                        manualAdminId = ""
-                        manualNetworkId = ""
-                        manualExpanded = false
-                    }
+                    dispatch(NativeActions.manualAddNetwork(adminTrim, meshTrim))
+                    manualAdminId = ""
+                    manualNetworkId = ""
+                    manualExpanded = false
                 },
             ) {
-                Text("Send join request")
+                Text("Add")
             }
         }
     }
     NearbyCard(state, dispatch)
-}
-
-internal fun manualInviteJson(adminNpub: String, meshId: String): String? {
-    if (!isValidDeviceId(adminNpub) || meshId.isBlank()) return null
-    // NetworkInvite is serde(rename_all = "camelCase") on the Rust side.
-    val payload = JSONObject()
-    payload.put("v", 3)
-    payload.put("networkId", meshId)
-    payload.put("inviterNpub", adminNpub)
-    payload.put("admins", org.json.JSONArray().put(adminNpub))
-    payload.put("participants", org.json.JSONArray())
-    return payload.toString()
 }
 
 // LazyListScope wrapper for the Add Network body, used as the entire
@@ -639,7 +623,7 @@ private fun AddDevicesDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("For manual join", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "If the other device can't scan or paste an invite, share these two values. They'll enter them under Join Network → Add manually. You still need to add their Device ID below for the pairing to complete.",
+                    "If the other device can't scan or paste an invite, share these two values. They'll enter them under Join Network → Add manually. You still need to add their Device ID below.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Muted,
                 )

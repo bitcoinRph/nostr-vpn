@@ -11,6 +11,7 @@ public static class NativeActions
     public static string DisableSystemService() => AppCoreClient.Action(new { type = "disable_system_service" });
     public static string UninstallSystemService() => AppCoreClient.Action(new { type = "uninstall_system_service" });
     public static string AddNetwork(string name) => AppCoreClient.Action(new { type = "add_network", name });
+    public static string ManualAddNetwork(string adminNpub, string meshNetworkId) => AppCoreClient.Action(new { type = "manual_add_network", adminNpub, meshNetworkId });
     public static string RenameNetwork(string networkId, string name) => AppCoreClient.Action(new { type = "rename_network", networkId, name });
     public static string RemoveNetwork(string networkId) => AppCoreClient.Action(new { type = "remove_network", networkId });
     public static string SetNetworkMeshId(string networkId, string meshId) => AppCoreClient.Action(new { type = "set_network_mesh_id", networkId, meshId });

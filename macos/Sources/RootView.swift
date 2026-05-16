@@ -24,6 +24,11 @@ struct RootView: View {
     @State private var diagnosticsExpanded = false
     @State private var showingQrScanner = false
     @State private var selectedSidebarItem: SidebarItem? = .devices
+    @State private var addNetworkPresented = false
+    @State private var addDevicePresented = false
+    @State private var manualJoinExpanded = false
+    @State private var manualJoinAdminId = ""
+    @State private var manualJoinMeshId = ""
     @State private var lastSyncedNodeName = ""
     @State private var lastSyncedEndpoint = ""
     @State private var lastSyncedTunnelIp = ""
@@ -68,6 +73,77 @@ struct RootView: View {
                 showingQrScanner = false
             }
         }
+        .sheet(isPresented: $addNetworkPresented) {
+            addNetworkSheetContent
+        }
+        .sheet(isPresented: $addDevicePresented) {
+            if let network = activeNetwork {
+                addDeviceSheetContent(network)
+            }
+        }
+    }
+
+    private var addNetworkSheetContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sheetTitleBar("Add Network", systemImage: "plus.circle") {
+                addNetworkPresented = false
+            }
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    createNetworkSection
+                    joinNetworkSection(activeNetwork)
+                }
+                .padding(18)
+            }
+        }
+        .frame(width: 560, height: 620)
+    }
+
+    private func addDeviceSheetContent(_ network: NativeNetworkState) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sheetTitleBar("Add Device", systemImage: "person.crop.circle.badge.plus") {
+                addDevicePresented = false
+            }
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    inviteSection(network)
+                    manualPairingInfoSection(network)
+                    addByDeviceIdSection(network)
+                }
+                .padding(18)
+            }
+        }
+        .frame(width: 560, height: 620)
+    }
+
+    /// Shown to the admin in the Add Device sheet so they can dictate the
+    /// two values another device needs to join manually: the admin's own
+    /// Device ID + the network ID. The other device pastes both into Join
+    /// Network → Add manually. Both sides still have to add each other for
+    /// the pairing to complete.
+    private func manualPairingInfoSection(_ network: NativeNetworkState) -> some View {
+        surface {
+            sectionHeader("For Manual Join", systemImage: "keyboard")
+            Text("If the other device can't scan or paste an invite, share these two values. They'll enter them under Join Network → Add manually. You still need to add their Device ID below.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            detailValueRow("Your Device ID", state.ownNpub)
+            detailValueRow("Network ID", network.networkId)
+        }
+    }
+
+    private func sheetTitleBar(_ title: String, systemImage: String, close: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: systemImage)
+                .font(.title3.weight(.semibold))
+            Spacer()
+            Button("Done", action: close)
+                .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
     }
 
     private var headerBar: some View {
@@ -184,7 +260,7 @@ struct RootView: View {
                 Divider()
             }
             Button {
-                selectedSidebarItem = .sharing
+                addNetworkPresented = true
             } label: {
                 Label("Add network", systemImage: "plus")
             }
@@ -287,21 +363,6 @@ struct RootView: View {
             } else {
                 setupPane
             }
-        case .sharing:
-            pageScroll {
-                pageTitle("Share", "qrcode")
-                if let activeNetwork {
-                    inviteSection(activeNetwork)
-                    joinRequestsSection(activeNetwork)
-                    if activeNetwork.localIsAdmin {
-                        addByDeviceIdSection(activeNetwork)
-                    }
-                    joinNetworkSection(activeNetwork)
-                } else {
-                    createNetworkSection
-                    joinNetworkSection(nil)
-                }
-            }
         case .routing:
             pageScroll {
                 pageTitle("Exit Nodes", "arrow.triangle.branch")
@@ -348,7 +409,7 @@ struct RootView: View {
 
     private var setupPane: some View {
         pageScroll {
-            pageTitle("Nostr VPN", "network")
+            pageTitle("Add Network", "plus.circle")
             createNetworkSection
             joinNetworkSection(nil)
         }
@@ -367,13 +428,14 @@ struct RootView: View {
                             .lineLimit(1)
                     }
                     Spacer()
-                    Button {
-                        selectedSidebarItem = .sharing
-                    } label: {
-                        Image(systemName: "plus")
+                    if network.localIsAdmin {
+                        Button {
+                            addDevicePresented = true
+                        } label: {
+                            Label("Add device", systemImage: "person.crop.circle.badge.plus")
+                        }
+                        .help("Add device to this network")
                     }
-                    .disabled(!network.localIsAdmin && network.inviteInviterNpub.isEmpty)
-                    .help("Add device")
                 }
                 TextField("Search", text: $deviceSearch)
                     .textFieldStyle(.roundedBorder)
@@ -810,6 +872,8 @@ struct RootView: View {
                 }
             }
 
+            manualJoinDisclosure
+
             Divider()
 
             HStack {
@@ -849,6 +913,44 @@ struct RootView: View {
                 }
             }
         }
+    }
+
+    private var manualJoinDisclosure: some View {
+        let admin = manualJoinAdminId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mesh = manualJoinMeshId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let adminInvalid = !admin.isEmpty && !isValidDeviceId(admin)
+        let canSubmit = !admin.isEmpty && !mesh.isEmpty && !adminInvalid
+        return DisclosureGroup("Add manually", isExpanded: $manualJoinExpanded) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Both sides have to add each other. Get the admin's Device ID and the network ID from them, then have the admin add your Device ID on their Add device page.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Admin Device ID", text: $manualJoinAdminId)
+                    .textFieldStyle(.roundedBorder)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.red, lineWidth: adminInvalid ? 1 : 0)
+                    )
+                if adminInvalid {
+                    Text("Not a valid device ID")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                TextField("Network ID", text: $manualJoinMeshId)
+                    .textFieldStyle(.roundedBorder)
+                Button {
+                    manager.manualAddNetwork(adminNpub: admin, meshNetworkId: mesh)
+                    manualJoinAdminId = ""
+                    manualJoinMeshId = ""
+                    manualJoinExpanded = false
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                .disabled(!canSubmit || manager.actionInFlight)
+            }
+            .padding(.top, 6)
+        }
+        .font(.subheadline)
     }
 
     private func pasteInviteFromClipboard() {
@@ -1113,7 +1215,7 @@ struct RootView: View {
                             }
                             Button("Cancel", role: .cancel) { pendingNetworkRemoval = nil }
                         } message: {
-                            Text("This deletes the network from this device. You can rejoin later with the invite.")
+                            Text("This deletes the network from this device.")
                         }
                     }
                 }
@@ -1178,7 +1280,7 @@ struct RootView: View {
             }
             Button("Cancel", role: .cancel) { pendingNetworkRemoval = nil }
         } message: {
-            Text("This deletes the network from this device. You can rejoin later with the invite.")
+            Text("This deletes the network from this device.")
         }
     }
 
@@ -1752,7 +1854,6 @@ struct InviteQRCodeView: View {
 
 enum SidebarItem: Hashable {
     case devices
-    case sharing
     case routing
     case settings
 }

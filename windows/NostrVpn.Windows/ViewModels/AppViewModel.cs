@@ -17,7 +17,8 @@ namespace NostrVpn.Windows.ViewModels;
 public enum AppPage
 {
     Devices,
-    Share,
+    AddNetwork,
+    AddDevice,
     ExitNodes,
     Settings,
 }
@@ -45,6 +46,9 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     private string _magicDnsSuffix = "";
     private string _advertisedRoutes = "";
     private string _wireguardExitConfig = "";
+    private string _manualJoinAdminId = "";
+    private string _manualJoinMeshId = "";
+    private bool _manualJoinExpanded;
     private string _updateStatus = "";
     private Uri? _updateAssetUrl;
     private bool _updateChecking;
@@ -67,7 +71,10 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         ApplyState(_core.State(), syncDrafts: true);
 
         ShowDevicesCommand = new RelayCommand(_ => Page = AppPage.Devices);
-        ShowShareCommand = new RelayCommand(_ => Page = AppPage.Share);
+        ShowAddNetworkCommand = new RelayCommand(_ => Page = AppPage.AddNetwork);
+        ShowAddDeviceCommand = new RelayCommand(
+            _ => Page = AppPage.AddDevice,
+            _ => ActiveNetwork?.LocalIsAdmin == true);
         ShowExitNodesCommand = new RelayCommand(_ => Page = AppPage.ExitNodes);
         ShowSettingsCommand = new RelayCommand(_ => Page = AppPage.Settings);
         RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => !ActionInFlight);
@@ -85,6 +92,13 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         SaveWireGuardExitCommand = new AsyncRelayCommand(_ => SaveWireGuardExitAsync(), _ => !ActionInFlight);
         CreateNetworkCommand = new AsyncRelayCommand(_ => CreateNetworkAsync(), _ => !ActionInFlight);
         AddNetworkCommand = new AsyncRelayCommand(_ => AddNetworkAsync(), _ => !ActionInFlight && !string.IsNullOrWhiteSpace(NetworkNameInput));
+        ManualAddNetworkCommand = new AsyncRelayCommand(
+            _ => ManualAddNetworkAsync(),
+            _ => !ActionInFlight && CanSubmitManualJoin);
+        ToggleManualJoinCommand = new RelayCommand(_ => ManualJoinExpanded = !ManualJoinExpanded);
+        ActivateInactiveNetworkCommand = new AsyncRelayCommand(
+            parameter => ActivateInactiveNetworkAsync(parameter as string),
+            parameter => !ActionInFlight && parameter is string id && !string.IsNullOrWhiteSpace(id));
         SaveNetworkNameCommand = new AsyncRelayCommand(_ => RenameActiveNetworkAsync(), _ => !ActionInFlight && ActiveNetwork?.LocalIsAdmin == true && !string.IsNullOrWhiteSpace(NetworkNameDraft));
         SaveNetworkMeshIdCommand = new AsyncRelayCommand(_ => SaveActiveNetworkMeshIdAsync(), _ => !ActionInFlight && ActiveNetwork?.LocalIsAdmin == true && !string.IsNullOrWhiteSpace(NetworkMeshIdDraft));
         CopyNetworkIdCommand = new RelayCommand(_ => CopyText(ActiveNetwork?.NetworkId ?? ""), _ => !string.IsNullOrWhiteSpace(ActiveNetwork?.NetworkId));
@@ -196,6 +210,70 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         }
     }
     public Visibility ParticipantInputErrorVisibility => ParticipantInputInvalid ? Visibility.Visible : Visibility.Collapsed;
+
+    public string ManualJoinAdminId
+    {
+        get => _manualJoinAdminId;
+        set
+        {
+            if (SetField(ref _manualJoinAdminId, value))
+            {
+                OnPropertyChanged(nameof(ManualJoinAdminInvalid));
+                OnPropertyChanged(nameof(ManualJoinAdminErrorVisibility));
+                OnPropertyChanged(nameof(CanSubmitManualJoin));
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
+
+    public string ManualJoinMeshId
+    {
+        get => _manualJoinMeshId;
+        set
+        {
+            if (SetField(ref _manualJoinMeshId, value))
+            {
+                OnPropertyChanged(nameof(CanSubmitManualJoin));
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
+
+    public bool ManualJoinExpanded
+    {
+        get => _manualJoinExpanded;
+        set
+        {
+            if (SetField(ref _manualJoinExpanded, value))
+            {
+                OnPropertyChanged(nameof(ManualJoinExpanderToggleText));
+            }
+        }
+    }
+
+    public string ManualJoinExpanderToggleText => ManualJoinExpanded ? "Add manually ▴" : "Add manually ▾";
+
+    public bool ManualJoinAdminInvalid
+    {
+        get
+        {
+            var trimmed = (_manualJoinAdminId ?? string.Empty).Trim();
+            return trimmed.Length > 0 && !IsValidDeviceId(trimmed);
+        }
+    }
+
+    public Visibility ManualJoinAdminErrorVisibility => ManualJoinAdminInvalid ? Visibility.Visible : Visibility.Collapsed;
+
+    public bool CanSubmitManualJoin
+    {
+        get
+        {
+            var admin = (_manualJoinAdminId ?? string.Empty).Trim();
+            var mesh = (_manualJoinMeshId ?? string.Empty).Trim();
+            return admin.Length > 0 && mesh.Length > 0 && !ManualJoinAdminInvalid;
+        }
+    }
+
     public string NetworkNameInput { get => _networkNameInput; set => SetField(ref _networkNameInput, value); }
     public string NetworkNameDraft
     {
@@ -457,7 +535,8 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public ICommand ShowDevicesCommand { get; }
-    public ICommand ShowShareCommand { get; }
+    public ICommand ShowAddNetworkCommand { get; }
+    public ICommand ShowAddDeviceCommand { get; }
     public ICommand ShowExitNodesCommand { get; }
     public ICommand ShowSettingsCommand { get; }
     public ICommand RefreshCommand { get; }
@@ -475,6 +554,9 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public ICommand SaveWireGuardExitCommand { get; }
     public ICommand CreateNetworkCommand { get; }
     public ICommand AddNetworkCommand { get; }
+    public ICommand ManualAddNetworkCommand { get; }
+    public ICommand ToggleManualJoinCommand { get; }
+    public ICommand ActivateInactiveNetworkCommand { get; }
     public ICommand SaveNetworkNameCommand { get; }
     public ICommand SaveNetworkMeshIdCommand { get; }
     public ICommand CopyNetworkIdCommand { get; }
@@ -904,6 +986,29 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         var name = string.IsNullOrWhiteSpace(NetworkNameInput) ? "My Network" : NetworkNameInput.Trim();
         NetworkNameInput = "";
         return DispatchAsync(NativeActions.AddNetwork(name), "Creating network");
+    }
+
+    private async Task ManualAddNetworkAsync()
+    {
+        var admin = (ManualJoinAdminId ?? string.Empty).Trim();
+        var mesh = (ManualJoinMeshId ?? string.Empty).Trim();
+        if (admin.Length == 0 || mesh.Length == 0 || ManualJoinAdminInvalid)
+        {
+            return;
+        }
+        await DispatchAsync(NativeActions.ManualAddNetwork(admin, mesh), "Adding network");
+        ManualJoinAdminId = "";
+        ManualJoinMeshId = "";
+        ManualJoinExpanded = false;
+    }
+
+    private Task ActivateInactiveNetworkAsync(string? networkId)
+    {
+        if (string.IsNullOrWhiteSpace(networkId))
+        {
+            return Task.CompletedTask;
+        }
+        return DispatchAsync(NativeActions.SetNetworkEnabled(networkId, true), "Switching network");
     }
 
     private Task SaveNodeAsync()
