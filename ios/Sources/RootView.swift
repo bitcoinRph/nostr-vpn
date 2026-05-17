@@ -32,9 +32,7 @@ struct RootView: View {
             } else {
                 TabView {
                     NavigationStack {
-                        DevicesPage(model: model, network: shownNetwork) {
-                            presentVpnDisclosure(startVpnAfterAccept: true)
-                        }
+                        DevicesPage(model: model, network: shownNetwork)
                             .toolbar { networkSwitcherToolbar }
                     }
                     .tabItem { Label("Devices", systemImage: "circle.grid.2x2.fill") }
@@ -224,18 +222,17 @@ private struct AddNetworkPage: View {
 private struct DevicesPage: View {
     @ObservedObject var model: AppModel
     let network: NetworkState?
-    var onReviewVpnDisclosure: () -> Void = {}
     @State private var addDevicePresented = false
     @State private var pendingNetworkRemoval: NetworkState?
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 14) {
-                if !model.state.error.isEmpty || !model.statusMessage.isEmpty {
+                if !model.state.error.isEmpty || shouldShowStatusNotice(model.statusMessage) {
                     NoticeCard(
                         text: model.state.error.isEmpty ? model.statusMessage : model.state.error,
-                        actionTitle: model.state.error.isEmpty && model.vpnDisclosurePromptVisible ? "Review" : nil,
-                        action: onReviewVpnDisclosure
+                        actionTitle: nil,
+                        action: {}
                     )
                 }
                 if let network {
@@ -331,6 +328,10 @@ private struct DevicesPage: View {
         } message: { _ in
             Text("Removes the network from this device. You can rejoin later with the invite.")
         }
+    }
+
+    private func shouldShowStatusNotice(_ message: String) -> Bool {
+        !message.isEmpty && message != AppModel.vpnDisclosurePromptMessage
     }
 
 }
