@@ -3057,6 +3057,48 @@ mod tests {
     }
 
     #[test]
+    fn native_state_exposes_inbound_join_requests_for_ui_shells() {
+        let requester_npub = Keys::generate()
+            .public_key()
+            .to_bech32()
+            .expect("requester npub");
+        let requester_hex = normalize_nostr_pubkey(&requester_npub).expect("normalize requester");
+
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        create_test_network(&mut runtime, "Home");
+        runtime.config.networks[0]
+            .inbound_join_requests
+            .push(PendingInboundJoinRequest {
+                requester: requester_hex.clone(),
+                requester_node_name: "iPhone".to_string(),
+                requested_at: 1_778_998_000,
+            });
+
+        let state = runtime.state();
+        let request = state.networks[0]
+            .inbound_join_requests
+            .first()
+            .expect("join request should be visible in native state");
+
+        assert_eq!(request.requester_npub, requester_npub);
+        assert_eq!(request.requester_pubkey_hex, requester_hex);
+        assert_eq!(request.requester_node_name, "iPhone");
+        assert!(!request.requested_at_text.trim().is_empty());
+
+        let json = serde_json::to_value(&state).expect("serialize native state");
+        assert_eq!(
+            json["networks"][0]["inboundJoinRequests"][0]["requesterNpub"],
+            requester_npub
+        );
+        assert_eq!(
+            json["networks"][0]["inboundJoinRequests"][0]["requesterNodeName"],
+            "iPhone"
+        );
+    }
+
+    #[test]
     fn accepting_join_request_uses_requester_node_name_as_alias() {
         let nonce = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

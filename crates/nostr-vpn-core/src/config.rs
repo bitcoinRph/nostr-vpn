@@ -1517,6 +1517,9 @@ impl AppConfig {
 
         let mut allowed_members = network.participants.clone();
         allowed_members.extend(network.admins.iter().cloned());
+        if own_in_shared_roster && let Some(own_pubkey) = &own_pubkey {
+            allowed_members.push(own_pubkey.clone());
+        }
         allowed_members.sort();
         allowed_members.dedup();
         let allowed_members = allowed_members.into_iter().collect::<HashSet<_>>();
@@ -1524,9 +1527,6 @@ impl AppConfig {
             let Ok(normalized_participant) = normalize_nostr_pubkey(&participant) else {
                 continue;
             };
-            if Some(normalized_participant.as_str()) == own_pubkey.as_deref() {
-                continue;
-            }
             if !allowed_members.contains(&normalized_participant) {
                 continue;
             }
@@ -1686,13 +1686,17 @@ impl AppConfig {
         let mut used_aliases = HashSet::new();
         let mut final_aliases = HashMap::new();
         let mut members = self.all_network_member_pubkeys_hex();
-        if let Ok(own_pubkey_hex) = self.own_nostr_pubkey_hex()
-            && let Some(index) = members
+        if let Ok(own_pubkey_hex) = self.own_nostr_pubkey_hex() {
+            let own_npub = npub_for_pubkey_hex(&own_pubkey_hex);
+            if let Some(index) = members
                 .iter()
                 .position(|participant| participant == &own_pubkey_hex)
-        {
-            let own = members.remove(index);
-            members.insert(0, own);
+            {
+                let own = members.remove(index);
+                members.insert(0, own);
+            } else if normalized_aliases.contains_key(&own_npub) {
+                members.insert(0, own_pubkey_hex);
+            }
         }
         for participant in &members {
             let participant_npub = npub_for_pubkey_hex(participant);

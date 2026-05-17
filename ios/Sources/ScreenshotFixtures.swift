@@ -11,7 +11,7 @@ enum ScreenshotFixtures {
 
         var state = AppState()
         state.rev = 1
-        state.appVersion = "4.0.27"
+        state.appVersion = "4.0.28"
         state.platform = "iOS Simulator"
         state.mobile = true
         state.vpnControlSupported = true

@@ -867,13 +867,9 @@ async fn handle_mobile_control_frame(
     if !control_frame_network_matches(network_id, &frame) {
         return Ok(true);
     }
-    let source_pubkey = {
-        let mesh = mesh
-            .read()
-            .map_err(|_| anyhow!("mobile FIPS mesh route table lock poisoned"))?;
-        control_frame_source_pubkey(&mesh, message.source_npub.as_deref())
-    };
-    let Some(source_pubkey) = source_pubkey else {
+    let Some(source_pubkey) =
+        mobile_control_source_pubkey(mesh, message.source_npub.as_deref(), &frame)?
+    else {
         return Ok(true);
     };
     note_mobile_peer_rx(presence, &source_pubkey, message.data.len());
@@ -940,21 +936,60 @@ async fn handle_mobile_control_frame(
             network_id,
             sent_at,
         } => {
-            if let Some(source_npub) = message.source_npub.as_deref() {
-                let reply = FipsControlFrame::Pong {
-                    network_id,
-                    sent_at,
-                    replied_at: unix_timestamp(),
-                };
-                let encoded = encode_fips_control_frame(&reply)?;
-                let _ = endpoint.send(source_npub.to_string(), encoded).await;
-            }
+            reply_mobile_ping(
+                endpoint,
+                message.source_npub.as_deref(),
+                network_id,
+                sent_at,
+            )
+            .await?;
         }
-        FipsControlFrame::Pong { .. }
-        | FipsControlFrame::JoinRequest { .. }
-        | FipsControlFrame::Fragment { .. } => {}
+        FipsControlFrame::JoinRequest {
+            requested_at,
+            request,
+        } => {
+            record_mobile_join_request(
+                app_config,
+                app_config_dirty,
+                config_path,
+                &source_pubkey,
+                requested_at,
+                &request,
+            )?;
+        }
+        FipsControlFrame::Pong { .. } | FipsControlFrame::Fragment { .. } => {}
     }
     Ok(true)
+}
+
+async fn reply_mobile_ping(
+    endpoint: &FipsEndpoint,
+    source_npub: Option<&str>,
+    network_id: String,
+    sent_at: u64,
+) -> Result<()> {
+    let Some(source_npub) = source_npub else {
+        return Ok(());
+    };
+    let reply = FipsControlFrame::Pong {
+        network_id,
+        sent_at,
+        replied_at: unix_timestamp(),
+    };
+    let encoded = encode_fips_control_frame(&reply)?;
+    let _ = endpoint.send(source_npub.to_string(), encoded).await;
+    Ok(())
+}
+
+fn mobile_control_source_pubkey(
+    mesh: &Arc<RwLock<FipsMeshRuntime>>,
+    source_npub: Option<&str>,
+    frame: &FipsControlFrame,
+) -> Result<Option<String>> {
+    let mesh = mesh
+        .read()
+        .map_err(|_| anyhow!("mobile FIPS mesh route table lock poisoned"))?;
+    Ok(control_frame_source_pubkey(&mesh, source_npub, frame))
 }
 
 fn decode_mobile_control_frame(
@@ -989,10 +1024,14 @@ fn control_frame_network_matches(expected_network_id: &str, frame: &FipsControlF
 fn control_frame_source_pubkey(
     mesh: &FipsMeshRuntime,
     source_npub: Option<&str>,
+    frame: &FipsControlFrame,
 ) -> Option<String> {
     let source_npub = source_npub?;
-    mesh.participant_for_endpoint_npub(source_npub)
-        .or_else(|| normalize_nostr_pubkey(source_npub).ok())
+    mesh.participant_for_endpoint_npub(source_npub).or_else(|| {
+        matches!(frame, FipsControlFrame::JoinRequest { .. })
+            .then(|| normalize_nostr_pubkey(source_npub).ok())
+            .flatten()
+    })
 }
 
 fn apply_mobile_roster(
@@ -1034,6 +1073,56 @@ fn apply_mobile_roster(
     app_config_dirty.store(true, Ordering::Relaxed);
     let config_path = config_path.unwrap_or_else(|| Path::new(""));
     MobileTunnelConfig::from_app_with_config_path(&app, config_path).map(Some)
+}
+
+fn record_mobile_join_request(
+    app_config: &Arc<RwLock<AppConfig>>,
+    app_config_dirty: &AtomicBool,
+    config_path: Option<&Path>,
+    sender_pubkey: &str,
+    requested_at: u64,
+    request: &MeshJoinRequest,
+) -> Result<bool> {
+    let mut app = app_config
+        .write()
+        .map_err(|_| anyhow!("mobile app config lock poisoned"))?;
+    app.ensure_defaults();
+    let changed = match app.record_inbound_join_request(
+        &request.network_id,
+        sender_pubkey,
+        &request.requester_node_name,
+        requested_at,
+    ) {
+        Ok(Some(_network_name)) => true,
+        Ok(None) => false,
+        Err(error) => {
+            mobile_debug_log(format!(
+                "mobile: ignoring invalid join request from {sender_pubkey}: {error:#}"
+            ));
+            tracing::warn!(
+                ?error,
+                %sender_pubkey,
+                "mobile: ignoring invalid FIPS join request"
+            );
+            false
+        }
+    };
+    if !changed {
+        return Ok(false);
+    }
+    if let Some(config_path) = config_path
+        && let Err(error) = app.save(config_path)
+    {
+        mobile_debug_log(format!(
+            "mobile: join request recorded in memory but config save failed: {error:#}"
+        ));
+        tracing::warn!(
+            ?error,
+            "mobile: join request recorded in memory but config save failed"
+        );
+    }
+    app_config_dirty.store(true, Ordering::Relaxed);
+    Ok(true)
 }
 
 fn mobile_runtime_state_path(config_path: &Path) -> Option<PathBuf> {
@@ -1826,6 +1915,7 @@ fn empty_config() -> MobileTunnelConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nostr_sdk::prelude::{Keys, ToBech32};
     use nostr_vpn_core::config::NetworkConfig;
 
     #[test]
@@ -1911,6 +2001,140 @@ mod tests {
                 seen_at_ms: None,
             }]
         );
+    }
+
+    #[test]
+    fn pending_mobile_join_request_targets_invite_admin() {
+        let admin = "26525c442dd039de4e728b41ee8d7f717b267ab25b7c219d53a3249e1c9174cc";
+        let expected_recipient = FipsMeshPeerConfig::from_participant_pubkey(admin, Vec::new())
+            .expect("recipient")
+            .endpoint_npub;
+        let mobile = MobileTunnelConfig {
+            network_id: "mesh-home".to_string(),
+            node_name: "iPhone".to_string(),
+            pending_join_request_recipient: admin.to_string(),
+            pending_join_requested_at: 1_778_998_000,
+            ..empty_config()
+        };
+
+        let (recipient, frame) = pending_mobile_join_request_frame(&mobile)
+            .expect("join request frame")
+            .expect("pending frame");
+
+        assert_eq!(recipient, expected_recipient);
+        assert_eq!(
+            frame,
+            FipsControlFrame::JoinRequest {
+                requested_at: 1_778_998_000,
+                request: MeshJoinRequest {
+                    network_id: "mesh-home".to_string(),
+                    requester_node_name: "iPhone".to_string(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn mobile_control_source_accepts_unknown_sender_only_for_join_request() {
+        let roster_peer =
+            "26525c442dd039de4e728b41ee8d7f717b267ab25b7c219d53a3249e1c9174cc".to_string();
+        let peer = FipsMeshPeerConfig::from_participant_pubkey(&roster_peer, Vec::new())
+            .expect("roster peer");
+        let peer_npub = peer.endpoint_npub.clone();
+        let mesh = FipsMeshRuntime::with_local_routes(vec![peer], Vec::new());
+        let unknown_keys = Keys::generate();
+        let unknown_npub = unknown_keys.public_key().to_bech32().expect("unknown npub");
+        let unknown_hex = unknown_keys.public_key().to_hex();
+        let ping = FipsControlFrame::Ping {
+            network_id: "mesh-home".to_string(),
+            sent_at: 1,
+        };
+        let join_request = FipsControlFrame::JoinRequest {
+            requested_at: 2,
+            request: MeshJoinRequest {
+                network_id: "mesh-home".to_string(),
+                requester_node_name: "iPhone".to_string(),
+            },
+        };
+
+        assert_eq!(
+            control_frame_source_pubkey(&mesh, Some(&peer_npub), &ping),
+            Some(roster_peer)
+        );
+        assert_eq!(
+            control_frame_source_pubkey(&mesh, Some(&unknown_npub), &ping),
+            None
+        );
+        assert_eq!(
+            control_frame_source_pubkey(&mesh, Some(&unknown_npub), &join_request),
+            Some(unknown_hex)
+        );
+    }
+
+    #[test]
+    fn mobile_admin_records_inbound_join_request_from_unknown_sender() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-mobile-join-request-{nonce}"));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        let config_path = dir.join("config.toml");
+
+        let mut app = AppConfig::generated();
+        app.ensure_defaults();
+        let own = app.own_nostr_pubkey_hex().expect("own pubkey");
+        app.networks = vec![NetworkConfig {
+            id: "test".to_string(),
+            name: "Home".to_string(),
+            enabled: true,
+            network_id: "mesh-home".to_string(),
+            participants: vec![own.clone()],
+            admins: vec![own],
+            listen_for_join_requests: true,
+            invite_inviter: String::new(),
+            outbound_join_request: None,
+            inbound_join_requests: Vec::new(),
+            shared_roster_updated_at: 0,
+            shared_roster_signed_by: String::new(),
+        }];
+        let requester = Keys::generate().public_key().to_hex();
+        let app_config = Arc::new(RwLock::new(app));
+        let dirty = AtomicBool::new(false);
+        let request = MeshJoinRequest {
+            network_id: "mesh-home".to_string(),
+            requester_node_name: "iPhone".to_string(),
+        };
+
+        assert!(
+            record_mobile_join_request(
+                &app_config,
+                &dirty,
+                Some(&config_path),
+                &requester,
+                1_778_998_000,
+                &request,
+            )
+            .expect("record join request")
+        );
+        assert!(dirty.load(Ordering::Relaxed));
+
+        let saved = AppConfig::load(&config_path).expect("load persisted config");
+        assert_eq!(saved.networks[0].inbound_join_requests.len(), 1);
+        assert_eq!(
+            saved.networks[0].inbound_join_requests[0].requester,
+            requester
+        );
+        assert_eq!(
+            saved.networks[0].inbound_join_requests[0].requester_node_name,
+            "iPhone"
+        );
+        assert_eq!(
+            saved.networks[0].inbound_join_requests[0].requested_at,
+            1_778_998_000
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

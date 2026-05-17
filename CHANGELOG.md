@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.28 - 2026-05-17
+
+### Changed
+
+- FIPS Docker e2e runs now use deterministic configured-only Nostr discovery,
+  keeping the test meshes off the public relay overlay while preserving open
+  discovery as the runtime default.
+- Docker e2e compose files can use `NVPN_FIPS_REPO_PATH` for the local FIPS
+  checkout path.
+- The release gate now includes a Docker e2e check for invite-based FIPS join
+  requests from a non-roster requester to an admin listener.
+
+### Fixed
+
+- Admin-signed shared rosters now apply MagicDNS aliases for the local device
+  itself, so an admin-set name such as `iphone.nvpn` replaces an older local
+  fallback like `snail.nvpn`.
+- Mobile admins now persist inbound FIPS join requests from unknown requesters,
+  and native app state exposes pending requests for every UI shell.
+- The release gate now runs the routed FIPS and NAT safe-MTU Docker e2e tests
+  again instead of printing a known-broken skip.
+
 ## 4.0.27 - 2026-05-17
 
 ### Added

@@ -762,7 +762,7 @@ function syncPlatformVersions({ tag, dryRun, builtLines }) {
 
 function runVerify({ dryRun, builtLines }) {
   run('./scripts/release-gate.sh', [], { dryRun })
-  builtLines.push('Ran release gate: sync-versions, fmt, clippy, tests, and routed-FIPS Docker e2e.')
+  builtLines.push('Ran release gate: sync-versions, fmt, clippy, tests, FIPS join-request Docker e2e, routed-FIPS Docker e2e, and NAT safe-MTU Docker e2e.')
 }
 
 function shouldRunStep(step, options) {

@@ -59,6 +59,7 @@ info:
     @echo "  just e2e-umbrel-web"
     @echo "  just e2e-exit-node"
     @echo "  just e2e-fips-routed-udp"
+    @echo "  just e2e-join-request"
     @echo "  just e2e-lan-pairing"
     @echo "  just e2e-roster-admin"
     @echo "  just e2e-wireguard-exit"
@@ -196,6 +197,9 @@ e2e-exit-node:
 
 e2e-fips-routed-udp:
     ./scripts/e2e-fips-routed-udp-docker.sh
+
+e2e-join-request:
+    ./scripts/e2e-join-request-docker.sh
 
 e2e-lan-pairing:
     ./scripts/e2e-lan-pairing-docker.sh
