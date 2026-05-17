@@ -14,6 +14,8 @@ type NetworkView = {
   name: string;
   enabled: boolean;
   networkId: string;
+  onlineCount: number;
+  expectedCount: number;
   participants: ParticipantView[];
 };
 
@@ -25,6 +27,7 @@ type UiState = {
   vpnStatus: string;
   activeNetworkInvite: string;
   nodeName: string;
+  selfMagicDnsName: string;
   magicDnsSuffix: string;
   autoconnect: boolean;
   inviteBroadcastActive: boolean;
@@ -75,8 +78,13 @@ async function expectNoConsoleErrors(page: Page, action: () => Promise<void>) {
   expect(errors).toEqual([]);
 }
 
-test('bundled UI loads, navigates, renders QR, and stays responsive', async ({ page }) => {
+test('bundled UI loads, navigates, renders QR, and stays responsive', async ({ page, request }) => {
   await expectNoConsoleErrors(page, async () => {
+    const initialState = await postJson<UiState>(request, '/api/tick');
+    expect(initialState.selfMagicDnsName).toMatch(/\.nvpn$/);
+    const initialNetwork = activeNetwork(initialState);
+    expect(initialNetwork.onlineCount).toBeGreaterThanOrEqual(1);
+
     await page.goto('/');
     await expect(page).toHaveTitle('Nostr VPN');
     await expect(page.locator('.app-header')).toBeVisible();
@@ -89,6 +97,13 @@ test('bundled UI loads, navigates, renders QR, and stays responsive', async ({ p
     await expect(page.locator('.vpn-switch')).toBeVisible();
     await expect(page.getByText('Daemon not running', { exact: true })).toHaveCount(0);
     await expect(page.locator('.header-vpn-text')).toHaveText('VPN off');
+    await expect(page.locator('.device-list-column .list-header p')).toContainText(
+      `${initialNetwork.onlineCount}/${initialNetwork.expectedCount} online`,
+    );
+    await expect(page.locator('.device-list-row').first()).toContainText(
+      initialState.selfMagicDnsName,
+    );
+    await expect(page.locator('.device-list-row').first()).toContainText('Online');
 
     await page.getByRole('button', { name: 'Add Device' }).click();
     await expect(page.getByRole('heading', { name: 'Add Device' })).toBeVisible();
@@ -118,6 +133,9 @@ test('bundled UI loads, navigates, renders QR, and stays responsive', async ({ p
     await expect(page.locator('.device-list-column')).toBeHidden();
     await expect(page.locator('.device-detail-column')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Back to Devices' })).toBeVisible();
+    await expect(page.locator('.device-detail-column .detail-header h2')).toHaveText(
+      initialState.selfMagicDnsName,
+    );
     await expect(page.locator('.device-detail-column .detail-header h2')).not.toHaveText(
       /^[0-9a-f]{12,64}(\.nvpn)?$/,
     );

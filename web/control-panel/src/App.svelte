@@ -246,7 +246,7 @@
 
   function participantTone(participant: ParticipantView): Tone {
     const stateText = `${participant.state} ${participant.meshState}`.toLowerCase();
-    if (stateText.includes('online') || stateText.includes('present')) {
+    if (stateText.includes('online') || stateText.includes('present') || stateText.includes('local')) {
       return 'ok';
     }
     if (stateText.includes('offline') || stateText.includes('absent')) {
@@ -385,6 +385,13 @@
         : participant.fipsTransportType;
     }
     return participant.meshState || participant.state || '-';
+  }
+
+  function deviceStatusText(participant: ParticipantView): string {
+    if (isSelf(participant) || participant.state === 'local' || participant.meshState === 'local') {
+      return 'Online';
+    }
+    return nonEmpty(participant.statusText || participant.state);
   }
 
   function isSelf(participant: ParticipantView): boolean {
@@ -1029,7 +1036,7 @@
                         {/if}
                       </span>
                       <span class="device-meta">
-                        <span>{nonEmpty(participant.statusText || participant.state)}</span>
+                        <span>{deviceStatusText(participant)}</span>
                         <span>{nonEmpty(participant.tunnelIp)}</span>
                       </span>
                     </span>
@@ -1101,7 +1108,7 @@
                   </div>
                   <div class="detail-status">
                     <span class="status-dot {participantTone(selectedParticipant)}"></span>
-                    <span>{nonEmpty(selectedParticipant.statusText || selectedParticipant.state)}</span>
+                    <span>{deviceStatusText(selectedParticipant)}</span>
                   </div>
                 </header>
 
