@@ -55,7 +55,7 @@ const FIPS_LAN_DISCOVERY_SCOPE_PREFIX: &str = "nostr-vpn";
 const FIPS_PEER_CAPS_GRACE_SECS: u64 = 600;
 const FIPS_DISCOVERY_BACKOFF_BASE_SECS: u64 = 30;
 const FIPS_DISCOVERY_BACKOFF_MAX_SECS: u64 = 300;
-const FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS: u64 = 5;
+const FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS: u64 = 30;
 const FIPS_NOSTR_OPEN_DISCOVERY_MAX_PENDING: usize = 8;
 const FIPS_NOSTR_FAILURE_STREAK_THRESHOLD: u32 = 2;
 const FIPS_NOSTR_STARTUP_SWEEP_MAX_AGE_SECS: u64 = 300;
@@ -1262,7 +1262,7 @@ fn fips_endpoint_peers_from_mesh(
             .or_insert_with(|| FipsEndpointPeerTransportConfig {
                 npub,
                 addresses: Vec::new(),
-                discovery_fallback_transit: true,
+                discovery_fallback_transit: !peer.advertises_default_route(),
             });
     }
 
@@ -4031,6 +4031,29 @@ mod tests {
         assert!(
             charlie.discovery_fallback_transit,
             "operator-configured transit peers are explicit lookup transit"
+        );
+    }
+
+    #[test]
+    fn endpoint_config_marks_default_route_peers_non_transit() {
+        let exit_keys = Keys::generate();
+        let exit_pubkey = exit_keys.public_key().to_hex();
+        let mesh_peer = FipsMeshPeerConfig::from_participant_pubkey(
+            &exit_pubkey,
+            vec!["10.44.1.2/32".into(), "0.0.0.0/0".into()],
+        )
+        .expect("mesh peer");
+
+        let endpoint_peers =
+            fips_endpoint_peers_from_mesh(std::slice::from_ref(&mesh_peer), Vec::new(), Vec::new());
+
+        let peer = endpoint_peers
+            .iter()
+            .find(|peer| peer.npub == mesh_peer.endpoint_npub)
+            .expect("mesh peer should be configured");
+        assert!(
+            !peer.discovery_fallback_transit,
+            "exit/default-route peers should not receive ambient lookup transit"
         );
     }
 

@@ -38,7 +38,7 @@ const TUNNEL_CHANNEL_CAPACITY: usize = 1024;
 const FIPS_NOSTR_DISCOVERY_APP: &str = "fips-overlay-v1";
 const FIPS_DISCOVERY_BACKOFF_BASE_SECS: u64 = 30;
 const FIPS_DISCOVERY_BACKOFF_MAX_SECS: u64 = 300;
-const FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS: u64 = 5;
+const FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS: u64 = 30;
 const MOBILE_NOSTR_OPEN_DISCOVERY_MAX_PENDING: usize = 4;
 const MOBILE_NOSTR_FAILURE_STREAK_THRESHOLD: u32 = 2;
 const FIPS_NOSTR_STARTUP_SWEEP_MAX_AGE_SECS: u64 = 300;
@@ -997,7 +997,7 @@ fn fips_peer_configs_from_mesh(
         configs.push(fips_peer_config_from_hint(
             &peer.endpoint_npub,
             peer_hints.get(&peer.participant_pubkey),
-            true,
+            !peer.advertises_default_route(),
         ));
     }
 
@@ -1548,6 +1548,31 @@ mod tests {
             MOBILE_MAX_FIPS_CONNECTIONS
         );
         assert_eq!(config.node.limits.max_links, MOBILE_MAX_FIPS_LINKS);
+        assert!(config.peers[0].discovery_fallback_transit);
+    }
+
+    #[test]
+    fn mobile_fips_config_marks_default_route_peers_non_transit() {
+        let peer = FipsMeshPeerConfig::from_participant_pubkey(
+            "26525c442dd039de4e728b41ee8d7f717b267ab25b7c219d53a3249e1c9174cc",
+            vec!["10.44.22.44/32".to_string(), "0.0.0.0/0".to_string()],
+        )
+        .expect("peer");
+        let mobile = MobileTunnelConfig {
+            peers: vec![peer.clone()],
+            ..empty_config()
+        };
+        let config = fips_endpoint_config("nostr-vpn:test", &mobile);
+        let peer_config = config
+            .peers
+            .iter()
+            .find(|candidate| candidate.npub == peer.endpoint_npub)
+            .expect("exit peer");
+
+        assert!(
+            !peer_config.discovery_fallback_transit,
+            "exit/default-route peers should not receive ambient lookup transit"
+        );
     }
 
     #[test]

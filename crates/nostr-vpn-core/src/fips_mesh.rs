@@ -28,6 +28,12 @@ impl FipsMeshPeerConfig {
             allowed_ips,
         })
     }
+
+    pub fn advertises_default_route(&self) -> bool {
+        self.allowed_ips
+            .iter()
+            .any(|route| matches!(route.trim(), "0.0.0.0/0" | "::/0"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -453,6 +459,34 @@ mod tests {
         assert_eq!(config.participant_pubkey, peer.participant_pubkey);
         assert_eq!(config.endpoint_npub, peer.endpoint_npub);
         assert_eq!(config.allowed_ips, vec!["10.44.22.44/32"]);
+    }
+
+    #[test]
+    fn peer_config_detects_default_route_advertisement() {
+        let peer = TestPeer::generate();
+        let config = FipsMeshPeerConfig {
+            participant_pubkey: peer.participant_pubkey,
+            endpoint_npub: peer.endpoint_npub,
+            allowed_ips: vec![
+                "10.44.22.44/32".to_string(),
+                " 0.0.0.0/0 ".to_string(),
+                "::/0".to_string(),
+            ],
+        };
+
+        assert!(config.advertises_default_route());
+    }
+
+    #[test]
+    fn peer_config_ignores_non_default_routes() {
+        let peer = TestPeer::generate();
+        let config = FipsMeshPeerConfig {
+            participant_pubkey: peer.participant_pubkey,
+            endpoint_npub: peer.endpoint_npub,
+            allowed_ips: vec!["10.44.0.0/16".to_string(), "fd00::/8".to_string()],
+        };
+
+        assert!(!config.advertises_default_route());
     }
 
     #[test]
