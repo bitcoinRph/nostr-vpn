@@ -131,6 +131,9 @@ test('bundled UI loads, navigates, renders QR, and stays responsive', async ({ p
 
     await page.getByRole('button', { name: 'Exit Nodes' }).click();
     await expect(page.getByRole('heading', { name: 'Route' })).toBeVisible();
+    const exitToggleBox = await page.locator('.switch-row input[type="checkbox"]').boundingBox();
+    expect(exitToggleBox?.width).toBeLessThanOrEqual(22);
+    expect(exitToggleBox?.height).toBeLessThanOrEqual(22);
 
     await page.getByRole('button', { name: 'Settings' }).click();
     await expect(page.getByRole('heading', { name: 'This Device' })).toBeVisible();
