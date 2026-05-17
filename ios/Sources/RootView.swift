@@ -84,10 +84,6 @@ struct RootView: View {
                 if shouldStartVpn, !model.state.vpnEnabled {
                     model.toggleVpn()
                 }
-            } cancel: {
-                startVpnAfterDisclosure = false
-                vpnDisclosurePresented = false
-                model.dismissVpnDisclosurePrompt()
             }
         }
         .onAppear {
@@ -212,9 +208,7 @@ private struct AddNetworkPage: View {
                     NoticeCard(
                         text: model.state.error.isEmpty ? model.statusMessage : model.state.error,
                         actionTitle: model.state.error.isEmpty && model.vpnDisclosurePromptVisible ? "Review" : nil,
-                        action: onReviewVpnDisclosure,
-                        secondaryTitle: model.state.error.isEmpty && model.vpnDisclosurePromptVisible ? "Later" : nil,
-                        secondaryAction: model.dismissVpnDisclosurePrompt
+                        action: onReviewVpnDisclosure
                     )
                 }
                 CreateNetworkCard(model: model, onCreated: onCreated)
@@ -241,9 +235,7 @@ private struct DevicesPage: View {
                     NoticeCard(
                         text: model.state.error.isEmpty ? model.statusMessage : model.state.error,
                         actionTitle: model.state.error.isEmpty && model.vpnDisclosurePromptVisible ? "Review" : nil,
-                        action: onReviewVpnDisclosure,
-                        secondaryTitle: model.state.error.isEmpty && model.vpnDisclosurePromptVisible ? "Later" : nil,
-                        secondaryAction: model.dismissVpnDisclosurePrompt
+                        action: onReviewVpnDisclosure
                     )
                 }
                 if let network {
@@ -383,12 +375,14 @@ private struct ToolbarVpnSwitch: View {
 }
 
 private struct VpnDisclosureSheet: View {
-    let accept: () -> Void
-    let cancel: () -> Void
+    let acknowledge: () -> Void
 
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 14) {
+                Text("Before Turning VPN On")
+                    .font(.title2.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Text("Nostr VPN is a private VPN and generic WireGuard exit-node utility. It is not a public VPN, anonymity, stealth, or consumer proxy service.")
                 Text("The app uses VPN data only to operate networks you configure: device identity, peer lists, routes, exit-node settings, endpoints, invite/join metadata, traffic counters, and connection health.")
                 Text("Packet traffic is encrypted. User-selected peers, relays, bridge paths, and exit nodes receive only the data needed to provide the connection you asked them to provide.")
@@ -398,14 +392,11 @@ private struct VpnDisclosureSheet: View {
             .font(.body)
             .foregroundStyle(.primary)
             .padding()
-            .navigationTitle("Before Turning VPN On")
+            .navigationTitle("VPN Data Use")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Later", action: cancel)
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Continue", action: accept)
+                    Button("Continue", action: acknowledge)
                         .fontWeight(.semibold)
                 }
             }
@@ -1382,23 +1373,15 @@ private struct NoticeCard: View {
     let text: String
     var actionTitle: String? = nil
     var action: () -> Void = {}
-    var secondaryTitle: String? = nil
-    var secondaryAction: () -> Void = {}
 
     var body: some View {
         AppCard {
             Text(text)
                 .foregroundStyle(.brown)
             if let actionTitle {
-                HStack(spacing: 8) {
-                    Button(actionTitle, action: action)
-                        .buttonStyle(.borderedProminent)
-                    if let secondaryTitle {
-                        Button(secondaryTitle, action: secondaryAction)
-                            .buttonStyle(.bordered)
-                    }
-                }
-                .controlSize(.regular)
+                Button(actionTitle, action: action)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
             }
         }
     }

@@ -98,13 +98,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func dismissVpnDisclosurePrompt() {
-        vpnDisclosurePromptVisible = false
-        if statusMessage == Self.vpnDisclosurePromptMessage {
-            statusMessage = ""
-        }
-    }
-
     private func setVpnEnabled(_ enabled: Bool, force: Bool = false) {
         debugLog("setVpnEnabled enabled=\(enabled) force=\(force) stateEnabled=\(state.vpnEnabled)")
         Task {
