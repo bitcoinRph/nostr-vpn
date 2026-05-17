@@ -51,7 +51,7 @@ const DEFAULT_STATIC_DIR: &str = "/usr/share/nostr-vpn/web";
 #[command(name = "nvpn-web")]
 #[command(about = "HTTP API for the nostr-vpn web UI")]
 struct Args {
-    #[arg(long, default_value = "0.0.0.0:8081")]
+    #[arg(long, default_value = "127.0.0.1:8081")]
     listen: SocketAddr,
     #[arg(long)]
     config: Option<PathBuf>,
@@ -538,4 +538,17 @@ async fn update_settings(
         }
         Ok("Settings saved.".to_string())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_listen_address_is_loopback() {
+        let args = Args::parse_from(["nvpn-web"]);
+
+        assert!(args.listen.ip().is_loopback());
+        assert_eq!(args.listen.port(), 8081);
+    }
 }

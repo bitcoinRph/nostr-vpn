@@ -6,7 +6,7 @@ services:
       dockerfile: umbrel/Dockerfile
     restart: unless-stopped
     ports:
-      - ${NOSTR_VPN_WEB_PORT:-38080}:38080
+      - 127.0.0.1:${NOSTR_VPN_WEB_PORT:-38080}:38080
     environment:
       HOME: /data/home
       XDG_CONFIG_HOME: /data/config
