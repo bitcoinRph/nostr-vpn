@@ -72,67 +72,20 @@ read_npub() {
     ' /root/.config/nvpn/config.toml" | tr -d '\r\"'
 }
 
-toml_array() {
-  local result="["
-  local first=true
-  local item
-  for item in "$@"; do
-    if [[ "$first" == true ]]; then
-      first=false
-    else
-      result+=", "
-    fi
-    result+="\"$item\""
-  done
-  result+="]"
-  printf '%s' "$result"
-}
-
-set_admin_roster() {
+assert_requester_not_seeded_on_admin() {
   local service="$1"
-  local participants_toml="$2"
-  local admins_toml="$3"
-  local admin="$4"
-  local shared_at
-  shared_at="$(date +%s)"
+  local requester="$2"
 
   "${COMPOSE[@]}" exec -T \
-    -e PARTICIPANTS_TOML="$participants_toml" \
-    -e ADMINS_TOML="$admins_toml" \
-    -e ADMIN="$admin" \
-    -e SHARED_AT="$shared_at" \
-    "$service" sh -lc '
-cfg=/root/.config/nvpn/config.toml
-tmp=$(mktemp)
-perl -0pe '"'"'
-  s/^participants\s*=\s*\[[^\]]*\]/participants = $ENV{PARTICIPANTS_TOML}/ms;
-  if (/^admins\s*=/m) {
-    s/^admins\s*=\s*\[[^\]]*\]/admins = $ENV{ADMINS_TOML}/ms;
-  } else {
-    s/^participants\s*=\s*\[[^\]]*\]/participants = $ENV{PARTICIPANTS_TOML}\nadmins = $ENV{ADMINS_TOML}/ms;
-  }
-  if (/^listen_for_join_requests\s*=/m) {
-    s/^listen_for_join_requests\s*=.*$/listen_for_join_requests = true/m;
-  } else {
-    s/^admins\s*=.*$/admins = $ENV{ADMINS_TOML}\nlisten_for_join_requests = true/m;
-  }
-  if (/^invite_inviter\s*=/m) {
-    s/^invite_inviter\s*=.*$/invite_inviter = "$ENV{ADMIN}"/m;
-  } else {
-    s/^listen_for_join_requests\s*=.*$/listen_for_join_requests = true\ninvite_inviter = "$ENV{ADMIN}"/m;
-  }
-  if (/^shared_roster_updated_at\s*=/m) {
-    s/^shared_roster_updated_at\s*=.*$/shared_roster_updated_at = $ENV{SHARED_AT}/m;
-  } else {
-    s/^invite_inviter\s*=.*$/invite_inviter = "$ENV{ADMIN}"\nshared_roster_updated_at = $ENV{SHARED_AT}/m;
-  }
-  if (/^shared_roster_signed_by\s*=/m) {
-    s/^shared_roster_signed_by\s*=.*$/shared_roster_signed_by = "$ENV{ADMIN}"/m;
-  } else {
-    s/^shared_roster_updated_at\s*=.*$/shared_roster_updated_at = $ENV{SHARED_AT}\nshared_roster_signed_by = "$ENV{ADMIN}"/m;
-  }
-'"'"' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
-'
+    -e REQUESTER="$requester" \
+    "$service" perl -0ne '
+      my $requester = $ENV{REQUESTER};
+      if (/^participants\s*=\s*\[[^\]]*\Q$requester\E[^\]]*\]/m
+        || /^admins\s*=\s*\[[^\]]*\Q$requester\E[^\]]*\]/m
+        || /^requester\s*=\s*"\Q$requester\E"\s*$/m) {
+        exit 1;
+      }
+    ' /root/.config/nvpn/config.toml
 }
 
 start_daemon_open_discovery() {
@@ -193,15 +146,14 @@ if [[ -z "$ADMIN_NPUB" || -z "$REQUESTER_NPUB" ]]; then
   exit 1
 fi
 
-ADMIN_ONLY="$(toml_array "$ADMIN_NPUB")"
-
 "${COMPOSE[@]}" exec -T node-a nvpn set \
   --network-id "$NETWORK_ID" \
   --node-name "macos-admin" \
   --endpoint "10.203.0.10:51820" \
   --listen-port 51820 \
+  --join-requests-enabled true \
   --fips-advertise-endpoint true >/dev/null
-set_admin_roster node-a "$ADMIN_ONLY" "$ADMIN_ONLY" "$ADMIN_NPUB"
+assert_requester_not_seeded_on_admin node-a "$REQUESTER_NPUB"
 
 INVITE="$("${COMPOSE[@]}" exec -T node-a nvpn create-invite | tr -d '\r')"
 if [[ -z "$INVITE" ]]; then

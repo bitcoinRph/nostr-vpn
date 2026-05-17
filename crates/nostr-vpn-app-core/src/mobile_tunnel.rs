@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 #[cfg(debug_assertions)]
 use std::fs::OpenOptions;
@@ -154,20 +154,29 @@ impl MobileTunnelConfig {
         let network_id = app.effective_network_id();
         let mut peers = Vec::new();
         let mut route_targets = Vec::new();
+        let participant_pubkeys = app
+            .participant_pubkeys_hex()
+            .into_iter()
+            .collect::<HashSet<_>>();
 
         for participant in app
             .active_network_signal_pubkeys_hex()
             .into_iter()
             .filter(|participant| participant != &own_pubkey)
         {
-            let Some(tunnel_ip) = derive_mesh_tunnel_ip(&network_id, &participant) else {
-                continue;
+            let allowed_ips = if participant_pubkeys.contains(&participant) {
+                let Some(tunnel_ip) = derive_mesh_tunnel_ip(&network_id, &participant) else {
+                    continue;
+                };
+                let route = format!("{}/32", strip_cidr(&tunnel_ip));
+                route_targets.push(route.clone());
+                vec![route]
+            } else {
+                Vec::new()
             };
-            let route = format!("{}/32", strip_cidr(&tunnel_ip));
-            route_targets.push(route.clone());
             peers.push(FipsMeshPeerConfig::from_participant_pubkey(
                 participant,
-                vec![route],
+                allowed_ips,
             )?);
         }
 
@@ -1916,7 +1925,7 @@ fn empty_config() -> MobileTunnelConfig {
 mod tests {
     use super::*;
     use nostr_sdk::prelude::{Keys, ToBech32};
-    use nostr_vpn_core::config::NetworkConfig;
+    use nostr_vpn_core::config::{NetworkConfig, PendingOutboundJoinRequest};
 
     #[test]
     fn mobile_config_routes_only_private_peer_addresses() {
@@ -2001,6 +2010,65 @@ mod tests {
                 seen_at_ms: None,
             }]
         );
+    }
+
+    #[test]
+    fn mobile_config_keeps_join_request_admin_as_control_peer_without_route() {
+        let admin_keys = Keys::generate();
+        let mut app = AppConfig::generated();
+        app.ensure_defaults();
+        let admin = admin_keys.public_key().to_hex();
+        let admin_npub = admin_keys.public_key().to_bech32().expect("admin npub");
+        app.networks = vec![NetworkConfig {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            enabled: true,
+            network_id: "test".to_string(),
+            participants: Vec::new(),
+            admins: vec![admin.clone()],
+            listen_for_join_requests: false,
+            invite_inviter: admin.clone(),
+            outbound_join_request: Some(PendingOutboundJoinRequest {
+                recipient: admin.clone(),
+                requested_at: 1,
+            }),
+            inbound_join_requests: Vec::new(),
+            shared_roster_updated_at: 0,
+            shared_roster_signed_by: String::new(),
+        }];
+        app.fips_peer_endpoints
+            .insert(admin.clone(), vec!["192.168.50.10:51820".to_string()]);
+        app.ensure_defaults();
+
+        let config = MobileTunnelConfig::from_app(&app).expect("mobile config");
+
+        assert_eq!(config.peers.len(), 1);
+        assert_eq!(config.peers[0].participant_pubkey, admin);
+        assert!(config.peers[0].allowed_ips.is_empty());
+        assert!(
+            !config
+                .route_targets
+                .iter()
+                .any(|route| route.starts_with("10.") && route.ends_with("/32"))
+        );
+        let hints = config
+            .peer_hints
+            .get(&admin)
+            .expect("admin static hint should stay available for FIPS control");
+        assert_eq!(
+            hints,
+            &vec![FipsPeerAddressHint {
+                addr: "192.168.50.10:51820".to_string(),
+                seen_at_ms: None,
+            }]
+        );
+        let endpoint_config = fips_peer_configs_from_mesh(&config.peers, &config.peer_hints);
+        let endpoint_peer = endpoint_config
+            .iter()
+            .find(|peer| peer.npub == admin_npub)
+            .expect("admin endpoint config");
+        assert_eq!(endpoint_peer.addresses.len(), 1);
+        assert_eq!(endpoint_peer.addresses[0].addr, "192.168.50.10:51820");
     }
 
     #[test]

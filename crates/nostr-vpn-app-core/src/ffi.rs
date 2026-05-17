@@ -816,7 +816,7 @@ impl NativeAppRuntime {
             } => {
                 self.config
                     .set_network_join_requests_enabled(&network_id, enabled)?;
-                self.save_reload_and_refresh()
+                self.save_reload_refresh_and_maybe_connect_for_join_requests(enabled)
             }
             NativeAppAction::RequestNetworkJoin { network_id } => {
                 self.request_network_join(&network_id)
@@ -1041,13 +1041,13 @@ impl NativeAppRuntime {
         let Some(network) = self.config.active_network_opt() else {
             return Ok(());
         };
-        if network.listen_for_join_requests {
-            return Ok(());
-        }
+        let enabled = network.listen_for_join_requests;
         let network_id = network.id.clone();
-        self.config
-            .set_network_join_requests_enabled(&network_id, true)?;
-        self.save_reload_and_refresh()
+        if !enabled {
+            self.config
+                .set_network_join_requests_enabled(&network_id, true)?;
+        }
+        self.save_reload_refresh_and_maybe_connect_for_join_requests(true)
     }
 
     fn stop_invite_broadcast(&mut self) {
@@ -1530,6 +1530,17 @@ impl NativeAppRuntime {
             ensure_success("nvpn reload", &output)?;
         }
         self.refresh_status()
+    }
+
+    fn save_reload_refresh_and_maybe_connect_for_join_requests(
+        &mut self,
+        enabled: bool,
+    ) -> Result<()> {
+        self.save_reload_and_refresh()?;
+        if enabled && !self.vpn_enabled {
+            self.connect_vpn()?;
+        }
+        Ok(())
     }
 
     fn save_config(&mut self) -> Result<()> {
@@ -3108,9 +3119,18 @@ mod tests {
 
     #[test]
     fn lan_pairing_runs_for_fifteen_minutes_until_cancelled() {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-lan-pairing-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+
         let error = anyhow!("boom");
         let mut runtime = NativeAppRuntime::from_startup_error(&error);
         runtime.startup_error = None;
+        runtime.mobile_runtime = true;
+        runtime.config_path = dir.join("config.toml");
         create_test_network(&mut runtime, "Home");
 
         runtime.dispatch(NativeAppAction::StartInviteBroadcast);
@@ -3140,6 +3160,8 @@ mod tests {
         assert!(!state.nearby_discovery_active);
         assert_eq!(state.nearby_discovery_remaining_secs, 0);
         assert!(state.lan_peers.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -3167,6 +3189,101 @@ mod tests {
 
         let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
         assert!(saved.networks[0].listen_for_join_requests);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn enabling_join_requests_starts_background_fips_listener() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-join-listener-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+        let calls_path = dir.join("calls.txt");
+        let started_path = dir.join("started");
+        let script_path = dir.join("nvpn");
+        let calls_literal = calls_path
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        let started_literal = started_path
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        let script = format!(
+            r#"#!/bin/sh
+CALLS="{calls_literal}"
+STARTED="{started_literal}"
+printf '%s\n' "$*" >> "$CALLS"
+if [ "$1" = "service" ] && [ "$2" = "status" ]; then
+  cat <<'JSON'
+{{"supported":true,"installed":true,"disabled":false,"loaded":true,"running":true,"pid":123,"label":"to.iris.nvpn.test","binary_version":"test"}}
+JSON
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  if [ -f "$STARTED" ]; then
+    cat <<'JSON'
+{{"daemon":{{"running":true,"state":{{"updated_at":1,"binary_version":"test","local_endpoint":"","advertised_endpoint":"","listen_port":0,"vpn_enabled":true,"vpn_active":false,"vpn_status":"Listening for join requests","expected_peer_count":0,"connected_peer_count":0,"mesh_ready":false,"peers":[]}}}}}}
+JSON
+  else
+    cat <<'JSON'
+{{"daemon":{{"running":false,"state":null}}}}
+JSON
+  fi
+  exit 0
+fi
+if [ "$1" = "start" ]; then
+  touch "$STARTED"
+  exit 0
+fi
+if [ "$1" = "resume" ] || [ "$1" = "reload" ]; then
+  exit 0
+fi
+exit 0
+"#
+        );
+        fs::write(&script_path, script).expect("write fake nvpn");
+        let mut permissions = fs::metadata(&script_path)
+            .expect("fake nvpn metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script_path, permissions).expect("make fake nvpn executable");
+
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        runtime.last_error.clear();
+        runtime.mobile_runtime = false;
+        runtime.config_path = dir.join("config.toml");
+        let network_id = create_test_network(&mut runtime, "Home");
+        runtime.config.networks[0].listen_for_join_requests = false;
+        runtime
+            .config
+            .save(&runtime.config_path)
+            .expect("save test config");
+        runtime.nvpn_bin = Some(script_path);
+
+        runtime.dispatch(NativeAppAction::SetNetworkJoinRequestsEnabled {
+            network_id,
+            enabled: true,
+        });
+
+        let calls = fs::read_to_string(&calls_path).expect("read fake nvpn calls");
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        assert!(
+            started_path.exists(),
+            "join listener daemon was not started"
+        );
+        assert!(calls.contains("start --daemon --connect --config"));
+        assert!(runtime.config.networks[0].listen_for_join_requests);
+        assert!(runtime.vpn_enabled);
+        assert_eq!(runtime.vpn_status, "Listening for join requests");
 
         let _ = fs::remove_dir_all(&dir);
     }

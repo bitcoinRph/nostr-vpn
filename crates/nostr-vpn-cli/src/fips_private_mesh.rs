@@ -1476,7 +1476,7 @@ impl FipsPrivateTunnelConfig {
         // descending — recent observations naturally beat unstamped hints,
         // and a fresh nostr advert beats both because it's stamped at fetch.
         let desired_endpoint_hint_npubs = app
-            .participant_pubkeys_hex()
+            .active_network_signal_pubkeys_hex()
             .into_iter()
             .filter(|participant| Some(participant.as_str()) != own_pubkey)
             .map(|participant| normalize_fips_endpoint_npub(&participant))
@@ -1491,7 +1491,7 @@ impl FipsPrivateTunnelConfig {
             .unwrap_or_default();
         recent_peer_endpoints =
             filter_stamped_tunnel_endpoints(recent_peer_endpoints, &tunnel_endpoint_hosts);
-        // Live capability hints are accepted only for roster peers because
+        // Live capability hints are accepted only for network signal peers because
         // they are claims carried by that peer. The disk cache above is
         // different: it records peers this endpoint already authenticated.
         recent_peer_endpoints.extend(
@@ -3334,7 +3334,7 @@ mod tests {
         TransportInstances, UdpConfig,
     };
     use nostr_sdk::prelude::{Keys, ToBech32};
-    use nostr_vpn_core::config::{AppConfig, derive_mesh_tunnel_ip};
+    use nostr_vpn_core::config::{AppConfig, PendingOutboundJoinRequest, derive_mesh_tunnel_ip};
     use nostr_vpn_core::data_plane::MeshPeerStatus;
     use nostr_vpn_core::fips_control::{
         FipsControlFrame, NetworkRoster, PeerEndpointHint, decode_fips_control_frame,
@@ -4123,7 +4123,7 @@ mod tests {
     }
 
     #[test]
-    fn tunnel_config_applies_live_endpoint_hints_only_for_participants() {
+    fn tunnel_config_applies_live_endpoint_hints_only_for_network_signal_peers() {
         let alice_keys = Keys::generate();
         let bob_keys = Keys::generate();
         let admin_keys = Keys::generate();
@@ -4174,7 +4174,55 @@ mod tests {
             .iter()
             .find(|peer| peer.npub == admin_npub)
             .expect("admin endpoint peer");
-        assert!(admin.addresses.is_empty());
+        assert_eq!(admin.addresses.len(), 1);
+        assert_eq!(admin.addresses[0].addr, "192.168.50.33:51820");
+        assert_eq!(admin.addresses[0].seen_at_ms, Some(123_000));
+    }
+
+    #[test]
+    fn tunnel_config_keeps_static_endpoint_hint_for_control_only_admin() {
+        let alice_keys = Keys::generate();
+        let admin_keys = Keys::generate();
+        let alice_nsec = alice_keys.secret_key().to_bech32().expect("alice nsec");
+        let alice_pubkey = alice_keys.public_key().to_hex();
+        let admin_pubkey = admin_keys.public_key().to_hex();
+        let admin_npub = admin_keys.public_key().to_bech32().expect("admin npub");
+        let network_id = "fips-admin-static-hints-test";
+
+        let mut app = AppConfig::default();
+        app.nostr.secret_key = alice_nsec;
+        app.networks[0].network_id = network_id.to_string();
+        app.networks[0].participants = Vec::new();
+        app.networks[0].admins = vec![admin_pubkey.clone()];
+        app.networks[0].outbound_join_request = Some(PendingOutboundJoinRequest {
+            recipient: admin_pubkey.clone(),
+            requested_at: 1,
+        });
+        app.fips_peer_endpoints
+            .insert(admin_npub.clone(), vec!["10.203.0.10:51820".to_string()]);
+
+        let config = FipsPrivateTunnelConfig::from_app(
+            &app,
+            network_id,
+            "utun-test",
+            Some(&alice_pubkey),
+            None,
+            &[],
+        )
+        .expect("fips tunnel config");
+
+        assert!(
+            config.peers.iter().all(|peer| peer.allowed_ips.is_empty()),
+            "join-request admin peers must not get private-network routes before roster acceptance",
+        );
+        let admin = config
+            .endpoint_peers
+            .iter()
+            .find(|peer| peer.npub == admin_npub)
+            .expect("admin endpoint peer");
+        assert_eq!(admin.addresses.len(), 1);
+        assert_eq!(admin.addresses[0].addr, "10.203.0.10:51820");
+        assert_eq!(admin.addresses[0].seen_at_ms, None);
     }
 
     #[test]

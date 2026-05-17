@@ -577,6 +577,8 @@ struct SetArgs {
     #[arg(long)]
     autoconnect: Option<bool>,
     #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    join_requests_enabled: Option<bool>,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
     fips_advertise_endpoint: Option<bool>,
     #[arg(long = "fips-peer-endpoint")]
     fips_peer_endpoints: Vec<String>,
@@ -1083,6 +1085,10 @@ async fn run_command(command: Command) -> Result<()> {
             }
             if let Some(value) = args.autoconnect {
                 app.autoconnect = value;
+            }
+            if let Some(value) = args.join_requests_enabled {
+                let network_id = app.active_network().id.clone();
+                app.set_network_join_requests_enabled(&network_id, value)?;
             }
             if let Some(value) = args.fips_advertise_endpoint {
                 app.fips_advertise_endpoint = value;

@@ -14,6 +14,11 @@ All notable changes to this project are documented in this file.
 ### Fixed
 
 - Admins can rename their own device from every native network UI.
+- Enabling join requests from the native app now starts the background FIPS
+  listener when needed, so admins can receive requests while the app is open.
+- FIPS join-request senders on desktop and mobile keep endpoint hints for
+  admin-only control peers without treating them as accepted data-plane peers,
+  and the Docker e2e no longer pre-seeds admin config by editing TOML.
 
 ## 4.0.28 - 2026-05-17
 
