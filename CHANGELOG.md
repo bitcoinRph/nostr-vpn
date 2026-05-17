@@ -19,6 +19,8 @@ All notable changes to this project are documented in this file.
 - FIPS join-request senders on desktop and mobile keep endpoint hints for
   admin-only control peers without treating them as accepted data-plane peers,
   and the Docker e2e no longer pre-seeds admin config by editing TOML.
+- Mobile join-request listeners and pending senders now enable FIPS discovery
+  even before any accepted roster peer exists.
 
 ## 4.0.28 - 2026-05-17
 

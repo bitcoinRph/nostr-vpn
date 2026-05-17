@@ -121,6 +121,8 @@ pub(crate) struct MobileTunnelConfig {
     #[serde(default)]
     pub(crate) wireguard_exit: Option<WireGuardExitConfig>,
     #[serde(default)]
+    pub(crate) join_requests_enabled: bool,
+    #[serde(default)]
     pub(crate) pending_join_request_recipient: String,
     #[serde(default)]
     pub(crate) pending_join_requested_at: u64,
@@ -265,6 +267,7 @@ impl MobileTunnelConfig {
             excluded_routes,
             dns_servers,
             wireguard_exit,
+            join_requests_enabled: app.join_requests_enabled(),
             pending_join_request_recipient,
             pending_join_requested_at,
             error: String::new(),
@@ -1628,7 +1631,12 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
     config.node.limits.max_peers = MOBILE_MAX_FIPS_PEERS;
     config.node.limits.max_connections = MOBILE_MAX_FIPS_CONNECTIONS;
     config.node.limits.max_links = MOBILE_MAX_FIPS_LINKS;
-    let nostr_enabled = !mobile.peers.is_empty();
+    let join_request_pending = !mobile.pending_join_request_recipient.trim().is_empty()
+        && mobile.pending_join_requested_at != 0;
+    let nostr_enabled = mobile.join_requests_enabled
+        || join_request_pending
+        || !mobile.peers.is_empty()
+        || !mobile.peer_hints.is_empty();
     config.node.discovery.nostr.enabled = nostr_enabled;
     // Publish only the generic `udp:nat` overlay advert so roster peers can
     // bootstrap encrypted traversal offers to mobile nodes. LAN addresses are
@@ -1915,6 +1923,7 @@ fn empty_config() -> MobileTunnelConfig {
         excluded_routes: Vec::new(),
         dns_servers: Vec::new(),
         wireguard_exit: None,
+        join_requests_enabled: false,
         pending_join_request_recipient: String::new(),
         pending_join_requested_at: 0,
         error: String::new(),
@@ -2069,6 +2078,41 @@ mod tests {
             .expect("admin endpoint config");
         assert_eq!(endpoint_peer.addresses.len(), 1);
         assert_eq!(endpoint_peer.addresses[0].addr, "192.168.50.10:51820");
+    }
+
+    #[test]
+    fn mobile_admin_listener_without_roster_peers_keeps_fips_discovery_enabled() {
+        let mut app = AppConfig::generated();
+        app.ensure_defaults();
+        let own = app.own_nostr_pubkey_hex().expect("own pubkey");
+        app.networks = vec![NetworkConfig {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            enabled: true,
+            network_id: "test".to_string(),
+            participants: Vec::new(),
+            admins: vec![own],
+            listen_for_join_requests: true,
+            invite_inviter: String::new(),
+            outbound_join_request: None,
+            inbound_join_requests: Vec::new(),
+            shared_roster_updated_at: 0,
+            shared_roster_signed_by: String::new(),
+        }];
+        app.ensure_defaults();
+
+        let mobile = MobileTunnelConfig::from_app(&app).expect("mobile config");
+        let config = fips_endpoint_config("nostr-vpn:test", &mobile);
+
+        assert!(mobile.join_requests_enabled);
+        assert!(mobile.peers.is_empty());
+        assert!(config.node.discovery.nostr.enabled);
+        assert!(config.node.discovery.nostr.advertise);
+        assert_eq!(
+            config.node.discovery.nostr.policy,
+            NostrDiscoveryPolicy::Open
+        );
+        assert!(config.peers.is_empty());
     }
 
     #[test]
@@ -2583,6 +2627,25 @@ mod tests {
         };
         assert!(!udp.advertise_on_nostr());
         assert!(udp.accept_connections());
+        assert!(config.peers.is_empty());
+    }
+
+    #[test]
+    fn mobile_fips_config_uses_discovery_for_pending_join_request_without_peers() {
+        let admin = Keys::generate().public_key().to_hex();
+        let mobile = MobileTunnelConfig {
+            pending_join_request_recipient: admin,
+            pending_join_requested_at: 1,
+            ..empty_config()
+        };
+        let config = fips_endpoint_config("nostr-vpn:test", &mobile);
+
+        assert!(config.node.discovery.nostr.enabled);
+        assert!(config.node.discovery.nostr.advertise);
+        assert_eq!(
+            config.node.discovery.nostr.policy,
+            NostrDiscoveryPolicy::Open
+        );
         assert!(config.peers.is_empty());
     }
 }
