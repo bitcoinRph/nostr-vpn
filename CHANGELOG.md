@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Default relay settings now include `wss://temp.iris.to` from FIPS discovery
+  defaults.
+
 ## 4.0.33 - 2026-05-18
 
 ### Added

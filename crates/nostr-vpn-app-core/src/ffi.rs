@@ -2715,6 +2715,7 @@ mod tests {
 
         assert!(!relays.is_empty());
         assert!(relays.iter().all(|relay| relay.starts_with("wss://")));
+        assert!(relays.contains(&"wss://temp.iris.to".to_string()));
     }
 
     #[test]
