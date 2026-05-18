@@ -75,7 +75,12 @@ pub struct DaemonPeerState {
     pub public_key: String,
     #[serde(alias = "advertised_routes")]
     pub advertised_routes: Vec<String>,
-    #[serde(default, alias = "presence_timestamp", alias = "presenceTimestamp")]
+    #[serde(
+        default,
+        alias = "last_mesh_seen_at",
+        alias = "presence_timestamp",
+        alias = "presenceTimestamp"
+    )]
     pub last_mesh_seen_at: u64,
     #[serde(default, alias = "last_signal_seen_at", alias = "lastSignalSeenAt")]
     pub last_fips_seen_at: Option<u64>,
@@ -421,6 +426,7 @@ mod tests {
         assert_eq!(state.connected_peer_count, 1);
         assert_eq!(state.port_mapping.active_protocol, None);
         assert_eq!(state.peers[0].runtime_endpoint.as_deref(), Some("fips"));
+        assert_eq!(state.peers[0].last_mesh_seen_at, 1778104080);
         assert!(state.peers[0].reachable);
     }
 }
