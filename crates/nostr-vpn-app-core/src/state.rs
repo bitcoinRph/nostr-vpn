@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(state.connected_peer_count, 1);
         assert_eq!(state.port_mapping.active_protocol, None);
         assert_eq!(state.peers[0].runtime_endpoint.as_deref(), Some("fips"));
-        assert_eq!(state.peers[0].last_mesh_seen_at, 1778104080);
+        assert_eq!(state.peers[0].last_mesh_seen_at, 1_778_104_080);
         assert!(state.peers[0].reachable);
     }
 }

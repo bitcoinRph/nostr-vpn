@@ -1250,34 +1250,7 @@ impl NativeAppRuntime {
         if let Some(value) = patch.listen_port {
             self.config.node.listen_port = value;
         }
-        if let Some(value) = patch.relays {
-            self.config.nostr.relays = normalize_relay_urls(value);
-            let enabled_relays = self
-                .config
-                .nostr
-                .relays
-                .iter()
-                .cloned()
-                .collect::<std::collections::HashSet<_>>();
-            self.config
-                .nostr
-                .disabled_relays
-                .retain(|relay| !enabled_relays.contains(relay));
-        }
-        if let Some(value) = patch.disabled_relays {
-            self.config.nostr.disabled_relays = normalize_relay_urls(value);
-            let disabled_relays = self
-                .config
-                .nostr
-                .disabled_relays
-                .iter()
-                .cloned()
-                .collect::<std::collections::HashSet<_>>();
-            self.config
-                .nostr
-                .relays
-                .retain(|relay| !disabled_relays.contains(relay));
-        }
+        self.apply_relay_settings_patch(patch.relays, patch.disabled_relays);
         // Exit-node selection is mutually exclusive: at most one of
         // (peer exit_node, WireGuard upstream) can be active at a
         // time. The daemon enforces this so every UI / CLI client
@@ -1373,6 +1346,41 @@ impl NativeAppRuntime {
             self.config.close_to_tray_on_close = value;
         }
         Ok(())
+    }
+
+    fn apply_relay_settings_patch(
+        &mut self,
+        relays: Option<Vec<String>>,
+        disabled_relays: Option<Vec<String>>,
+    ) {
+        if let Some(value) = relays {
+            self.config.nostr.relays = normalize_relay_urls(value);
+            let enabled_relays = self
+                .config
+                .nostr
+                .relays
+                .iter()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>();
+            self.config
+                .nostr
+                .disabled_relays
+                .retain(|relay| !enabled_relays.contains(relay));
+        }
+        if let Some(value) = disabled_relays {
+            self.config.nostr.disabled_relays = normalize_relay_urls(value);
+            let disabled_relays = self
+                .config
+                .nostr
+                .disabled_relays
+                .iter()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>();
+            self.config
+                .nostr
+                .relays
+                .retain(|relay| !disabled_relays.contains(relay));
+        }
     }
 
     fn connect_vpn(&mut self) -> Result<()> {

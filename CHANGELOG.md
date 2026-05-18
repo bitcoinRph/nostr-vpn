@@ -4,8 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.34 - 2026-05-18
+
+### Added
+
 - Default relay settings now include `wss://temp.iris.to` from FIPS discovery
   defaults.
+
+### Changed
+
+- Relay settings now use per-relay add, enable, disable, and delete controls
+  instead of a multiline relay editor across native app surfaces.
+
+### Fixed
+
+- The macOS app now accepts the daemon's snake_case mesh timestamp fields when
+  parsing `nvpn status --json`, so live status refreshes and relay dots keep
+  updating after service upgrades.
 
 ## 4.0.33 - 2026-05-18
 
