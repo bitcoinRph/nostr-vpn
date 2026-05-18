@@ -14,16 +14,16 @@ fn legacy_prefixed_network_ids_are_normalized_at_runtime() {
 #[test]
 fn default_node_name_from_hostname_uses_first_label() {
     assert_eq!(
-        default_node_name_from_hostname("Siriuss-Mini.fritz.box").as_deref(),
-        Some("siriuss-mini")
+        default_node_name_from_hostname("example-mini.lan").as_deref(),
+        Some("example-mini")
     );
 }
 
 #[test]
 fn default_node_name_from_hostname_normalizes_human_device_names() {
     assert_eq!(
-        default_node_name_from_hostname("Sirius's Mac mini").as_deref(),
-        Some("sirius-s-mac-mini")
+        default_node_name_from_hostname("Example Mac mini").as_deref(),
+        Some("example-mac-mini")
     );
 }
 
@@ -48,8 +48,8 @@ fn default_node_name_resolution_prefers_hostname_over_pubkey_fallback() {
     let own_hex = keys.public_key().to_hex();
 
     assert_eq!(
-        default_node_name_for_hostname_or_pubkey(Some("Siriuss-Mini.fritz.box"), &own_hex),
-        "siriuss-mini"
+        default_node_name_for_hostname_or_pubkey(Some("example-mini.lan"), &own_hex),
+        "example-mini"
     );
 }
 

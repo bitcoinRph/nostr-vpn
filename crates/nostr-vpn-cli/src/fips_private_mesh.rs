@@ -2587,7 +2587,7 @@ fn spawn_tun_read_task(
                         // Keep reading while the fd is hot. BoringTun and
                         // wireguard-go both batch TUN-side work; without this
                         // bounded drain we pay a scheduler/channel round trip
-                        // for every packet on the MacBook sender path.
+                        // for every packet on the macOS laptop sender path.
                     }
                     Err(error) if temporary_tun_read_error(&error) => {
                         guard.clear_ready();

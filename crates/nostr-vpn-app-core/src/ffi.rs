@@ -3473,7 +3473,7 @@ exit 0
             .inbound_join_requests
             .push(PendingInboundJoinRequest {
                 requester: requester_hex.clone(),
-                requester_node_name: "Ubuntu Dev".to_string(),
+                requester_node_name: "Linux Dev".to_string(),
                 requested_at: 1_726_000_000,
             });
 
@@ -3491,13 +3491,13 @@ exit 0
         assert!(runtime.config.networks[0].inbound_join_requests.is_empty());
         assert_eq!(
             runtime.config.peer_alias(&requester_hex).as_deref(),
-            Some("ubuntu-dev")
+            Some("linux-dev")
         );
 
         let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
         assert_eq!(
             saved.peer_alias(&requester_hex).as_deref(),
-            Some("ubuntu-dev")
+            Some("linux-dev")
         );
 
         let _ = fs::remove_dir_all(&dir);

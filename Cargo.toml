@@ -14,7 +14,7 @@ resolver = "2"
 version = "4.0.31"
 edition = "2024"
 license = "MIT"
-authors = ["sirius"]
+authors = ["Nostr VPN contributors"]
 repository = "https://github.com/mmalmi/nostr-vpn"
 
 [workspace.dependencies]

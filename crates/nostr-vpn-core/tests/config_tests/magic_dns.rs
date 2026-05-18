@@ -103,36 +103,36 @@ fn self_magic_dns_name_uses_assigned_own_alias_and_resolves_to_own_pubkey() {
 #[test]
 fn generic_add_network_does_not_guess_self_magic_dns_from_node_name() {
     let mut config = AppConfig::generated_without_networks();
-    config.node_name = "Sirius's iPhone".to_string();
+    config.node_name = "Example iPhone".to_string();
 
     config.add_network("Joined");
     config.ensure_defaults();
 
     assert_ne!(
         config.self_magic_dns_name().as_deref(),
-        Some("sirius-s-iphone.nvpn")
+        Some("example-iphone.nvpn")
     );
 }
 
 #[test]
 fn add_owned_first_network_seeds_local_device_name_as_self_magic_dns_alias() {
     let mut config = AppConfig::generated_without_networks();
-    config.node_name = "Sirius's Mac mini".to_string();
+    config.node_name = "Example Mac mini".to_string();
 
     config.add_owned_network("Home");
     config.ensure_defaults();
 
-    assert_eq!(config.node_name, "Sirius's Mac mini");
+    assert_eq!(config.node_name, "Example Mac mini");
     assert_eq!(
         config.self_magic_dns_name().as_deref(),
-        Some("sirius-s-mac-mini.nvpn")
+        Some("example-mac-mini.nvpn")
     );
 }
 
 #[test]
 fn adding_later_network_preserves_configured_device_name() {
     let mut config = AppConfig::generated_without_networks();
-    config.node_name = "Sirius's Mac mini".to_string();
+    config.node_name = "Example Mac mini".to_string();
 
     config.add_owned_network("Home");
     config.node_name = "My Pocket Router".to_string();
@@ -142,7 +142,7 @@ fn adding_later_network_preserves_configured_device_name() {
     assert_eq!(config.node_name, "My Pocket Router");
     assert_eq!(
         config.self_magic_dns_name().as_deref(),
-        Some("sirius-s-mac-mini.nvpn")
+        Some("example-mac-mini.nvpn")
     );
 }
 
@@ -189,7 +189,7 @@ fn self_magic_dns_label_uses_assigned_own_peer_alias() {
     let mut config = AppConfig::generated_without_networks();
     config.nostr.secret_key = own.secret_key().to_secret_hex();
     config.nostr.public_key = own_hex;
-    config.node_name = "Sirius's iPhone".to_string();
+    config.node_name = "Example iPhone".to_string();
     config.peer_aliases.insert(own_npub, "iphone1".to_string());
     config.add_network("Joined");
     config.ensure_defaults();
@@ -226,7 +226,7 @@ fn pending_join_self_alias_uses_self_until_roster_names_device() {
     let mut config = AppConfig::generated_without_networks();
     config.nostr.secret_key = own.secret_key().to_secret_hex();
     config.nostr.public_key = own_hex.clone();
-    config.node_name = "Sirius iPhone".to_string();
+    config.node_name = "Example iPhone".to_string();
     config.add_network("Joined");
 
     let alias = config
@@ -241,7 +241,7 @@ fn pending_join_self_alias_uses_self_until_roster_names_device() {
 
     assert_eq!(
         config.self_magic_dns_name().as_deref(),
-        Some("sirius-iphone.nvpn")
+        Some("example-iphone.nvpn")
     );
 }
 

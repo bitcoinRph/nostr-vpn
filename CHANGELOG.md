@@ -458,8 +458,8 @@ All notable changes to this project are documented in this file.
 - **Bumped fips-endpoint to `02c00a0` — Darwin connected-UDP and tunnel
   reliability refresh.** The macOS private mesh now installs per-peer connected
   UDP sockets by default after fixing the listener/peer `SO_REUSE*` mismatch
-  that made earlier Darwin connected-socket tests unstable. On the MacBook
-  Wi-Fi to Ethernet-mini path, the best same-window sample improved to about
+  that made earlier Darwin connected-socket tests unstable. On the macOS laptop
+  Wi-Fi to Ethernet desktop path, the best same-window sample improved to about
   256 Mbit/s forward and 404 Mbit/s reverse; reverse is now Tailscale-level in
   current samples, while the forward direction remains packet-rate limited by
   the Darwin Wi-Fi sender path.
@@ -478,14 +478,14 @@ All notable changes to this project are documented in this file.
 - Private FIPS mesh packet routing now moves owned packet buffers through the
   send/receive hot path instead of cloning each packet at the nvpn mesh layer.
 - FIPS macOS sending now defaults to the hash-by-send-target worker path instead
-  of the per-flow ordered sender thread. Live MacBook Wi-Fi to Ethernet-mini
+  of the per-flow ordered sender thread. Live macOS laptop Wi-Fi to Ethernet desktop
   testing improved the weak direction from about 103-109 Mbit/s to about
   147 Mbit/s while keeping reverse around 350 Mbit/s; the ordered path remains
   available for A/B runs with `FIPS_MACOS_ORDERED_SENDER=1`.
 - FIPS macOS worker drain size can now be A/B tested with
   `FIPS_MACOS_WORKER_BATCH`; the default remains 32 after smaller batches
   regressed local Wi-Fi/Ethernet throughput.
-- Added runtime-only pipeline tracing and recorded the MacBook/mini and mini
+- Added runtime-only pipeline tracing and recorded the macOS laptop/desktop and
   Docker performance experiments in `docs/EXPERIMENTS.md`.
 
 ### Fixed
@@ -515,7 +515,7 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
-- **Bumped fips-endpoint to `9b7c723` — boringtun-style data-plane perf overhaul.** Single squash-merge landing 49 commits worth of FIPS receive/send hot-path work. **Single-stream TCP went from ~1.5 Gbps baseline to ~2.2 Gbps on Mac docker bench (+47%) and 2.24 Gbps on ubuntu-dev netns+veth host bench (+62% over same-host baseline).** Multi-stream throughput moves up 8-15% across 4/8-stream configurations. Highlights:
+- **Bumped fips-endpoint to `9b7c723` — boringtun-style data-plane perf overhaul.** Single squash-merge landing 49 commits worth of FIPS receive/send hot-path work. **Single-stream TCP went from ~1.5 Gbps baseline to ~2.2 Gbps on Mac docker bench (+47%) and 2.24 Gbps on linux-dev netns+veth host bench (+62% over same-host baseline).** Multi-stream throughput moves up 8-15% across 4/8-stream configurations. Highlights:
   - **Shard-owned decrypt worker pool** (std::thread + crossbeam_channel) — each worker owns its session state in a thread-local HashMap. No `Arc<RwLock<HashMap>>` cache on Node, no `Arc<Mutex<ReplayWindow>>` shared with rx_loop. Direct `&mut` access per packet, zero lock acquires per AEAD layer. Hash-by-cache_key dispatch so a session always lands on the same shard.
   - **UDP_GSO on Linux** — `sendmsg(2)` + `UDP_SEGMENT` cmsg path for uniform-size batches, falling back to `sendmmsg(2)` on EINVAL/EOPNOTSUPP. Kernel splits one super-skb into N on-the-wire UDP datagrams via a single skb walk (the same primitive WireGuard kernel + boringtun use to hit 2.5–3.2 Gbps).
   - **Connected UDP per peer on Linux** — `ConnectedPeerSocket` (SO_REUSEPORT + bind + connect) for each established peer, with a `PeerRecvDrain` std::thread feeding the existing `packet_tx`. Encrypt-worker send path uses the peer's connected fd with `msg_name = NULL`; kernel skips per-packet sockaddr handling + route lookup + neighbor resolve. Pairs cleanly with UDP_GSO.
@@ -638,7 +638,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
-- FIPS spanning-tree: nodes whose only smaller-NodeAddr parent disappeared no longer advertise an ancestry whose advertised root is not the path's minimum entry. Previously such announces were rejected by recipients with `invalid ancestry: advertised root X is not the minimum path entry Y`, blocking mesh transit (e.g. mini→ubuntu-dev / mini→win11 through a shared mac peer).
+- FIPS spanning-tree: nodes whose only smaller-NodeAddr parent disappeared no longer advertise an ancestry whose advertised root is not the path's minimum entry. Previously such announces were rejected by recipients with `invalid ancestry: advertised root X is not the minimum path entry Y`, blocking mesh transit (e.g. macOS desktop→linux-dev / macOS desktop→windows-dev through a shared mac peer).
 
 ## 4.0.2 - 2026-05-08
 

@@ -1,7 +1,7 @@
 # AGENTS.md
 
-Notes for AI coding agents working in this repo. Pair with the user's
-global `~/.claude/CLAUDE.md` instructions.
+Notes for AI coding agents working in this repo. Pair with any local
+operator instructions outside the repository.
 
 ## Development notes
 

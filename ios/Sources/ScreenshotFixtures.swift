@@ -33,7 +33,7 @@ enum ScreenshotFixtures {
         state.exitNode = macNpub
         state.exitNodeLeakProtection = true
         state.exitNodeActive = true
-        state.exitNodeStatusText = "Routing through MacBook"
+        state.exitNodeStatusText = "Routing through laptop"
         state.advertiseExitNode = false
         state.advertisedRoutes = ["10.44.0.0/24"]
         state.wireguardExitEnabled = false
@@ -167,7 +167,7 @@ enum ScreenshotFixtures {
             ),
             participant(
                 npub: macNpub,
-                alias: "MacBook",
+                alias: "Laptop",
                 magicDns: "",
                 ip: "10.44.0.3/32",
                 isAdmin: true,
