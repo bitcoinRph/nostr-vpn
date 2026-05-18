@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.36 - 2026-05-18
+
+### Changed
+
+- Admins can now rename their own device from the native and web device UIs.
+
+### Fixed
+
+- Devices now drop a network locally when an admin removes that device from the
+  roster, so a removed member does not keep stale local network state.
+
 ## 4.0.35 - 2026-05-18
 
 ### Fixed
