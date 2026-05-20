@@ -83,7 +83,13 @@ internal fun ParticipantRow(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (isSelf) Pill("This device", Color(0xFFECFDF5), Ok)
                     if (participant.isAdmin) Pill("Admin", Color(0xFFF5F3FF), Accent)
-                    if (participant.offersExitNode) Pill("Exit", Color(0xFFFFF7ED), Color(0xFFA16207))
+                    if (participant.offersExitNode) {
+                        Pill(
+                            participant.exitNodeLabel(state),
+                            participant.exitNodeBackground(state),
+                            participant.exitNodeTint(state),
+                        )
+                    }
                     if (participant.isFipsRouted(state)) Pill("via mesh", Color(0xFFF1F5F9), Muted)
                 }
                 Text(participant.subtitle(isSelf), color = Muted, maxLines = 1)
@@ -128,7 +134,13 @@ private fun DeviceDetailDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (isSelf) Pill("This device", Color(0xFFECFDF5), Ok)
                     if (participant.isAdmin) Pill("Admin", Color(0xFFF5F3FF), Accent)
-                    if (participant.offersExitNode) Pill("Exit", Color(0xFFFFF7ED), Color(0xFFA16207))
+                    if (participant.offersExitNode) {
+                        Pill(
+                            participant.exitNodeLabel(state),
+                            participant.exitNodeBackground(state),
+                            participant.exitNodeTint(state),
+                        )
+                    }
                 }
                 if (participant.magicDnsName.isNotBlank()) {
                     Text("Magic DNS", style = MaterialTheme.typography.labelMedium, color = Muted)
@@ -708,6 +720,18 @@ private fun ParticipantState.fipsPathLabel(appState: AppState): String {
 
 private fun ParticipantState.isFipsRouted(state: AppState): Boolean =
     !isSelf(state) && reachable && fipsTransportAddr.isBlank()
+
+private fun ParticipantState.isActiveExitNode(state: AppState): Boolean =
+    state.exitNodeActive && state.exitNode.isNotBlank() && npub == state.exitNode
+
+private fun ParticipantState.exitNodeLabel(state: AppState): String =
+    if (isActiveExitNode(state)) "Exit active" else "Exit offered"
+
+private fun ParticipantState.exitNodeBackground(state: AppState): Color =
+    if (isActiveExitNode(state)) Color(0xFFECFDF5) else Color(0xFFFFF7ED)
+
+private fun ParticipantState.exitNodeTint(state: AppState): Color =
+    if (isActiveExitNode(state)) Ok else Color(0xFFA16207)
 
 private fun String.shortNpub(): String {
     if (isBlank()) return "Device"

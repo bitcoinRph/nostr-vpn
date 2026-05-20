@@ -3,6 +3,7 @@
   import './app.css';
   import { qrMatrix, runAction, tick } from './lib/api';
   import { formatBytes, nonEmpty, remainingText, routeList, shortMiddle } from './lib/format';
+  import nostrVpnIcon from './lib/nostr-vpn-icon.svg';
   import type {
     HealthIssue,
     InboundJoinRequestView,
@@ -84,6 +85,9 @@
     devicePane = 'list';
   }
   $: exitCandidates = participants.filter((participant) => {
+    if (!participant.offersExitNode) {
+      return false;
+    }
     const query = exitSearch.trim().toLowerCase();
     if (!query) {
       return true;
@@ -189,20 +193,24 @@
     }
   }
 
-  async function run(endpoint: string, payload?: unknown, label = 'Working'): Promise<boolean> {
+  async function runState(endpoint: string, payload?: unknown, label = 'Working'): Promise<UiState | null> {
     busyAction = label;
     error = '';
     try {
       const next = await runAction(endpoint, payload);
       applyState(next);
       setNotice(next.vpnStatus || 'Updated');
-      return true;
+      return next;
     } catch (err) {
       error = messageOf(err);
-      return false;
+      return null;
     } finally {
       busyAction = '';
     }
+  }
+
+  async function run(endpoint: string, payload?: unknown, label = 'Working'): Promise<boolean> {
+    return Boolean(await runState(endpoint, payload, label));
   }
 
   async function loadQr(invite: string) {
@@ -325,12 +333,20 @@
     return '';
   }
 
-  function selectedExitName(): string {
-    if (!state?.exitNode) {
-      return 'Direct';
+  function isActiveExitParticipant(participant: ParticipantView): boolean {
+    return Boolean(
+      state?.exitNodeActive &&
+        state.exitNode &&
+        participant.npub &&
+        participant.npub === state.exitNode,
+    );
+  }
+
+  function exitNodeBadgeText(participant: ParticipantView): string {
+    if (!participant.offersExitNode) {
+      return '';
     }
-    const participant = participants.find((candidate) => candidate.npub === state?.exitNode);
-    return participant ? participantName(participant) : 'Exit node';
+    return isActiveExitParticipant(participant) ? 'Exit active' : 'Exit offered';
   }
 
   function participantKey(participant: ParticipantView): string {
@@ -372,8 +388,9 @@
     if (participant.isAdmin) {
       roles.push('Admin');
     }
-    if (participant.offersExitNode) {
-      roles.push('Exit');
+    const exitRole = exitNodeBadgeText(participant);
+    if (exitRole) {
+      roles.push(exitRole);
     }
     return roles.length > 0 ? roles.join(', ') : 'Member';
   }
@@ -607,8 +624,11 @@
     if (!name) {
       return;
     }
-    const ok = await run('/api/add_network', { name }, 'Adding network');
-    if (ok) {
+    const existingIds = new Set(state?.networks.map((network) => network.id) ?? []);
+    const next = await runState('/api/add_network', { name }, 'Adding network');
+    if (next) {
+      const createdNetwork = next.networks.find((network) => !existingIds.has(network.id));
+      shownNetworkId = createdNetwork?.id ?? preferredNetworkId(next, '');
       newNetworkName = '';
       addNetworkOpen = false;
       tab = 'devices';
@@ -702,15 +722,20 @@
 <main class="shell">
   <header class="app-header">
     <div class="brand">
-      <div class="brand-mark" aria-hidden="true">N</div>
+      <img class="brand-mark" src={nostrVpnIcon} alt="" aria-hidden="true" />
       <div>
         <h1>Nostr VPN</h1>
-        <p>{state?.platform ?? 'Umbrel'}</p>
       </div>
     </div>
 
     {#if state}
       <div class="network-picker">
+        <span
+          class="network-state-dot"
+          class:active={Boolean(shownNetwork?.enabled)}
+          aria-label={shownNetwork?.enabled ? 'Selected network active' : 'Selected network inactive'}
+          title={shownNetwork?.enabled ? 'Selected network active' : 'Selected network inactive'}
+        ></span>
         <select bind:value={shownNetworkId} aria-label="Network">
           {#each state.networks as network (network.id)}
             <option value={network.id}>{network.name}</option>
@@ -723,7 +748,9 @@
           title="Add Network"
           on:click={() => (addNetworkOpen = true)}
         >
-          +
+          <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
+            <path d="M8 3.5v9M3.5 8h9" />
+          </svg>
         </button>
       </div>
 
@@ -1098,8 +1125,14 @@
                         {#if participant.isAdmin}
                           <span class="badge muted">Admin</span>
                         {/if}
-                        {#if participant.offersExitNode}
-                          <span class="badge warn">Exit</span>
+                        {#if exitNodeBadgeText(participant)}
+                          <span
+                            class="badge"
+                            class:active={isActiveExitParticipant(participant)}
+                            class:warn={!isActiveExitParticipant(participant)}
+                          >
+                            {exitNodeBadgeText(participant)}
+                          </span>
                         {/if}
                       </span>
                       <span class="device-meta">
@@ -1168,8 +1201,14 @@
                       {#if selectedParticipant.isAdmin}
                         <span class="badge muted">Admin</span>
                       {/if}
-                      {#if selectedParticipant.offersExitNode}
-                        <span class="badge warn">Exit</span>
+                      {#if exitNodeBadgeText(selectedParticipant)}
+                        <span
+                          class="badge"
+                          class:active={isActiveExitParticipant(selectedParticipant)}
+                          class:warn={!isActiveExitParticipant(selectedParticipant)}
+                        >
+                          {exitNodeBadgeText(selectedParticipant)}
+                        </span>
                       {/if}
                     </div>
                   </div>
@@ -1362,15 +1401,16 @@
                   type="button"
                   class:active={state.exitNode === participant.npub}
                   class="choice-row"
-                  disabled={!participant.offersExitNode}
                   on:click={() => setExitNode(participant.npub)}
                 >
                   <span class="radio-dot"></span>
                   <div>
                     <strong>{participantName(participant)}</strong>
-                    <span>{participant.offersExitNode ? nonEmpty(participant.statusText, 'Exit node') : 'Exit not offered'}</span>
+                    <span>{nonEmpty(participant.statusText, 'Exit node')}</span>
                   </div>
                 </button>
+              {:else}
+                <div class="empty-state">{exitSearch.trim() ? 'No exit nodes found' : 'No exit nodes offered'}</div>
               {/each}
             </div>
           </div>
@@ -1391,16 +1431,6 @@
                   setAdvertiseExitNode((event.currentTarget as HTMLInputElement).checked)}
               />
             </label>
-            <div class="detail-list">
-              <div>
-                <span>Advertised</span>
-                <strong>{routeList(state.effectiveAdvertisedRoutes)}</strong>
-              </div>
-              <div>
-                <span>Selected</span>
-                <strong>{selectedExitName()}</strong>
-              </div>
-            </div>
           </div>
         </section>
       {:else if tab === 'settings'}

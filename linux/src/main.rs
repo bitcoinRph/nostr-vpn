@@ -1367,7 +1367,10 @@ fn device_detail_card(
         badges.append(&badge("Admin", "muted"));
     }
     if participant.offers_exit_node {
-        badges.append(&badge("Exit", "warn"));
+        badges.append(&badge(
+            exit_node_badge_text(&participant, state),
+            exit_node_badge_style(&participant, state),
+        ));
     }
     match fips_path_kind(&participant) {
         FipsPathKind::Direct => badges.append(&badge("direct connection", "ok")),
@@ -2131,7 +2134,7 @@ fn build_exit_nodes_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) 
     );
 
     let query = app.borrow().drafts.exit_search.to_ascii_lowercase();
-    for participant in exit_node_candidates(&network)
+    let exit_candidates = exit_node_candidates(&network, state)
         .into_iter()
         .filter(|participant| {
             query.is_empty()
@@ -2140,22 +2143,30 @@ fn build_exit_nodes_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) 
                     .contains(&query)
                 || participant.npub.to_ascii_lowercase().contains(&query)
         })
-    {
-        let peer_selected = !state.wireguard_exit_enabled && state.exit_node == participant.npub;
-        route_choice(
-            app,
+        .collect::<Vec<_>>();
+    if exit_candidates.is_empty() {
+        empty_row(
             &exit,
-            &device_name(&participant),
-            if participant.offers_exit_node {
-                non_empty_or(&participant.status_text, "Exit node")
+            if query.is_empty() {
+                "No exit nodes offered"
             } else {
-                "Exit not offered".to_string()
-            }
-            .as_str(),
-            peer_selected,
-            participant.offers_exit_node,
-            ExitChoice::Peer(participant.npub.clone()),
+                "No exit nodes found"
+            },
         );
+    } else {
+        for participant in exit_candidates {
+            let peer_selected =
+                !state.wireguard_exit_enabled && state.exit_node == participant.npub;
+            route_choice(
+                app,
+                &exit,
+                &device_name(&participant),
+                non_empty_or(&participant.status_text, "Exit node").as_str(),
+                peer_selected,
+                true,
+                ExitChoice::Peer(participant.npub.clone()),
+            );
+        }
     }
     page.append(&exit);
 
@@ -3145,7 +3156,10 @@ fn device_row(
         name_row.append(&badge("Admin", "muted"));
     }
     if participant.offers_exit_node {
-        name_row.append(&badge("Exit", "warn"));
+        name_row.append(&badge(
+            exit_node_badge_text(participant, state),
+            exit_node_badge_style(participant, state),
+        ));
     }
     text.append(&name_row);
 
@@ -3691,7 +3705,7 @@ fn device_role_text(participant: &NativeParticipantState, state: &NativeAppState
         roles.push("Admin");
     }
     if participant.offers_exit_node {
-        roles.push("Exit node");
+        roles.push(exit_node_badge_text(participant, state));
     }
     if roles.is_empty() {
         "Member".to_string()
@@ -3770,8 +3784,16 @@ fn fips_path_text(participant: &NativeParticipantState) -> String {
     }
 }
 
-fn exit_node_candidates(network: &NativeNetworkState) -> Vec<NativeParticipantState> {
-    let mut candidates = network.participants.clone();
+fn exit_node_candidates(
+    network: &NativeNetworkState,
+    state: &NativeAppState,
+) -> Vec<NativeParticipantState> {
+    let mut candidates = network
+        .participants
+        .iter()
+        .filter(|participant| participant.offers_exit_node && !is_self(participant, state))
+        .cloned()
+        .collect::<Vec<_>>();
     candidates.sort_by_key(device_name);
     candidates
 }
@@ -3779,6 +3801,35 @@ fn exit_node_candidates(network: &NativeNetworkState) -> Vec<NativeParticipantSt
 fn is_self(participant: &NativeParticipantState, state: &NativeAppState) -> bool {
     (!state.own_npub.is_empty() && participant.npub == state.own_npub)
         || (!state.own_pubkey_hex.is_empty() && participant.pubkey_hex == state.own_pubkey_hex)
+}
+
+fn is_active_exit_participant(
+    participant: &NativeParticipantState,
+    state: &NativeAppState,
+) -> bool {
+    state.exit_node_active && !state.exit_node.is_empty() && participant.npub == state.exit_node
+}
+
+fn exit_node_badge_text(
+    participant: &NativeParticipantState,
+    state: &NativeAppState,
+) -> &'static str {
+    if is_active_exit_participant(participant, state) {
+        "Exit active"
+    } else {
+        "Exit offered"
+    }
+}
+
+fn exit_node_badge_style(
+    participant: &NativeParticipantState,
+    state: &NativeAppState,
+) -> &'static str {
+    if is_active_exit_participant(participant, state) {
+        "ok"
+    } else {
+        "warn"
+    }
 }
 
 fn hero_subtitle(state: &NativeAppState) -> String {

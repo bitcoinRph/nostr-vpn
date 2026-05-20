@@ -570,7 +570,7 @@ struct RootView: View {
                         badge("Admin", style: selected ? .selected : .muted)
                     }
                     if participant.offersExitNode {
-                        badge("Exit", style: selected ? .selected : .warn)
+                        badge(exitNodeBadgeText(participant), style: selected ? .selected : exitNodeBadgeStyle(participant))
                     }
                     if isFipsRouted(participant) {
                         badge("via mesh", style: selected ? .selected : .muted)
@@ -646,7 +646,7 @@ struct RootView: View {
                                 badge("Admin", style: .muted)
                             }
                             if participant.offersExitNode {
-                                badge("Exit", style: .warn)
+                                badge(exitNodeBadgeText(participant), style: exitNodeBadgeStyle(participant))
                             }
                             if isDirectFipsPeer(participant) {
                                 badge("direct connection", style: .ok)
@@ -1118,14 +1118,24 @@ struct RootView: View {
                         manager.selectWireGuardUpstreamExit()
                     }
 
-                    ForEach(exitNodeCandidates(network), id: \.pubkeyHex) { participant in
-                        routeChoice(
-                            title: deviceName(participant),
-                            subtitle: participant.offersExitNode ? participant.statusText : "Exit not offered",
-                            selected: !state.wireguardExitEnabled && state.exitNode == participant.npub,
-                            enabled: participant.offersExitNode
-                        ) {
-                            manager.selectPeerExit(participant.npub)
+                    let peerExitCandidates = exitNodeCandidates(network)
+                    if peerExitCandidates.isEmpty {
+                        emptyRow(
+                            exitNodeSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? "No exit nodes offered"
+                                : "No exit nodes found",
+                            systemImage: "tray"
+                        )
+                    } else {
+                        ForEach(peerExitCandidates, id: \.pubkeyHex) { participant in
+                            routeChoice(
+                                title: deviceName(participant),
+                                subtitle: participant.statusText.isEmpty ? "Exit node" : participant.statusText,
+                                selected: !state.wireguardExitEnabled && state.exitNode == participant.npub,
+                                enabled: true
+                            ) {
+                                manager.selectPeerExit(participant.npub)
+                            }
                         }
                     }
                 }
@@ -1886,6 +1896,18 @@ struct RootView: View {
         return ""
     }
 
+    private func isActiveExitParticipant(_ participant: NativeParticipantState) -> Bool {
+        state.exitNodeActive && !state.exitNode.isEmpty && participant.npub == state.exitNode
+    }
+
+    private func exitNodeBadgeText(_ participant: NativeParticipantState) -> String {
+        isActiveExitParticipant(participant) ? "Exit active" : "Exit offered"
+    }
+
+    private func exitNodeBadgeStyle(_ participant: NativeParticipantState) -> BadgeStyle {
+        isActiveExitParticipant(participant) ? .ok : .warn
+    }
+
     private func deviceRoleText(_ participant: NativeParticipantState) -> String {
         var roles: [String] = []
         if isSelf(participant) {
@@ -1895,7 +1917,7 @@ struct RootView: View {
             roles.append("Admin")
         }
         if participant.offersExitNode {
-            roles.append("Exit node")
+            roles.append(exitNodeBadgeText(participant))
         }
         return roles.isEmpty ? "Member" : roles.joined(separator: ", ")
     }
@@ -1970,7 +1992,7 @@ struct RootView: View {
     private func exitNodeCandidates(_ network: NativeNetworkState) -> [NativeParticipantState] {
         let needle = exitNodeSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return network.participants.filter { participant in
-            if isSelf(participant) {
+            if isSelf(participant) || !participant.offersExitNode {
                 return false
             }
             guard !needle.isEmpty else {

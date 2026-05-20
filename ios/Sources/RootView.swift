@@ -749,6 +749,10 @@ private struct ExitNodesPage: View {
         return endpoint.isEmpty ? "Configured" : endpoint
     }
 
+    private var exitParticipants: [ParticipantState] {
+        network?.participants.filter(\.offersExitNode) ?? []
+    }
+
     // The daemon clears the *other* side automatically when there
     // would otherwise be both a peer exit AND WG upstream enabled
     // (see `settings_patch_enforces_exit_node_mutual_exclusion` in
@@ -795,8 +799,13 @@ private struct ExitNodesPage: View {
                         enabled: model.state.wireguardExitConfigured,
                         action: selectWireGuard
                     )
-                    if let network {
-                        ForEach(network.participants.filter(\.offersExitNode)) { participant in
+                    if exitParticipants.isEmpty {
+                        Text("No exit nodes offered")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        ForEach(exitParticipants) { participant in
                             ExitNodeRow(
                                 title: participant.displayName,
                                 subtitle: participant.npub,
@@ -915,7 +924,10 @@ private struct ParticipantRow: View {
                                 Pill("This device", tint: AppColors.ok)
                             }
                             if participant.offersExitNode {
-                                Pill("Exit", tint: .orange)
+                                Pill(
+                                    exitNodeBadgeText(participant, state: model.state),
+                                    tint: exitNodeBadgeTint(participant, state: model.state)
+                                )
                             }
                             if isFipsRouted(participant, state: model.state) {
                                 Pill("via mesh", tint: .secondary)
@@ -979,7 +991,10 @@ private struct DeviceDetailSheet: View {
                             Pill("This device", tint: AppColors.ok)
                         }
                         if participant.offersExitNode {
-                            Pill("Exit", tint: .orange)
+                            Pill(
+                                exitNodeBadgeText(participant, state: model.state),
+                                tint: exitNodeBadgeTint(participant, state: model.state)
+                            )
                         }
                     }
                 }
@@ -1666,6 +1681,18 @@ private func sortedParticipants(_ participants: [ParticipantState], state: AppSt
 
 private func isSelf(_ participant: ParticipantState, state: AppState) -> Bool {
     (!state.ownNpub.isEmpty && participant.npub == state.ownNpub) || participant.meshState == "local"
+}
+
+private func isActiveExitParticipant(_ participant: ParticipantState, state: AppState) -> Bool {
+    state.exitNodeActive && !state.exitNode.isEmpty && participant.npub == state.exitNode
+}
+
+private func exitNodeBadgeText(_ participant: ParticipantState, state: AppState) -> String {
+    isActiveExitParticipant(participant, state: state) ? "Exit active" : "Exit offered"
+}
+
+private func exitNodeBadgeTint(_ participant: ParticipantState, state: AppState) -> Color {
+    isActiveExitParticipant(participant, state: state) ? AppColors.ok : .orange
 }
 
 private func deviceName(_ participant: ParticipantState, state: AppState) -> String {

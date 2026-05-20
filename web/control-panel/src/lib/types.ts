@@ -44,6 +44,7 @@ export type ParticipantView = {
   rxBytes: number;
   advertisedRoutes: string[];
   offersExitNode: boolean;
+  reachable: boolean;
   fipsEndpointNpub: string;
   fipsTransportAddr: string;
   fipsTransportType: string;
@@ -128,6 +129,7 @@ export type UiState = {
   listenPort: number;
   relays: RelayView[];
   exitNode: string;
+  exitNodeActive: boolean;
   advertiseExitNode: boolean;
   advertisedRoutes: string[];
   effectiveAdvertisedRoutes: string[];

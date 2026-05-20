@@ -825,16 +825,21 @@ private fun androidx.compose.foundation.lazy.LazyListScope.exitNodesPage(
                 },
             )
 
-            network?.participants.orEmpty().filter { it.offersExitNode }.forEach { participant ->
-                ExitNodeRow(
-                    title = participant.magicDnsName.ifBlank { participant.alias },
-                    subtitle = participant.npub,
-                    selected = !state.wireguardExitEnabled && state.exitNode == participant.npub,
-                    enabled = true,
-                    onClick = {
-                        dispatch(NativeActions.updateSettings("exitNode" to participant.npub))
-                    },
-                )
+            val exitParticipants = network?.participants.orEmpty().filter { it.offersExitNode }
+            if (exitParticipants.isEmpty()) {
+                Text("No exit nodes offered", color = Muted, style = MaterialTheme.typography.bodySmall)
+            } else {
+                exitParticipants.forEach { participant ->
+                    ExitNodeRow(
+                        title = participant.magicDnsName.ifBlank { participant.alias },
+                        subtitle = participant.npub,
+                        selected = !state.wireguardExitEnabled && state.exitNode == participant.npub,
+                        enabled = true,
+                        onClick = {
+                            dispatch(NativeActions.updateSettings("exitNode" to participant.npub))
+                        },
+                    )
+                }
             }
         }
     }
