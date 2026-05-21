@@ -104,6 +104,7 @@ internal fun NostrVpnApp(
     dispatch: (JSONObject) -> Unit,
     selfUpdateState: AndroidSelfUpdateState,
     selfUpdateActions: SelfUpdateActions,
+    importWireGuardConfigFile: () -> Unit,
 ) {
     var page by remember { mutableStateOf(Page.Devices) }
     var showAddDevice by remember { mutableStateOf(false) }
@@ -175,7 +176,7 @@ internal fun NostrVpnApp(
                         onAddDevice = { showAddDevice = true },
                         onDeleteNetwork = { pendingNetworkRemoval = network },
                     )
-                    Page.ExitNodes -> exitNodesPage(state, network, dispatch)
+                    Page.ExitNodes -> exitNodesPage(state, network, dispatch, importWireGuardConfigFile)
                     Page.Settings -> settingsPage(state, network, dispatch, selfUpdateState, selfUpdateActions)
                 }
             }
@@ -818,6 +819,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.exitNodesPage(
     state: AppState,
     network: NetworkState?,
     dispatch: (JSONObject) -> Unit,
+    importWireGuardConfigFile: () -> Unit,
 ) {
     item {
         AppCard {
@@ -897,7 +899,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.exitNodesPage(
             }
         }
     }
-    item { WireGuardSettingsCard(state, dispatch) }
+    item { WireGuardSettingsCard(state, dispatch, importWireGuardConfigFile) }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(

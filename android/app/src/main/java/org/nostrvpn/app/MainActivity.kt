@@ -101,16 +101,52 @@ class MainActivity : ComponentActivity() {
                     vpnPermissionLauncher.launch(intent)
                 }
             }
-            fun actionRequiresTunnelRefresh(type: String): Boolean =
-                type == "set_participant_endpoint_hints"
+            fun actionRequiresTunnelRefresh(action: JSONObject): Boolean {
+                val type = action.optString("type")
+                if (type == "set_participant_endpoint_hints") {
+                    return true
+                }
+                if (type != "update_settings") {
+                    return false
+                }
+                val patch = action.optJSONObject("patch") ?: return false
+                val tunnelSettingKeys = listOf(
+                    "listenPort",
+                    "endpoint",
+                    "relays",
+                    "disabledRelays",
+                    "exitNode",
+                    "exitNodeLeakProtection",
+                    "advertiseExitNode",
+                    "advertisedRoutes",
+                    "wireguardExitEnabled",
+                    "wireguardExitInterface",
+                    "wireguardExitAddress",
+                    "wireguardExitPrivateKey",
+                    "wireguardExitPeerPublicKey",
+                    "wireguardExitPeerPresharedKey",
+                    "wireguardExitEndpoint",
+                    "wireguardExitAllowedIps",
+                    "wireguardExitDns",
+                    "wireguardExitMtu",
+                    "wireguardExitPersistentKeepaliveSecs",
+                    "wireguardExitConfig",
+                )
+                return tunnelSettingKeys.any { patch.has(it) }
+            }
 
             fun dispatchNow(action: JSONObject) {
                 val wasEnabled = state.vpnEnabled
-                val actionType = action.optString("type")
+                var actionSucceeded = false
                 try {
-                    applyUserActionState(core.dispatch(action))
+                    val nextState = core.dispatch(action)
+                    actionSucceeded = nextState.error.isBlank()
+                    applyUserActionState(nextState)
                 } catch (error: Exception) {
                     showAndroidError(error, "Android action failed")
+                }
+                if (!actionSucceeded) {
+                    return
                 }
                 if (!wasEnabled && state.vpnEnabled) {
                     requestVpnTunnel()
@@ -119,7 +155,7 @@ class MainActivity : ComponentActivity() {
                         Intent(this, NostrVpnService::class.java)
                             .setAction(NostrVpnService.ACTION_DISCONNECT),
                     )
-                } else if (wasEnabled && state.vpnEnabled && actionRequiresTunnelRefresh(actionType)) {
+                } else if (wasEnabled && state.vpnEnabled && actionRequiresTunnelRefresh(action)) {
                     startVpnTunnel()
                 }
             }
@@ -165,6 +201,40 @@ class MainActivity : ComponentActivity() {
                         }
                 } else {
                     dispatchNow(action)
+                }
+            }
+            val wireGuardConfigFileLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument(),
+            ) { uri ->
+                if (uri == null) {
+                    return@rememberLauncherForActivityResult
+                }
+                runCatching {
+                    contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: error("Could not open selected file")
+                }.onSuccess { config ->
+                    if (config.isBlank()) {
+                        showAndroidError("Selected WireGuard config is empty.")
+                    } else {
+                        dispatch(NativeActions.updateSettings("wireguardExitConfig" to config))
+                    }
+                }.onFailure { error ->
+                    showAndroidError(error, "Could not read WireGuard config")
+                }
+            }
+            fun importWireGuardConfigFile() {
+                androidError = ""
+                runCatching {
+                    wireGuardConfigFileLauncher.launch(
+                        arrayOf(
+                            "application/x-wireguard-profile",
+                            "application/octet-stream",
+                            "text/*",
+                            "*/*",
+                        ),
+                    )
+                }.onFailure { error ->
+                    showAndroidError(error, "Could not open file picker")
                 }
             }
             fun requestQrScan() {
@@ -239,6 +309,7 @@ class MainActivity : ComponentActivity() {
                     dispatch = dispatch,
                     selfUpdateState = selfUpdateState,
                     selfUpdateActions = updateActions,
+                    importWireGuardConfigFile = { importWireGuardConfigFile() },
                 )
                 if (showQrScanner) {
                     QrScannerDialog(

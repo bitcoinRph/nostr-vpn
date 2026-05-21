@@ -521,7 +521,11 @@ internal fun ExitNodeRow(
 }
 
 @Composable
-internal fun WireGuardSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit) {
+internal fun WireGuardSettingsCard(
+    state: AppState,
+    dispatch: (JSONObject) -> Unit,
+    importConfigFile: () -> Unit,
+) {
     var config by remember(state.wireguardExitConfig) { mutableStateOf(state.wireguardExitConfig) }
 
     AppCard {
@@ -547,14 +551,19 @@ internal fun WireGuardSettingsCard(state: AppState, dispatch: (JSONObject) -> Un
             minLines = 8,
             label = { Text("Config") },
         )
-        Button(onClick = {
-            dispatch(
-                NativeActions.updateSettings(
-                    "wireguardExitConfig" to config,
-                ),
-            )
-        }) {
-            Text("Save")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                dispatch(
+                    NativeActions.updateSettings(
+                        "wireguardExitConfig" to config,
+                    ),
+                )
+            }) {
+                Text("Save")
+            }
+            OutlinedButton(onClick = importConfigFile) {
+                Text("Import file")
+            }
         }
     }
 }
