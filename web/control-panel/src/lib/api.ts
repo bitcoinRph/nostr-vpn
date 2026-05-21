@@ -1,5 +1,10 @@
 import type { UiState } from './types';
 
+export type QrMatrix = {
+  width: number;
+  cells: boolean[];
+};
+
 const rawApiBase = import.meta.env.VITE_NVPN_API_BASE ?? '';
 const apiBase = rawApiBase.replace(/\/+$/, '');
 
@@ -41,4 +46,8 @@ export function tick(): Promise<UiState> {
 
 export function runAction(endpoint: string, payload?: unknown): Promise<UiState> {
   return postJson<UiState>(endpoint, payload);
+}
+
+export function qrMatrix(text: string): Promise<QrMatrix> {
+  return postJson<QrMatrix>('/api/qr_matrix', { text });
 }
