@@ -2984,6 +2984,163 @@ mod tests {
     }
 
     #[test]
+    fn inactive_saved_network_actions_are_real_config_mutations() {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-saved-network-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+
+        let peer = Keys::generate();
+        let peer_hex = peer.public_key().to_hex();
+        let peer_npub = peer.public_key().to_bech32().expect("peer npub");
+        let admin_one = Keys::generate();
+        let admin_one_hex = admin_one.public_key().to_hex();
+        let admin_one_npub = admin_one.public_key().to_bech32().expect("admin one npub");
+        let admin_two = Keys::generate();
+        let admin_two_hex = admin_two.public_key().to_hex();
+        let admin_two_npub = admin_two.public_key().to_bech32().expect("admin two npub");
+
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        runtime.last_error.clear();
+        runtime.mobile_runtime = true;
+        runtime.config_path = dir.join("config.toml");
+
+        let active_id = create_test_network(&mut runtime, "Home");
+        let saved_id = create_test_network(&mut runtime, "Work");
+        assert!(
+            runtime
+                .config
+                .network_by_id(&active_id)
+                .expect("active network")
+                .enabled
+        );
+        assert!(
+            !runtime
+                .config
+                .network_by_id(&saved_id)
+                .expect("saved network")
+                .enabled
+        );
+        let old_invite_secret = runtime
+            .config
+            .network_by_id(&saved_id)
+            .expect("saved network")
+            .invite_secret
+            .clone();
+
+        runtime.dispatch(NativeAppAction::RenameNetwork {
+            network_id: saved_id.clone(),
+            name: "Office".to_string(),
+        });
+        runtime.dispatch(NativeAppAction::SetNetworkMeshId {
+            network_id: saved_id.clone(),
+            mesh_id: "ABCD-1234-EF56".to_string(),
+        });
+        runtime.dispatch(NativeAppAction::SetNetworkJoinRequestsEnabled {
+            network_id: saved_id.clone(),
+            enabled: true,
+        });
+        runtime.dispatch(NativeAppAction::ResetNetworkInvite {
+            network_id: saved_id.clone(),
+        });
+        runtime.dispatch(NativeAppAction::AddParticipant {
+            network_id: saved_id.clone(),
+            npub: peer_npub.clone(),
+            alias: Some("Desk Peer".to_string()),
+        });
+        runtime.dispatch(NativeAppAction::AddAdmin {
+            network_id: saved_id.clone(),
+            npub: admin_one_npub.clone(),
+        });
+        runtime.dispatch(NativeAppAction::AddAdmin {
+            network_id: saved_id.clone(),
+            npub: admin_two_npub.clone(),
+        });
+        runtime.dispatch(NativeAppAction::SetParticipantAlias {
+            npub: peer_npub.clone(),
+            alias: "Renamed Peer".to_string(),
+        });
+
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        let state = runtime.state();
+        let saved_state = state
+            .networks
+            .iter()
+            .find(|network| network.id == saved_id)
+            .expect("saved network state");
+        assert!(!saved_state.enabled);
+        assert_eq!(saved_state.name, "Office");
+        assert_eq!(saved_state.network_id, "abcd1234ef56");
+        assert!(saved_state.join_requests_enabled);
+        let peer_state = saved_state
+            .participants
+            .iter()
+            .find(|participant| participant.pubkey_hex == peer_hex)
+            .expect("peer participant state");
+        assert_eq!(peer_state.magic_dns_alias, "renamed-peer");
+
+        let saved_config = runtime
+            .config
+            .network_by_id(&saved_id)
+            .expect("saved network config");
+        assert_eq!(saved_config.name, "Office");
+        assert_eq!(saved_config.network_id, "abcd1234ef56");
+        assert!(saved_config.listen_for_join_requests);
+        assert_ne!(saved_config.invite_secret, old_invite_secret);
+        assert!(saved_config.participants.contains(&peer_hex));
+        assert!(saved_config.admins.contains(&admin_one_hex));
+        assert!(saved_config.admins.contains(&admin_two_hex));
+        assert_eq!(
+            runtime.config.peer_alias(&peer_hex).as_deref(),
+            Some("renamed-peer")
+        );
+
+        runtime.dispatch(NativeAppAction::RemoveAdmin {
+            network_id: saved_id.clone(),
+            npub: admin_one_npub,
+        });
+        runtime.dispatch(NativeAppAction::RemoveParticipant {
+            network_id: saved_id.clone(),
+            npub: peer_npub,
+        });
+        runtime.dispatch(NativeAppAction::SetNetworkEnabled {
+            network_id: saved_id.clone(),
+            enabled: true,
+        });
+
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        let saved_config = runtime
+            .config
+            .network_by_id(&saved_id)
+            .expect("saved network config");
+        assert!(saved_config.enabled);
+        assert!(!saved_config.participants.contains(&peer_hex));
+        assert!(!saved_config.admins.contains(&admin_one_hex));
+        assert!(saved_config.admins.contains(&admin_two_hex));
+        assert!(
+            !runtime
+                .config
+                .network_by_id(&active_id)
+                .expect("previously active network")
+                .enabled
+        );
+
+        let persisted = AppConfig::load(&runtime.config_path).expect("load persisted config");
+        let persisted_saved = persisted
+            .network_by_id(&saved_id)
+            .expect("persisted saved network");
+        assert!(persisted_saved.enabled);
+        assert_eq!(persisted_saved.name, "Office");
+        assert_eq!(persisted_saved.network_id, "abcd1234ef56");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn connect_vpn_requires_created_or_joined_network() {
         let error = anyhow!("boom");
         let mut runtime = NativeAppRuntime::from_startup_error(&error);

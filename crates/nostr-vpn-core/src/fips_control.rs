@@ -294,7 +294,26 @@ pub fn peer_endpoint_hint_addr(hint: &PeerEndpointHint) -> Option<String> {
     {
         return None;
     }
+    if host.parse::<IpAddr>().is_err() && !endpoint_hint_host_is_valid(host) {
+        return None;
+    }
     Some(format!("{host}:{port}"))
+}
+
+fn endpoint_hint_host_is_valid(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    if host.is_empty() || host.len() > 253 {
+        return false;
+    }
+    host.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    })
 }
 
 fn endpoint_hint_ip_is_unusable(ip: IpAddr) -> bool {
@@ -485,6 +504,10 @@ mod tests {
         );
         assert_eq!(
             peer_endpoint_hint_addr(&PeerEndpointHint::udp("localhost:51820")),
+            None
+        );
+        assert_eq!(
+            peer_endpoint_hint_addr(&PeerEndpointHint::udp("not an endpoint:51820")),
             None
         );
         assert_eq!(
