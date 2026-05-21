@@ -1397,12 +1397,21 @@ struct RootView: View {
                         .stroke(Color(nsColor: .separatorColor))
                 )
 
-            Button {
-                manager.saveWireGuardExitConfig(wireguardExitConfig)
-            } label: {
-                Label("Save", systemImage: "checkmark")
+            HStack {
+                Button {
+                    manager.chooseWireGuardConfigFile()
+                } label: {
+                    Label("Import File", systemImage: "doc.badge.plus")
+                }
+                .disabled(manager.actionInFlight)
+
+                Button {
+                    manager.saveWireGuardExitConfig(wireguardExitConfig)
+                } label: {
+                    Label("Save", systemImage: "checkmark")
+                }
+                .disabled(manager.actionInFlight)
             }
-            .disabled(manager.actionInFlight)
         }
     }
 

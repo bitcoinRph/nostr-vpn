@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -99,6 +100,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         SaveNodeCommand = new AsyncRelayCommand(_ => SaveNodeAsync(), _ => !ActionInFlight);
         AddRelayCommand = new AsyncRelayCommand(_ => AddRelayAsync(), _ => !ActionInFlight && !string.IsNullOrWhiteSpace(RelayInput));
         SaveRelaysCommand = new AsyncRelayCommand(_ => SaveRelaysAsync(), _ => !ActionInFlight);
+        ImportWireGuardExitCommand = new AsyncRelayCommand(_ => ImportWireGuardExitAsync(), _ => !ActionInFlight);
         SaveWireGuardExitCommand = new AsyncRelayCommand(_ => SaveWireGuardExitAsync(), _ => !ActionInFlight);
         CreateNetworkCommand = new AsyncRelayCommand(_ => CreateNetworkAsync(), _ => !ActionInFlight);
         AddNetworkCommand = new AsyncRelayCommand(_ => AddNetworkAsync(), _ => !ActionInFlight && !string.IsNullOrWhiteSpace(NetworkNameInput));
@@ -604,6 +606,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public ICommand SaveNodeCommand { get; }
     public ICommand AddRelayCommand { get; }
     public ICommand SaveRelaysCommand { get; }
+    public ICommand ImportWireGuardExitCommand { get; }
     public ICommand SaveWireGuardExitCommand { get; }
     public ICommand CreateNetworkCommand { get; }
     public ICommand AddNetworkCommand { get; }
@@ -1067,6 +1070,34 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
         await ImportInviteAsync(result.Value);
+    }
+
+    private async Task ImportWireGuardExitAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "WireGuard configs|*.conf;*.txt|All files|*.*",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+        try
+        {
+            var config = await File.ReadAllTextAsync(dialog.FileName);
+            if (string.IsNullOrWhiteSpace(config))
+            {
+                Notice = "Selected WireGuard config is empty.";
+                return;
+            }
+            WireguardExitConfig = config;
+            await SaveWireGuardExitAsync();
+        }
+        catch (Exception error)
+        {
+            Notice = $"Could not read WireGuard config: {error.Message}";
+        }
     }
 
     private Task AddParticipantAsync()

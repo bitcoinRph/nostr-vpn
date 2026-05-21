@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct RootView: View {
     @ObservedObject var model: AppModel
@@ -1501,6 +1502,7 @@ private struct RelaySettingsCard: View {
 private struct WireGuardSettingsCard: View {
     @ObservedObject var model: AppModel
     @State private var config = ""
+    @State private var importingConfig = false
 
     var body: some View {
         AppCard {
@@ -1524,11 +1526,26 @@ private struct WireGuardSettingsCard: View {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.secondary.opacity(0.25))
                 )
-            Button("Save") {
-                model.dispatch(NativeActions.updateSettings(["wireguardExitConfig": config]), status: "Saving")
+            HStack {
+                Button("Import File") {
+                    importingConfig = true
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.actionInFlight)
+
+                Button("Save") {
+                    model.dispatch(NativeActions.updateSettings(["wireguardExitConfig": config]), status: "Saving")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.actionInFlight)
             }
-            .buttonStyle(.borderedProminent)
         }
+        .fileImporter(
+            isPresented: $importingConfig,
+            allowedContentTypes: [.plainText, .data, .item],
+            allowsMultipleSelection: false,
+            onCompletion: importConfigFile
+        )
         .onAppear(perform: sync)
         .onChange(of: model.state.rev) { _, _ in
             sync()
@@ -1537,6 +1554,32 @@ private struct WireGuardSettingsCard: View {
 
     private func sync() {
         config = model.state.wireguardExitConfig
+    }
+
+    private func importConfigFile(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else {
+                return
+            }
+            let didStartAccess = url.startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccess {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            let imported = try String(contentsOf: url, encoding: .utf8)
+            guard !imported.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                model.statusMessage = "Selected WireGuard config is empty."
+                return
+            }
+            config = imported
+            model.dispatch(
+                NativeActions.updateSettings(["wireguardExitConfig": imported]),
+                status: "Importing"
+            )
+        } catch {
+            model.statusMessage = error.localizedDescription
+        }
     }
 }
 

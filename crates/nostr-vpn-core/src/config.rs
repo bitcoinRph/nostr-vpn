@@ -9,6 +9,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use nostr_sdk::prelude::{Keys, ToBech32};
 
 pub use crate::config_magic_dns::{
@@ -371,6 +372,11 @@ pub fn parse_wireguard_exit_config(raw: &str) -> Result<WireGuardExitConfig> {
     if config.endpoint.trim().is_empty() {
         return Err(anyhow!("WireGuard peer is missing Endpoint"));
     }
+    validate_wireguard_key(&config.private_key, "PrivateKey")?;
+    validate_wireguard_key(&config.peer_public_key, "PublicKey")?;
+    if !config.peer_preshared_key.trim().is_empty() {
+        validate_wireguard_key(&config.peer_preshared_key, "PresharedKey")?;
+    }
     Ok(config)
 }
 
@@ -504,6 +510,16 @@ fn parse_wireguard_u16(value: &str, field: &str, line_no: usize) -> Result<u16> 
         .trim()
         .parse::<u16>()
         .with_context(|| format!("invalid WireGuard {field} '{value}' at line {line_no}"))
+}
+
+fn validate_wireguard_key(value: &str, field: &str) -> Result<()> {
+    let raw = STANDARD
+        .decode(value.trim())
+        .with_context(|| format!("WireGuard {field} is not valid base64"))?;
+    if raw.len() != 32 {
+        return Err(anyhow!("WireGuard {field} must decode to exactly 32 bytes"));
+    }
+    Ok(())
 }
 
 fn default_wireguard_exit_interface() -> String {
@@ -2195,6 +2211,11 @@ mod tests {
         AppConfig, normalize_nostr_pubkey, parse_wireguard_exit_config, wireguard_exit_config_text,
     };
     use crate::config_defaults::generate_nostr_identity;
+
+    const TEST_WG_PRIVATE_KEY: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+    const TEST_WG_PUBLIC_KEY: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
+    const TEST_WG_PRESHARED_KEY: &str = "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=";
+
     #[test]
     fn ensure_defaults_keeps_existing_public_identity_without_parsing_secret_key() {
         let (_, public_key) = generate_nostr_identity();
@@ -2247,14 +2268,14 @@ mod tests {
             r#"
             # Provider export
             [Interface]
-            PrivateKey = client-private
+            PrivateKey = AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
             Address = 10.64.70.195/32, fc00:bbbb:bbbb:bb01::1:46c2/128
             DNS = 10.64.0.1, 1.1.1.1
             MTU = 1380
 
             [Peer]
-            PublicKey = provider-public
-            PresharedKey = optional-psk
+            PublicKey = AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=
+            PresharedKey = AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=
             AllowedIPs = 0.0.0.0/0, ::/0
             Endpoint = vpn.example.test:51820
             PersistentKeepalive = 20
@@ -2263,9 +2284,9 @@ mod tests {
         .expect("provider config parses");
 
         assert_eq!(imported.address, "10.64.70.195/32");
-        assert_eq!(imported.private_key, "client-private");
-        assert_eq!(imported.peer_public_key, "provider-public");
-        assert_eq!(imported.peer_preshared_key, "optional-psk");
+        assert_eq!(imported.private_key, TEST_WG_PRIVATE_KEY);
+        assert_eq!(imported.peer_public_key, TEST_WG_PUBLIC_KEY);
+        assert_eq!(imported.peer_preshared_key, TEST_WG_PRESHARED_KEY);
         assert_eq!(imported.endpoint, "vpn.example.test:51820");
         assert_eq!(imported.allowed_ips, vec!["0.0.0.0/0", "::/0"]);
         assert_eq!(imported.dns, vec!["1.1.1.1", "10.64.0.1"]);
@@ -2279,12 +2300,12 @@ mod tests {
         let error = parse_wireguard_exit_config(
             r#"
             [Interface]
-            PrivateKey = client-private
+            PrivateKey = AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
             Address = 10.64.70.195/32
             PostUp = echo unsafe
 
             [Peer]
-            PublicKey = provider-public
+            PublicKey = AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=
             AllowedIPs = 0.0.0.0/0
             Endpoint = vpn.example.test:51820
             "#,
@@ -2293,6 +2314,26 @@ mod tests {
         .to_string();
 
         assert!(error.contains("hook directive"), "{error}");
+    }
+
+    #[test]
+    fn wireguard_exit_import_rejects_invalid_key_material() {
+        let error = parse_wireguard_exit_config(
+            r#"
+            [Interface]
+            PrivateKey = not-a-wireguard-key
+            Address = 10.64.70.195/32
+
+            [Peer]
+            PublicKey = AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=
+            AllowedIPs = 0.0.0.0/0
+            Endpoint = vpn.example.test:51820
+            "#,
+        )
+        .expect_err("bad keys are rejected")
+        .to_string();
+
+        assert!(error.contains("PrivateKey"), "{error}");
     }
 
     #[test]

@@ -645,7 +645,10 @@
                 <TextBlock Text="WireGuard Upstream" FontSize="18" FontWeight="SemiBold" Margin="0,16,0,10" />
                 <TextBlock Text="Paste a WireGuard config from an upstream VPN provider such as Mullvad or Proton VPN." Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,10" />
                 <TextBox Text="{Binding WireguardExitConfig, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" MinHeight="180" />
-                <Button Content="Save WireGuard" Command="{Binding SaveWireGuardExitCommand}" HorizontalAlignment="Left" Margin="0,12,0,0" />
+                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                  <Button Content="Import File" Command="{Binding ImportWireGuardExitCommand}" Margin="0,0,8,0" />
+                  <Button Content="Save WireGuard" Command="{Binding SaveWireGuardExitCommand}" />
+                </StackPanel>
               </StackPanel>
             </Border>
           </StackPanel>

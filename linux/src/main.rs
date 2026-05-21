@@ -3049,6 +3049,44 @@ fn save_wireguard_exit_settings(app: &AppRef) {
     );
 }
 
+fn import_wireguard_exit_config_file(app: &AppRef, button: &gtk::Button) {
+    let parent = button
+        .root()
+        .and_then(|root| root.downcast::<gtk::Window>().ok());
+    let dialog = gtk::FileDialog::builder()
+        .title("Import WireGuard config")
+        .accept_label("Import")
+        .build();
+    let app = app.clone();
+    dialog.open(parent.as_ref(), gio::Cancellable::NONE, move |result| {
+        let Ok(file) = result else {
+            return;
+        };
+        let Some(path) = file.path() else {
+            set_notice(&app, "Could not open config file");
+            return;
+        };
+        match std::fs::read_to_string(&path) {
+            Ok(config) if config.trim().is_empty() => {
+                set_notice(&app, "Selected WireGuard config is empty.");
+            }
+            Ok(config) => {
+                app.borrow_mut().drafts.wireguard_exit_config = config.clone();
+                dispatch(
+                    &app,
+                    NativeAppAction::UpdateSettings {
+                        patch: SettingsPatch {
+                            wireguard_exit_config: Some(config),
+                            ..SettingsPatch::default()
+                        },
+                    },
+                );
+            }
+            Err(error) => set_notice(&app, format!("Could not read config file: {error}")),
+        }
+    });
+}
+
 fn build_wireguard_settings_card(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     let card = card();
     section_header(&card, "WireGuard Upstream", "");
@@ -3092,13 +3130,23 @@ fn build_wireguard_settings_card(app: &AppRef, page: &gtk::Box, state: &NativeAp
     scroller.set_child(Some(&config));
     card.append(&scroller);
 
+    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    actions.set_halign(gtk::Align::Start);
+
+    let import_wg = icon_text_button("Import File", "document-open-symbolic");
+    {
+        let app = app.clone();
+        import_wg.connect_clicked(move |button| import_wireguard_exit_config_file(&app, button));
+    }
+    actions.append(&import_wg);
+
     let save_wg = icon_text_button("Save WireGuard", "");
-    save_wg.set_halign(gtk::Align::Start);
     {
         let app = app.clone();
         save_wg.connect_clicked(move |_| save_wireguard_exit_settings(&app));
     }
-    card.append(&save_wg);
+    actions.append(&save_wg);
+    card.append(&actions);
     page.append(&card);
 }
 

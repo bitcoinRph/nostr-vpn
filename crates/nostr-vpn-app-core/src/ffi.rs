@@ -1270,6 +1270,12 @@ impl NativeAppRuntime {
     }
 
     fn apply_settings_patch(&mut self, patch: SettingsPatch) -> Result<()> {
+        let parsed_wireguard_exit_config = patch
+            .wireguard_exit_config
+            .as_deref()
+            .map(parse_wireguard_exit_config)
+            .transpose()?;
+
         if let Some(value) = patch.node_name {
             self.config.node_name = value.trim().to_string();
         }
@@ -1359,9 +1365,8 @@ impl NativeAppRuntime {
         if let Some(value) = patch.wireguard_exit_persistent_keepalive_secs {
             self.config.wireguard_exit.persistent_keepalive_secs = value;
         }
-        if let Some(value) = patch.wireguard_exit_config {
+        if let Some(mut parsed) = parsed_wireguard_exit_config {
             let enabled = self.config.wireguard_exit.enabled;
-            let mut parsed = parse_wireguard_exit_config(&value)?;
             parsed.enabled = enabled;
             self.config.wireguard_exit = parsed;
         }
@@ -2744,6 +2749,9 @@ fn applescript_quote(value: &str) -> String {
 mod tests {
     use super::*;
     use nostr_sdk::prelude::{Keys, ToBech32};
+
+    const TEST_WG_PRIVATE_KEY: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+    const TEST_WG_PUBLIC_KEY: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
 
     fn create_test_network(runtime: &mut NativeAppRuntime, name: &str) -> String {
         runtime.config.add_network(name)
@@ -4378,22 +4386,21 @@ exit 0
 
         runtime.dispatch(NativeAppAction::UpdateSettings {
             patch: SettingsPatch {
-                wireguard_exit_config: Some(
+                wireguard_exit_config: Some(format!(
                     r"
                     [Interface]
-                    PrivateKey = client-private
+                    PrivateKey = {TEST_WG_PRIVATE_KEY}
                     Address = 10.64.70.195/32
                     DNS = 10.64.0.1
                     MTU = 1380
 
                     [Peer]
-                    PublicKey = provider-public
+                    PublicKey = {TEST_WG_PUBLIC_KEY}
                     AllowedIPs = 0.0.0.0/0
                     Endpoint = vpn.example.test:51820
                     PersistentKeepalive = 20
                     "
-                    .to_string(),
-                ),
+                )),
                 ..SettingsPatch::default()
             },
         });
@@ -4402,8 +4409,8 @@ exit 0
         let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
         assert!(saved.wireguard_exit.enabled);
         assert_eq!(saved.wireguard_exit.address, "10.64.70.195/32");
-        assert_eq!(saved.wireguard_exit.private_key, "client-private");
-        assert_eq!(saved.wireguard_exit.peer_public_key, "provider-public");
+        assert_eq!(saved.wireguard_exit.private_key, TEST_WG_PRIVATE_KEY);
+        assert_eq!(saved.wireguard_exit.peer_public_key, TEST_WG_PUBLIC_KEY);
         assert_eq!(saved.wireguard_exit.endpoint, "vpn.example.test:51820");
         assert_eq!(saved.wireguard_exit.mtu, 1380);
         assert_eq!(saved.wireguard_exit.persistent_keepalive_secs, 20);
@@ -4414,6 +4421,81 @@ exit 0
                 .wireguard_exit_config
                 .contains("Endpoint = vpn.example.test:51820")
         );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn settings_patch_rejects_bad_wireguard_exit_config_without_replacing_saved_config() {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-wireguard-bad-import-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        runtime.mobile_runtime = true;
+        runtime.config_path = dir.join("config.toml");
+        runtime.config.wireguard_exit.enabled = true;
+
+        runtime.dispatch(NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                wireguard_exit_config: Some(format!(
+                    r"
+                    [Interface]
+                    PrivateKey = {TEST_WG_PRIVATE_KEY}
+                    Address = 10.64.70.195/32
+
+                    [Peer]
+                    PublicKey = {TEST_WG_PUBLIC_KEY}
+                    AllowedIPs = 0.0.0.0/0
+                    Endpoint = vpn.example.test:51820
+                    "
+                )),
+                ..SettingsPatch::default()
+            },
+        });
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        let saved_before = AppConfig::load(&runtime.config_path).expect("load saved config");
+
+        runtime.dispatch(NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                wireguard_exit_enabled: Some(false),
+                wireguard_exit_config: Some(
+                    r"
+                    [Interface]
+                    PrivateKey = not-a-wireguard-key
+                    Address = 10.64.70.200/32
+
+                    [Peer]
+                    PublicKey = also-bad
+                    AllowedIPs = 0.0.0.0/0
+                    Endpoint = bad.example.test:51820
+                    "
+                    .to_string(),
+                ),
+                ..SettingsPatch::default()
+            },
+        });
+
+        assert!(
+            runtime.last_error.contains("PrivateKey"),
+            "{}",
+            runtime.last_error
+        );
+        let state = runtime.state();
+        assert!(state.error.contains("PrivateKey"), "{}", state.error);
+        assert!(runtime.config.wireguard_exit.enabled);
+        assert_eq!(runtime.config.wireguard_exit.address, "10.64.70.195/32");
+        assert_eq!(
+            runtime.config.wireguard_exit.endpoint,
+            "vpn.example.test:51820"
+        );
+        let saved_after = AppConfig::load(&runtime.config_path).expect("load saved config");
+        assert_eq!(saved_before.wireguard_exit, saved_after.wireguard_exit);
 
         let _ = fs::remove_dir_all(&dir);
     }

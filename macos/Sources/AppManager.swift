@@ -322,6 +322,40 @@ final class AppManager: ObservableObject {
         }
     }
 
+    func chooseWireGuardConfigFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.plainText, .data, .item]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else {
+                return
+            }
+            Task { @MainActor in
+                self?.importWireGuardConfigFile(url)
+            }
+        }
+    }
+
+    func importWireGuardConfigFile(_ url: URL) {
+        do {
+            let didStartAccess = url.startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccess {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            let config = try String(contentsOf: url, encoding: .utf8)
+            guard !config.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                actionStatus = "Selected WireGuard config is empty."
+                return
+            }
+            saveWireGuardExitConfig(config)
+        } catch {
+            actionStatus = error.localizedDescription
+        }
+    }
+
     func saveNodeSettings(
         nodeName: String,
         endpoint: String,

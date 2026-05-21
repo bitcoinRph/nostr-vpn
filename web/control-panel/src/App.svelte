@@ -54,6 +54,7 @@
   let meshIdDrafts: Record<string, string> = {};
   let wireguardExitConfigDraft = '';
   let wireguardDirty = false;
+  let wireguardConfigFileInput: HTMLInputElement | null = null;
   let noticeTimer: number | undefined;
 
   let settingsDraft = {
@@ -835,6 +836,28 @@
     if (ok && state) {
       wireguardDirty = false;
       syncWireGuard(state);
+    }
+  }
+
+  async function importWireGuardExitConfigFile(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const config = await file.text();
+      if (!config.trim()) {
+        error = 'Selected WireGuard config is empty.';
+        return;
+      }
+      wireguardExitConfigDraft = config;
+      wireguardDirty = true;
+      await saveWireGuardExitConfig();
+    } catch (err) {
+      error = messageOf(err);
+    } finally {
+      input.value = '';
     }
   }
 
@@ -1643,6 +1666,21 @@
                 ></textarea>
               </label>
               <div class="button-row">
+                <input
+                  bind:this={wireguardConfigFileInput}
+                  type="file"
+                  accept=".conf,.txt,text/*,application/octet-stream,*/*"
+                  hidden
+                  on:change={importWireGuardExitConfigFile}
+                />
+                <button
+                  type="button"
+                  class="secondary-button"
+                  disabled={Boolean(busyAction)}
+                  on:click={() => wireguardConfigFileInput?.click()}
+                >
+                  Import file
+                </button>
                 <button type="submit" class="secondary-button" disabled={Boolean(busyAction)}>
                   Save
                 </button>
