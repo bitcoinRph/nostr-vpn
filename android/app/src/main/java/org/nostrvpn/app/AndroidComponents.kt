@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 import org.nostrvpn.app.core.AppState
@@ -574,13 +575,18 @@ internal fun DiagnosticsCard(state: AppState) {
 }
 
 @Composable
-internal fun QrCode(invite: String, qrJson: (String) -> JSONObject) {
+internal fun QrCode(
+    invite: String,
+    qrJson: (String) -> JSONObject,
+    modifier: Modifier = Modifier,
+    side: Dp = 132.dp,
+) {
     val qr = remember(invite) { qrJson(invite) }
     val width = qr.optInt("width")
     val cells = qr.optJSONArray("cells")
     Canvas(
-        modifier = Modifier
-            .size(132.dp)
+        modifier = modifier
+            .size(side)
             .clip(RoundedCornerShape(8.dp))
             .background(Color.White),
     ) {

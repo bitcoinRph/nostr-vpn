@@ -972,7 +972,7 @@
           <div class="modal-section invite-section">
             <div class="qr-frame compact">
               {#if qrInvite}
-                <QRCode data={qrInvite} />
+                <QRCode data={qrInvite} size={320} />
               {:else}
                 <div class="qr-empty">QR</div>
               {/if}

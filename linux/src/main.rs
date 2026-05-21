@@ -1867,7 +1867,7 @@ fn build_share_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     let invite = card();
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 18);
     row.set_valign(gtk::Align::Start);
-    row.append(&qr::build(&state.active_network_invite, 150));
+    row.append(&qr::build(&state.active_network_invite, 260));
 
     let column = gtk::Box::new(gtk::Orientation::Vertical, 12);
     column.set_hexpand(true);

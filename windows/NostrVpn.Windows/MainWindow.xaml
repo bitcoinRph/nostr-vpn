@@ -462,10 +462,18 @@
             <Border Style="{StaticResource Card}" Visibility="{Binding ShowActiveNetworkInviteCard, Converter={StaticResource BoolToVisibility}}">
               <Grid>
                 <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="170" />
+                  <ColumnDefinition Width="*" MinWidth="220" MaxWidth="300" />
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <controls:QrCodeView Width="150" Height="150" Matrix="{Binding InviteQr}" />
+                <Viewbox Grid.Column="0"
+                         Stretch="Uniform"
+                         StretchDirection="DownOnly"
+                         MaxWidth="300"
+                         MaxHeight="300"
+                         HorizontalAlignment="Stretch"
+                         VerticalAlignment="Top">
+                  <controls:QrCodeView Width="300" Height="300" Matrix="{Binding InviteQr}" />
+                </Viewbox>
                 <StackPanel Grid.Column="1" Margin="18,0,0,0">
                   <TextBlock Text="Invite to my network" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
                   <TextBlock Text="Share this code with another device to give it access to your network." Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,0,0,8" TextWrapping="Wrap" />

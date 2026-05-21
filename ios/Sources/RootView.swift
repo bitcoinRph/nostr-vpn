@@ -672,69 +672,102 @@ private struct InviteToMyNetworkCard: View {
 
     var body: some View {
         AppCard {
-            HStack(alignment: .top, spacing: 16) {
-                QrCodeView(matrix: model.qrMatrix(for: model.state.activeNetworkInvite))
-                    .frame(width: 136, height: 136)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    QrCodeView(matrix: model.qrMatrix(for: model.state.activeNetworkInvite))
+                        .frame(width: 300, height: 300)
+                    inviteControls
+                }
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Invite to my network")
-                        .font(.headline)
-                    Text("Share this code with another device to give it access to your network.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Button {
-                            model.copy(model.state.activeNetworkInvite)
-                        } label: {
-                            Label("Copy Link", systemImage: model.copiedValue == model.state.activeNetworkInvite ? "checkmark" : "doc.on.doc")
-                        }
-                        .disabled(model.state.activeNetworkInvite.isEmpty)
-                        Button(role: .destructive) {
-                            model.dispatch(
-                                NativeActions.resetNetworkInvite(networkId: network.id),
-                                status: "Resetting invite"
-                            )
-                        } label: {
-                            Label("Reset", systemImage: "arrow.clockwise")
-                        }
-                        .disabled(!network.localIsAdmin || model.actionInFlight)
-                    }
-                    if let inviteUrl = URL(string: model.state.activeNetworkInvite) {
-                        ShareLink(item: inviteUrl) {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                        }
-                    } else if !model.state.activeNetworkInvite.isEmpty {
-                        ShareLink(item: model.state.activeNetworkInvite) {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                        }
-                    }
-                    Toggle("Allow join requests", isOn: Binding(
-                        get: { network.joinRequestsEnabled },
-                        set: { enabled in
-                            model.dispatch(
-                                NativeActions.setJoinRequests(networkId: network.id, enabled: enabled),
-                                status: "Saving join request setting"
-                            )
-                        }
-                    ))
-                    .disabled(!network.localIsAdmin || model.actionInFlight)
-                    Button {
-                        if model.state.inviteBroadcastActive {
-                            model.dispatch(NativeActions.stopInviteBroadcast(), status: "Stopped nearby sharing")
-                        } else {
-                            model.dispatch(NativeActions.startInviteBroadcast(), status: "Sharing nearby")
-                        }
-                    } label: {
-                        Label(
-                            model.state.inviteBroadcastActive
-                                ? "Sharing nearby · \(formatRemaining(model.state.inviteBroadcastRemainingSecs))"
-                                : "Share invite nearby",
-                            systemImage: model.state.inviteBroadcastActive ? "stop.circle" : "dot.radiowaves.left.and.right"
-                        )
-                    }
-                    .buttonStyle(.bordered)
+                    QrCodeView(matrix: model.qrMatrix(for: model.state.activeNetworkInvite))
+                        .frame(width: 320, height: 320)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    inviteControls
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    QrCodeView(matrix: model.qrMatrix(for: model.state.activeNetworkInvite))
+                        .frame(width: 288, height: 288)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    inviteControls
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var inviteControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Invite to my network")
+                .font(.headline)
+            Text("Share this code with another device to give it access to your network.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    inviteCopyButton
+                    inviteResetButton
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    inviteCopyButton
+                    inviteResetButton
+                }
+            }
+            if let inviteUrl = URL(string: model.state.activeNetworkInvite) {
+                ShareLink(item: inviteUrl) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+            } else if !model.state.activeNetworkInvite.isEmpty {
+                ShareLink(item: model.state.activeNetworkInvite) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+            }
+            Toggle("Allow join requests", isOn: Binding(
+                get: { network.joinRequestsEnabled },
+                set: { enabled in
+                    model.dispatch(
+                        NativeActions.setJoinRequests(networkId: network.id, enabled: enabled),
+                        status: "Saving join request setting"
+                    )
+                }
+            ))
+            .disabled(!network.localIsAdmin || model.actionInFlight)
+            Button {
+                if model.state.inviteBroadcastActive {
+                    model.dispatch(NativeActions.stopInviteBroadcast(), status: "Stopped nearby sharing")
+                } else {
+                    model.dispatch(NativeActions.startInviteBroadcast(), status: "Sharing nearby")
+                }
+            } label: {
+                Label(
+                    model.state.inviteBroadcastActive
+                        ? "Sharing nearby · \(formatRemaining(model.state.inviteBroadcastRemainingSecs))"
+                        : "Share invite nearby",
+                    systemImage: model.state.inviteBroadcastActive ? "stop.circle" : "dot.radiowaves.left.and.right"
+                )
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var inviteCopyButton: some View {
+        Button {
+            model.copy(model.state.activeNetworkInvite)
+        } label: {
+            Label("Copy Link", systemImage: model.copiedValue == model.state.activeNetworkInvite ? "checkmark" : "doc.on.doc")
+        }
+        .disabled(model.state.activeNetworkInvite.isEmpty)
+    }
+
+    private var inviteResetButton: some View {
+        Button(role: .destructive) {
+            model.dispatch(
+                NativeActions.resetNetworkInvite(networkId: network.id),
+                status: "Resetting invite"
+            )
+        } label: {
+            Label("Reset", systemImage: "arrow.clockwise")
+        }
+        .disabled(!network.localIsAdmin || model.actionInFlight)
     }
 
     private func formatRemaining(_ seconds: UInt64) -> String {

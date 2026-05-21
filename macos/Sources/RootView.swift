@@ -873,55 +873,67 @@ struct RootView: View {
     private func inviteSection(_ network: NativeNetworkState) -> some View {
         let invite = network.enabled ? state.activeNetworkInvite : ""
         return surface {
-            HStack(alignment: .top, spacing: 18) {
-                InviteQRCodeView(invite: invite)
-                    .frame(width: 150, height: 150)
-                VStack(alignment: .leading, spacing: 12) {
-                    sectionHeader("Invite Devices", systemImage: "qrcode")
-                    HStack(spacing: 8) {
-                        Button {
-                            manager.copy(invite, as: .invite)
-                        } label: {
-                            Label("Copy Link", systemImage: copyIndicator(.invite, peerNpub: nil) ? "checkmark" : "doc.on.doc")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(invite.isEmpty)
-                        Button(role: .destructive) {
-                            manager.resetNetworkInvite(networkId: network.id)
-                        } label: {
-                            Label("Reset", systemImage: "arrow.clockwise")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!network.localIsAdmin || manager.actionInFlight || !network.enabled)
-                        Button {
-                            manager.share(invite)
-                        } label: {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                        }
-                        .disabled(invite.isEmpty)
-                    }
-                    HStack {
-                        Toggle("Allow join requests", isOn: Binding(
-                            get: { network.joinRequestsEnabled },
-                            set: { manager.setJoinRequests(networkId: network.id, enabled: $0) }
-                        ))
-                        .disabled(!network.localIsAdmin || manager.actionInFlight)
-                        .help("Allow devices with an invite to request access")
-                        badge(network.joinRequestsEnabled ? "Allowed" : "Blocked", style: network.joinRequestsEnabled ? .ok : .muted)
-                        Spacer()
-                        Button {
-                            state.inviteBroadcastActive ? manager.stopInviteBroadcast() : manager.startInviteBroadcast()
-                        } label: {
-                            Label(
-                                state.inviteBroadcastActive
-                                    ? "Sharing nearby · \(formatRemaining(state.inviteBroadcastRemainingSecs))"
-                                    : "Share invite nearby",
-                                systemImage: state.inviteBroadcastActive ? "stop.circle" : "dot.radiowaves.left.and.right"
-                            )
-                        }
-                        .disabled(manager.actionInFlight || !network.enabled)
-                    }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 18) {
+                    InviteQRCodeView(invite: invite)
+                        .frame(width: 260, height: 260)
+                    inviteControls(network, invite: invite)
                 }
+                VStack(alignment: .leading, spacing: 12) {
+                    InviteQRCodeView(invite: invite)
+                        .frame(width: 300, height: 300)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    inviteControls(network, invite: invite)
+                }
+            }
+        }
+    }
+
+    private func inviteControls(_ network: NativeNetworkState, invite: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Invite Devices", systemImage: "qrcode")
+            HStack(spacing: 8) {
+                Button {
+                    manager.copy(invite, as: .invite)
+                } label: {
+                    Label("Copy Link", systemImage: copyIndicator(.invite, peerNpub: nil) ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .disabled(invite.isEmpty)
+                Button(role: .destructive) {
+                    manager.resetNetworkInvite(networkId: network.id)
+                } label: {
+                    Label("Reset", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!network.localIsAdmin || manager.actionInFlight || !network.enabled)
+                Button {
+                    manager.share(invite)
+                } label: {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .disabled(invite.isEmpty)
+            }
+            HStack {
+                Toggle("Allow join requests", isOn: Binding(
+                    get: { network.joinRequestsEnabled },
+                    set: { manager.setJoinRequests(networkId: network.id, enabled: $0) }
+                ))
+                .disabled(!network.localIsAdmin || manager.actionInFlight)
+                .help("Allow devices with an invite to request access")
+                badge(network.joinRequestsEnabled ? "Allowed" : "Blocked", style: network.joinRequestsEnabled ? .ok : .muted)
+                Spacer()
+                Button {
+                    state.inviteBroadcastActive ? manager.stopInviteBroadcast() : manager.startInviteBroadcast()
+                } label: {
+                    Label(
+                        state.inviteBroadcastActive
+                            ? "Sharing nearby · \(formatRemaining(state.inviteBroadcastRemainingSecs))"
+                            : "Share invite nearby",
+                        systemImage: state.inviteBroadcastActive ? "stop.circle" : "dot.radiowaves.left.and.right"
+                    )
+                }
+                .disabled(manager.actionInFlight || !network.enabled)
             }
         }
     }

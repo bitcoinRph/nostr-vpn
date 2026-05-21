@@ -1054,13 +1054,14 @@ input.invalid {
 }
 
 .invite-section {
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(180px, min(50%, 300px)) minmax(0, 1fr);
   align-items: start;
 }
 
 .qr-frame.compact {
-  width: 168px;
-  height: 168px;
+  width: min(100%, 300px);
+  height: auto;
+  aspect-ratio: 1;
   padding: 10px;
 }
 
@@ -1216,7 +1217,7 @@ input.invalid {
 
   .qr-frame,
   .qr-frame.compact {
-    width: min(100%, 260px);
+    width: min(100%, 320px);
     height: auto;
     aspect-ratio: 1;
     justify-self: center;

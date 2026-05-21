@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -686,7 +687,21 @@ private fun AddDevicesDialog(
                         color = Muted,
                     )
                     if (state.activeNetworkInvite.isNotBlank()) {
-                        QrCode(invite = state.activeNetworkInvite, qrJson = qrJson)
+                        BoxWithConstraints(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val qrSide = if (maxWidth < 420.dp) {
+                                maxWidth.coerceAtMost(320.dp)
+                            } else {
+                                (maxWidth * 0.5f).coerceAtLeast(220.dp).coerceAtMost(320.dp)
+                            }
+                            QrCode(
+                                invite = state.activeNetworkInvite,
+                                qrJson = qrJson,
+                                side = qrSide,
+                            )
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             CopyButton(state.activeNetworkInvite, "Copy link")
                             OutlinedButton(onClick = {
