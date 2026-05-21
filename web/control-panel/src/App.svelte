@@ -235,6 +235,14 @@
     return String(value);
   }
 
+  function displayNetworkId(value: string): string {
+    const trimmed = value.trim();
+    if (trimmed.length <= 4 || /[^a-zA-Z0-9]/.test(trimmed)) {
+      return trimmed;
+    }
+    return trimmed.match(/.{1,4}/g)?.join('-') ?? trimmed;
+  }
+
   function heroTone(value: UiState | null): Tone {
     if (!value) {
       return 'muted';
@@ -964,7 +972,7 @@
               </div>
               <div>
                 <span>Network ID</span>
-                <strong>{shownNetwork.networkId}</strong>
+                <strong>{displayNetworkId(shownNetwork.networkId)}</strong>
                 <CopyButton value={shownNetwork.networkId} label="Network ID" on:copied={handleCopied} />
               </div>
             </div>
