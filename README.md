@@ -174,6 +174,42 @@ make
 `make` requires the StartOS `start-cli` tooling and emits architecture-specific
 `.s9pk` files for x86_64 and aarch64.
 
+StartOS package details:
+
+- Image and runtime: local Docker build from [`umbrel/Dockerfile`](umbrel/Dockerfile);
+  the runtime image contains `nvpn`, `nostr-vpn-web`, and the compiled web UI.
+- Volume layout: the `main` volume is mounted at `/data`; config is stored under
+  `/data/config/nvpn`, and home/runtime state is under `/data/home`.
+- Network access: one HTTP UI interface is exported through StartOS as `Web UI`;
+  the internal web service listens on port 38080.
+- Actions: no custom StartOS actions are currently exposed.
+- Backups: the `main` volume is included in StartOS backups.
+- Health checks: StartOS checks the `nvpn` daemon process and the web health
+  endpoint at `/api/health`.
+- Dependencies: none.
+- Limitations: the service needs tunnel-device access from StartOS; the manifest
+  enables the runtime flag that exposes `/dev/net/tun`.
+
+Quick reference:
+
+```yaml
+package_id: nostr-vpn
+architectures: [x86_64, aarch64]
+volumes:
+  main: /data
+ports:
+  ui: 38080
+dependencies: none
+startos_managed_env_vars:
+  - HOME
+  - XDG_CONFIG_HOME
+  - RUST_LOG
+  - NVPN_CLI_PATH
+  - NVPN_DAEMON_STATUS_MODE
+  - NVPN_EXTERNAL_DAEMON
+actions: []
+```
+
 ### Umbrel app
 
 The Umbrel package lives in [`umbrel`](umbrel). It runs a web control panel

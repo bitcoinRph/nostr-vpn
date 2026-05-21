@@ -7,10 +7,12 @@
 !crates/**
 
 !umbrel
+umbrel/**
 !umbrel/Dockerfile
 
 !web
 !web/control-panel
+web/control-panel/**
 !web/control-panel/index.html
 !web/control-panel/package.json
 !web/control-panel/pnpm-lock.yaml
@@ -21,3 +23,17 @@
 !web/control-panel/svelte.config.js
 !web/control-panel/tsconfig.json
 !web/control-panel/vite.config.ts
+
+**/.DS_Store
+**/.env
+**/.env.*
+**/*.log
+**/*.rs.bk
+**/dist
+**/dist/**
+**/node_modules
+**/node_modules/**
+**/target
+**/target/**
+umbrel/.data
+umbrel/.data/**
