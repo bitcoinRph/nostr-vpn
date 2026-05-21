@@ -9,7 +9,9 @@ NETWORK_ID="docker-vpn"
 FIPS_HOST_IFACE="nvpnfips0"
 FIPS_HOST_MTU="1280"
 FIPS_HOST_TCP_PORT="18080"
+FIPS_HOST_BLOCKED_TCP_PORT="18081"
 FIPS_HOST_TCP_PAYLOAD="alice-to-bob-fips-tcp"
+FIPS_HOST_BLOCKED_TCP_PAYLOAD="blocked-fips-tcp"
 
 cleanup() {
   "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -109,6 +111,39 @@ assert_fips_host_tunnel() {
   fi
 }
 
+assert_fips_firewall_rules() {
+  local service="$1"
+  local expected_tcp_port="${2:-}"
+  local rules
+
+  rules="$("${COMPOSE[@]}" exec -T "$service" nft list table inet nvpn_fips_host)"
+  for expected in \
+    "table inet nvpn_fips_host" \
+    "iifname != \"$FIPS_HOST_IFACE\" return" \
+    "oifname != \"$FIPS_HOST_IFACE\" return" \
+    "ip6 saddr != fd00::/8 return" \
+    "ip6 daddr != fd00::/8 return" \
+    "meta l4proto tcp accept"; do
+    if ! grep -q "$expected" <<<"$rules"; then
+      echo "docker e2e failed: $service .fips firewall missing rule: $expected" >&2
+      echo "$rules" >&2
+      exit 1
+    fi
+  done
+
+  if [[ -n "$expected_tcp_port" ]]; then
+    if ! grep -q "tcp dport $expected_tcp_port accept" <<<"$rules"; then
+      echo "docker e2e failed: $service .fips firewall missing inbound TCP port $expected_tcp_port" >&2
+      echo "$rules" >&2
+      exit 1
+    fi
+  elif grep -q "tcp dport .* accept" <<<"$rules"; then
+    echo "docker e2e failed: $service .fips firewall unexpectedly allows inbound TCP ports" >&2
+    echo "$rules" >&2
+    exit 1
+  fi
+}
+
 assert_fips_tcp_crosses() {
   local peer_npub="$1"
   local peer_fips_ip=""
@@ -138,6 +173,52 @@ assert_fips_tcp_crosses() {
   "${COMPOSE[@]}" exec -T node-a sh -lc "ip -6 route show fd00::/8; ip link show dev '$FIPS_HOST_IFACE'" >&2 || true
   "${COMPOSE[@]}" exec -T node-b sh -lc "ip -6 route show fd00::/8; ip link show dev '$FIPS_HOST_IFACE'; cat /tmp/bob-fips-tcp.out 2>/dev/null || true" >&2 || true
   exit 1
+}
+
+assert_fips_tcp_blocked() {
+  local source_service="$1"
+  local target_service="$2"
+  local target_fips_ip="$3"
+  local target_port="$4"
+  local payload="$5"
+  local output_path="/tmp/${target_service}-${target_port}-blocked.out"
+
+  "${COMPOSE[@]}" exec -T "$target_service" sh -lc "rm -f '$output_path'"
+  "${COMPOSE[@]}" exec -d "$target_service" sh -lc "nc -6 -l -p '$target_port' > '$output_path'"
+  sleep 1
+
+  printf '%s' "$payload" \
+    | "${COMPOSE[@]}" exec -T "$source_service" sh -lc "cat | nc -6 -w 2 '$target_fips_ip' '$target_port'" \
+    >/dev/null 2>&1 || true
+  sleep 1
+
+  if "${COMPOSE[@]}" exec -T "$target_service" sh -lc "grep -q '$payload' '$output_path' 2>/dev/null"; then
+    echo "docker e2e failed: $source_service reached blocked .fips TCP port $target_port on $target_service" >&2
+    "${COMPOSE[@]}" exec -T "$source_service" sh -lc "nft list table inet nvpn_fips_host; ip -6 route show fd00::/8" >&2 || true
+    "${COMPOSE[@]}" exec -T "$target_service" sh -lc "nft list table inet nvpn_fips_host; ip -6 route show fd00::/8; cat '$output_path' 2>/dev/null || true" >&2 || true
+    exit 1
+  fi
+}
+
+assert_fips_firewall_blocks() {
+  local alice_fips_ip bob_fips_ip
+
+  alice_fips_ip="$(wait_for_fips_dns_aaaa node-b "$ALICE_NPUB" || true)"
+  bob_fips_ip="$(wait_for_fips_dns_aaaa node-a "$BOB_NPUB" || true)"
+  if [[ -z "$alice_fips_ip" || -z "$bob_fips_ip" ]]; then
+    echo "docker e2e failed: could not resolve .fips addresses for firewall checks" >&2
+    exit 1
+  fi
+
+  assert_fips_tcp_blocked node-a node-b "$bob_fips_ip" "$FIPS_HOST_BLOCKED_TCP_PORT" "$FIPS_HOST_BLOCKED_TCP_PAYLOAD"
+  assert_fips_tcp_blocked node-b node-a "$alice_fips_ip" "$FIPS_HOST_TCP_PORT" "$FIPS_HOST_BLOCKED_TCP_PAYLOAD"
+
+  if "${COMPOSE[@]}" exec -T node-a ping -6 -c 1 -W 1 "$bob_fips_ip" >/dev/null 2>&1; then
+    echo "docker e2e failed: .fips firewall allowed non-TCP IPv6 ping" >&2
+    "${COMPOSE[@]}" exec -T node-a sh -lc "nft list table inet nvpn_fips_host; ip -6 route show fd00::/8" >&2 || true
+    "${COMPOSE[@]}" exec -T node-b sh -lc "nft list table inet nvpn_fips_host; ip -6 route show fd00::/8" >&2 || true
+    exit 1
+  fi
 }
 
 cleanup
@@ -212,7 +293,10 @@ fi
 
 assert_fips_host_tunnel node-a "$BOB_NPUB"
 assert_fips_host_tunnel node-b "$ALICE_NPUB"
+assert_fips_firewall_rules node-a
+assert_fips_firewall_rules node-b "$FIPS_HOST_TCP_PORT"
 assert_fips_tcp_crosses "$BOB_NPUB"
+assert_fips_firewall_blocks
 
 if ! "${COMPOSE[@]}" exec -T node-a ping -c 3 -W 2 "$BOB_TUNNEL_IP" >/tmp/ping-a.log; then
   echo "docker e2e failed: ping A -> B failed" >&2
@@ -237,4 +321,4 @@ cat /tmp/ping-a.log
 echo "--- Ping B -> A ---"
 cat /tmp/ping-b.log
 
-echo "docker e2e passed: FIPS private mesh established, .fips resolver/tunnel carried TCP, and tunnel pings succeeded"
+echo "docker e2e passed: FIPS private mesh established, .fips firewall enforced, resolver/tunnel carried TCP, and tunnel pings succeeded"
