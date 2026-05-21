@@ -22,6 +22,7 @@ pub(crate) fn active_network_invite_code_with_endpoints(
         v: NETWORK_INVITE_VERSION,
         network_name: String::new(),
         network_id: roster.network_id,
+        invite_secret: active_network.invite_secret.clone(),
         inviter_npub: String::new(),
         inviter_node_name: String::new(),
         inviter_endpoints: active_inviter_endpoints(config, extra_inviter_endpoints),
@@ -49,6 +50,7 @@ pub(crate) fn apply_network_invite_to_active_network(
     config.set_network_enabled(&target_network_id, true)?;
     config.set_network_mesh_id(&target_network_id, &invite.network_id)?;
     if let Some(network) = config.network_by_id_mut(&target_network_id) {
+        network.invite_secret = invite.invite_secret.trim().to_string();
         merge_invite_membership(network, &prepared, own_pubkey.as_deref(), reset_membership);
     }
     config.add_fips_peer_endpoint_hints(&prepared.inviter_pubkey, &invite.inviter_endpoints)?;
@@ -246,6 +248,7 @@ mod tests {
             name: "Network 1".to_string(),
             enabled: true,
             network_id: "8d4f34f5425bc50e".to_string(),
+            invite_secret: "join-secret".to_string(),
             participants: Vec::new(),
             admins: vec![admin_hex],
             listen_for_join_requests: true,
@@ -268,6 +271,7 @@ mod tests {
         .expect("invite code");
         let invite = parse_network_invite(&code).expect("invite parses");
 
+        assert_eq!(invite.invite_secret, "join-secret");
         assert_eq!(
             invite.inviter_endpoints,
             vec![

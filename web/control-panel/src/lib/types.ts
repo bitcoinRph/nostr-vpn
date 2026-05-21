@@ -46,6 +46,7 @@ export type ParticipantView = {
   offersExitNode: boolean;
   reachable: boolean;
   fipsEndpointNpub: string;
+  fipsEndpointHints: string[];
   fipsTransportAddr: string;
   fipsTransportType: string;
   fipsSrttMs?: number | null;

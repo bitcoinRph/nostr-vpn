@@ -45,6 +45,7 @@
   let deviceSearch = '';
   let exitSearch = '';
   let aliasDrafts: Record<string, string> = {};
+  let endpointHintDrafts: Record<string, string> = {};
   let networkNameDrafts: Record<string, string> = {};
   let meshIdDrafts: Record<string, string> = {};
   let wireguardExitConfigDraft = '';
@@ -166,7 +167,7 @@
         names[network.id] = network.name;
       }
       if (!(network.id in meshIds)) {
-        meshIds[network.id] = network.networkId;
+        meshIds[network.id] = displayNetworkId(network.networkId);
       }
     }
     networkNameDrafts = names;
@@ -175,14 +176,19 @@
 
   function syncAliasDrafts(next: UiState) {
     const aliases = { ...aliasDrafts };
+    const endpointHints = { ...endpointHintDrafts };
     for (const network of next.networks) {
       for (const participant of network.participants) {
         if (!(participant.npub in aliases)) {
           aliases[participant.npub] = participant.magicDnsAlias;
         }
+        if (!(participant.npub in endpointHints)) {
+          endpointHints[participant.npub] = (participant.fipsEndpointHints ?? []).join(', ');
+        }
       }
     }
     aliasDrafts = aliases;
+    endpointHintDrafts = endpointHints;
   }
 
   async function refresh(showSpinner: boolean) {
@@ -237,10 +243,19 @@
 
   function displayNetworkId(value: string): string {
     const trimmed = value.trim();
-    if (trimmed.length <= 4 || /[^a-zA-Z0-9]/.test(trimmed)) {
+    if (trimmed.length <= 4 || !/^[0-9a-f]+$/i.test(trimmed)) {
       return trimmed;
     }
     return trimmed.match(/.{1,4}/g)?.join('-') ?? trimmed;
+  }
+
+  function normalizeNetworkIdInput(value: string): string {
+    const trimmed = value.trim();
+    const compact = trimmed.replace(/[\s-]/g, '');
+    if (!compact && /^[\s-]*$/.test(trimmed)) {
+      return '';
+    }
+    return compact && /^[0-9a-f]+$/i.test(compact) ? compact.toLowerCase() : trimmed;
   }
 
   function heroTone(value: UiState | null): Tone {
@@ -518,6 +533,13 @@
     }
   }
 
+  async function resetNetworkInvite(network: NetworkView) {
+    if (!window.confirm('Reset this invite link? Devices with the old link will no longer be able to request access.')) {
+      return;
+    }
+    await run('/api/reset_network_invite', { networkId: network.id }, 'Resetting invite');
+  }
+
   async function saveAlias(participant: ParticipantView) {
     await run(
       '/api/set_participant_alias',
@@ -526,6 +548,25 @@
         alias: aliasDrafts[participant.npub] ?? '',
       },
       'Saving name',
+    );
+  }
+
+  function endpointHintsFromDraft(value: string): string[] {
+    return value
+      .split(/[,\n\r\t ]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  async function saveEndpointHints(participant: ParticipantView) {
+    const next = endpointHintsFromDraft(endpointHintDrafts[participant.npub] ?? '');
+    await run(
+      '/api/set_participant_endpoint_hints',
+      {
+        npub: participant.npub,
+        endpointHints: next,
+      },
+      'Saving address hints',
     );
   }
 
@@ -648,17 +689,20 @@
 
   async function saveNetworkProfile(network: NetworkView) {
     const name = (networkNameDrafts[network.id] ?? '').trim();
-    const meshId = (meshIdDrafts[network.id] ?? '').trim();
+    const meshId = normalizeNetworkIdInput(meshIdDrafts[network.id] ?? '');
     let ok = true;
     if (name && name !== network.name) {
       ok = await run('/api/rename_network', { networkId: network.id, name }, 'Saving network');
     }
-    if (ok && meshId && meshId !== network.networkId) {
+    if (ok && meshId && meshId !== normalizeNetworkIdInput(network.networkId)) {
       ok = await run(
         '/api/set_network_mesh_id',
         { networkId: network.id, meshId },
         'Saving mesh',
       );
+    }
+    if (ok) {
+      meshIdDrafts = { ...meshIdDrafts, [network.id]: displayNetworkId(meshId || network.networkId) };
     }
     if (ok) {
       setNotice('Network saved');
@@ -891,19 +935,23 @@
                   <p>{shownNetwork.name}</p>
                 </div>
               </div>
-              <textarea
-                readonly
-                value={qrInvite}
-                aria-label="Invite"
-              ></textarea>
               <div class="button-row">
                 <CopyButton
                   variant="secondary"
                   value={qrInvite}
                   label="Invite"
+                  text="Copy Link"
                   disabled={!qrInvite}
                   on:copied={handleCopied}
                 />
+                <button
+                  type="button"
+                  class="small-button"
+                  disabled={!shownNetwork.localIsAdmin || !shownNetwork.enabled || Boolean(busyAction)}
+                  on:click={() => resetNetworkInvite(shownNetwork)}
+                >
+                  Reset
+                </button>
                 <button
                   type="button"
                   class="secondary-button"
@@ -1249,7 +1297,7 @@
                 </header>
 
                 {#if shownNetwork.localIsAdmin}
-                  <form class="detail-surface" on:submit|preventDefault={() => saveAlias(selectedParticipant)}>
+                  <div class="detail-surface">
                     <div class="section-heading">
                       <div>
                         <h3>Manage Device</h3>
@@ -1262,11 +1310,32 @@
                         bind:value={aliasDrafts[selectedParticipant.npub]}
                         disabled={Boolean(busyAction)}
                       />
-                      <button type="submit" class="small-button" disabled={Boolean(busyAction)}>
+                      <button
+                        type="button"
+                        class="small-button"
+                        disabled={Boolean(busyAction)}
+                        on:click={() => saveAlias(selectedParticipant)}
+                      >
                         Save
                       </button>
                     </div>
                     {#if !isSelf(selectedParticipant)}
+                      <div class="inline-form">
+                        <input
+                          aria-label="FIPS address hints"
+                          placeholder="host:port"
+                          bind:value={endpointHintDrafts[selectedParticipant.npub]}
+                          disabled={Boolean(busyAction)}
+                        />
+                        <button
+                          type="button"
+                          class="small-button"
+                          disabled={Boolean(busyAction)}
+                          on:click={() => saveEndpointHints(selectedParticipant)}
+                        >
+                          Save hints
+                        </button>
+                      </div>
                       <div class="button-row">
                         <button
                           type="button"
@@ -1284,7 +1353,7 @@
                         </button>
                       </div>
                     {/if}
-                  </form>
+                  </div>
                 {/if}
 
                 <div class="detail-surface">
@@ -1336,6 +1405,12 @@
                       <div class="metric-wide">
                         <span>Endpoint</span>
                         <strong>{selectedParticipant.fipsTransportAddr}</strong>
+                      </div>
+                    {/if}
+                    {#if selectedParticipant.fipsEndpointHints?.length}
+                      <div class="metric-wide">
+                        <span>Address hints</span>
+                        <strong>{selectedParticipant.fipsEndpointHints.join(', ')}</strong>
                       </div>
                     {/if}
                     <div>

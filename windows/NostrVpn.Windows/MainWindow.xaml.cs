@@ -125,6 +125,16 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void SetEndpointHints_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: NativeParticipantState participant } button
+            && FindParent<Grid>(button) is { } row
+            && FindChild<TextBox>(row, "EndpointHintsInput") is { } hintsInput)
+        {
+            await ViewModel.SetParticipantEndpointHintsAsync(participant, hintsInput.Text);
+        }
+    }
+
     private async void AcceptJoin_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: NativeInboundJoinRequestState request })

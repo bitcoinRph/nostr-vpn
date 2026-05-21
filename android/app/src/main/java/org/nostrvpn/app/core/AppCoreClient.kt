@@ -39,6 +39,7 @@ object NativeActions {
     fun importInvite(invite: String) = action("import_network_invite", "invite" to invite)
     fun startInviteBroadcast() = action("start_invite_broadcast")
     fun stopInviteBroadcast() = action("stop_invite_broadcast")
+    fun resetNetworkInvite(networkId: String) = action("reset_network_invite", "networkId" to networkId)
     fun startNearbyDiscovery() = action("start_nearby_discovery")
     fun stopNearbyDiscovery() = action("stop_nearby_discovery")
     fun addNetwork(name: String) = action("add_network", "name" to name)
@@ -59,6 +60,9 @@ object NativeActions {
 
     fun removeNetwork(networkId: String) = action("remove_network", "networkId" to networkId)
 
+    fun setParticipantEndpointHints(npub: String, endpointHints: List<String>) =
+        action("set_participant_endpoint_hints", "npub" to npub, "endpointHints" to endpointHints)
+
     fun updateSettings(vararg settings: Pair<String, Any?>): JSONObject =
         JSONObject()
             .put("type", "update_settings")
@@ -73,6 +77,6 @@ object NativeActions {
 
     private fun action(type: String, vararg fields: Pair<String, Any?>): JSONObject =
         JSONObject().put("type", type).apply {
-            fields.forEach { (key, value) -> put(key, value) }
+            fields.forEach { (key, value) -> put(key, if (value is List<*>) JSONArray(value) else value) }
         }
 }

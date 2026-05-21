@@ -95,7 +95,7 @@ impl Drafts {
         self.wireguard_exit_config = state.wireguard_exit_config.clone();
         if let Some(network) = active_network(state) {
             self.network_name = display_network_name(network);
-            self.mesh_id = network.network_id.clone();
+            self.mesh_id = display_network_id(&network.network_id);
         } else {
             self.network_name = "Nostr VPN".to_string();
             self.mesh_id.clear();
@@ -1428,6 +1428,34 @@ fn device_detail_card(
         row.append(&save);
 
         if !participant_is_self {
+            let hint_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            hint_row.set_valign(gtk::Align::Center);
+            let hint_label = gtk::Label::new(Some("Hints"));
+            hint_label.add_css_class("dim-label");
+            hint_row.append(&hint_label);
+
+            let hints = entry("host:port", &participant.fips_endpoint_hints.join(", "));
+            hints.set_hexpand(true);
+            hint_row.append(&hints);
+
+            let save_hints = gtk::Button::with_label("Save");
+            {
+                let app = app.clone();
+                let npub = participant.npub.clone();
+                let hints = hints.clone();
+                save_hints.connect_clicked(move |_| {
+                    dispatch(
+                        &app,
+                        NativeAppAction::SetParticipantEndpointHints {
+                            npub: npub.clone(),
+                            endpoint_hints: parse_endpoint_hints(&hints.text()),
+                        },
+                    );
+                });
+            }
+            hint_row.append(&save_hints);
+            manage.append(&hint_row);
+
             let admin = gtk::Button::from_icon_name(if participant.is_admin {
                 "starred-symbolic"
             } else {
@@ -1505,6 +1533,14 @@ fn device_detail_card(
         ("Role", device_role_text(&participant, state)),
         ("State", device_status_text(&participant)),
         ("FIPS path", fips_path_text(&participant)),
+        (
+            "Address hints",
+            if participant.fips_endpoint_hints.is_empty() {
+                "-".to_string()
+            } else {
+                participant.fips_endpoint_hints.join(", ")
+            },
+        ),
         ("Last seen", non_empty_or(&participant.last_seen_text, "-")),
         ("Sent", format_bytes(participant.tx_bytes)),
         ("Received", format_bytes(participant.rx_bytes)),
@@ -1834,19 +1870,28 @@ fn build_share_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     section_header(&column, "Invite Devices", "emblem-shared-symbolic");
 
     let invite_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let code = gtk::Entry::new();
-    code.set_text(&state.active_network_invite);
-    code.set_editable(false);
-    code.set_hexpand(true);
-    code.set_placeholder_text(Some("No invite"));
-    invite_row.append(&code);
-    let copy = icon_text_button("Copy", "edit-copy-symbolic");
+    let copy = icon_text_button("Copy Link", "edit-copy-symbolic");
     copy.set_sensitive(!state.active_network_invite.is_empty());
     {
         let invite = state.active_network_invite.clone();
         copy.connect_clicked(move |_| copy_text(&invite));
     }
     invite_row.append(&copy);
+    let reset = icon_text_button("Reset", "view-refresh-symbolic");
+    reset.set_sensitive(network.local_is_admin && network.enabled);
+    {
+        let app = app.clone();
+        let network_id = network.id.clone();
+        reset.connect_clicked(move |_| {
+            dispatch(
+                &app,
+                NativeAppAction::ResetNetworkInvite {
+                    network_id: network_id.clone(),
+                },
+            );
+        });
+    }
+    invite_row.append(&reset);
     let broadcast_label = if state.invite_broadcast_active {
         format!(
             "Sharing nearby · {}",
@@ -2448,7 +2493,7 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
             let app = app.clone();
             let network_id = active.id.clone();
             save.connect_clicked(move |_| {
-                let mesh_id = app.borrow().drafts.mesh_id.trim().to_string();
+                let mesh_id = normalize_network_id_input(&app.borrow().drafts.mesh_id);
                 if !mesh_id.is_empty() {
                     dispatch(
                         &app,
@@ -3679,6 +3724,18 @@ fn device_name(participant: &NativeParticipantState) -> String {
     short_text(&participant.npub, 18)
 }
 
+fn parse_endpoint_hints(input: &str) -> Vec<String> {
+    let mut hints = input
+        .split([',', '\n', '\r', '\t', ' '])
+        .map(str::trim)
+        .filter(|hint| !hint.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    hints.sort();
+    hints.dedup();
+    hints
+}
+
 fn device_magic_dns_name(participant: &NativeParticipantState, state: &NativeAppState) -> String {
     if !participant.magic_dns_name.trim().is_empty() {
         return participant.magic_dns_name.clone();
@@ -3929,6 +3986,35 @@ fn non_empty_or(value: &str, fallback: &str) -> String {
         fallback.to_string()
     } else {
         value.to_string()
+    }
+}
+
+fn display_network_id(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() <= 4 || !trimmed.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return trimmed.to_string();
+    }
+    trimmed
+        .as_bytes()
+        .chunks(4)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn normalize_network_id_input(value: &str) -> String {
+    let trimmed = value.trim();
+    let compact = trimmed
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && *ch != '-')
+        .collect::<String>();
+    if compact.is_empty() && trimmed.chars().all(|ch| ch.is_whitespace() || ch == '-') {
+        return String::new();
+    }
+    if !compact.is_empty() && compact.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        compact.to_ascii_lowercase()
+    } else {
+        trimmed.to_string()
     }
 }
 

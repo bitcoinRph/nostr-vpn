@@ -9,6 +9,8 @@ pub const FIPS_JOIN_REQUEST_RETRY_SECS: u64 = 10;
 pub struct MeshJoinRequest {
     pub network_id: String,
     #[serde(default)]
+    pub invite_secret: String,
+    #[serde(default)]
     pub requester_node_name: String,
 }
 
@@ -20,6 +22,7 @@ pub fn normalize_join_request(request: MeshJoinRequest) -> Result<MeshJoinReques
 
     Ok(MeshJoinRequest {
         network_id,
+        invite_secret: request.invite_secret.trim().to_string(),
         requester_node_name: request.requester_node_name.trim().to_string(),
     })
 }
@@ -32,11 +35,13 @@ mod tests {
     fn join_request_normalizes_network_id_and_node_name() {
         let request = normalize_join_request(MeshJoinRequest {
             network_id: "  Mesh Home  ".to_string(),
+            invite_secret: " invite-secret ".to_string(),
             requester_node_name: " alice-phone ".to_string(),
         })
         .expect("normalize");
 
         assert_eq!(request.network_id, "Mesh Home");
+        assert_eq!(request.invite_secret, "invite-secret");
         assert_eq!(request.requester_node_name, "alice-phone");
     }
 }

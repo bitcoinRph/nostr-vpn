@@ -5,6 +5,7 @@
 
   export let value = '';
   export let label = 'Value';
+  export let text = '';
   export let disabled = false;
   export let variant: ButtonVariant = 'small';
 
@@ -56,6 +57,7 @@
 <button
   type="button"
   class="copy-button {variant}"
+  class:with-text={Boolean(text)}
   disabled={disabled || !value}
   aria-label={copied ? `${label} copied` : `Copy ${label}`}
   title={copied ? 'Copied' : `Copy ${label}`}
@@ -71,6 +73,9 @@
       <path d="M3.5 5H10v8.5H3.5z" />
     </svg>
   {/if}
+  {#if text}
+    <span>{text}</span>
+  {/if}
 </button>
 
 <style>
@@ -79,6 +84,7 @@
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
+    gap: 7px;
     border: 0;
     border-radius: 8px;
     color: var(--text-on-accent, #ffffff);
@@ -94,6 +100,12 @@
   .copy-button.secondary {
     width: 40px;
     min-height: 40px;
+  }
+
+  .copy-button.with-text {
+    width: auto;
+    min-width: 0;
+    padding: 0 12px;
   }
 
   .copy-button:hover {

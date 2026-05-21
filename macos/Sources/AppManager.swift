@@ -531,6 +531,10 @@ final class AppManager: ObservableObject {
         dispatch(.setNetworkJoinRequestsEnabled(networkId: networkId, enabled: enabled), status: "Saving join request setting")
     }
 
+    func resetNetworkInvite(networkId: String) {
+        dispatch(.resetNetworkInvite(networkId: networkId), status: "Resetting invite")
+    }
+
     func requestNetworkJoin(networkId: String) {
         dispatch(.requestNetworkJoin(networkId: networkId), status: "Requesting network join")
     }
@@ -545,6 +549,13 @@ final class AppManager: ObservableObject {
 
     func setParticipantAlias(npub: String, alias: String) {
         dispatch(.setParticipantAlias(npub: npub, alias: alias), status: "Saving alias")
+    }
+
+    func setParticipantEndpointHints(npub: String, endpointHints: [String]) {
+        dispatch(
+            .setParticipantEndpointHints(npub: npub, endpointHints: endpointHints),
+            status: "Saving address hints"
+        )
     }
 
     func toggleAdmin(networkId: String, participant: NativeParticipantState) {
@@ -565,7 +576,7 @@ final class AppManager: ObservableObject {
 
     func manualAddNetwork(adminNpub: String, meshNetworkId: String) {
         let admin = adminNpub.trimmingCharacters(in: .whitespacesAndNewlines)
-        let mesh = meshNetworkId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mesh = normalizeNetworkIdInput(meshNetworkId)
         guard !admin.isEmpty, !mesh.isEmpty else { return }
         dispatch(.manualAddNetwork(adminNpub: admin, meshNetworkId: mesh), status: "Adding network")
     }
@@ -940,6 +951,7 @@ final class AppManager: ObservableObject {
             advertisedRoutes: [],
             offersExitNode: false,
             fipsEndpointNpub: selfNpub,
+            fipsEndpointHints: [],
             fipsTransportAddr: "192.0.2.57:51820",
             fipsTransportType: "udp",
             fipsSrttMs: 0,
@@ -966,6 +978,7 @@ final class AppManager: ObservableObject {
             advertisedRoutes: [],
             offersExitNode: false,
             fipsEndpointNpub: macbookNpub,
+            fipsEndpointHints: [],
             fipsTransportAddr: "",
             fipsTransportType: "mesh",
             fipsSrttMs: 38,
@@ -992,6 +1005,7 @@ final class AppManager: ObservableObject {
             advertisedRoutes: [],
             offersExitNode: false,
             fipsEndpointNpub: iphoneNpub,
+            fipsEndpointHints: [],
             fipsTransportAddr: "192.0.2.74:52283",
             fipsTransportType: "udp",
             fipsSrttMs: 9,
@@ -1018,6 +1032,7 @@ final class AppManager: ObservableObject {
             advertisedRoutes: [],
             offersExitNode: false,
             fipsEndpointNpub: androidNpub,
+            fipsEndpointHints: [],
             fipsTransportAddr: "192.0.2.92:47120",
             fipsTransportType: "udp",
             fipsSrttMs: 18,
@@ -1044,6 +1059,7 @@ final class AppManager: ObservableObject {
             advertisedRoutes: ["10.88.0.0/16"],
             offersExitNode: true,
             fipsEndpointNpub: ubuntuNpub,
+            fipsEndpointHints: [],
             fipsTransportAddr: "203.0.113.44:51820",
             fipsTransportType: "udp",
             fipsSrttMs: 22,
@@ -1674,4 +1690,24 @@ func settingsPatch(
         launchOnStartup: launchOnStartup,
         closeToTrayOnClose: closeToTrayOnClose
     )
+}
+
+private func normalizeNetworkIdInput(_ value: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let compactScalars = trimmed.unicodeScalars.filter {
+        !$0.properties.isWhitespace && $0 != "-"
+    }
+    let compact = String(String.UnicodeScalarView(compactScalars))
+    if compact.isEmpty && trimmed.unicodeScalars.allSatisfy({ $0.properties.isWhitespace || $0 == "-" }) {
+        return ""
+    }
+    return !compact.isEmpty && isHexString(compact) ? compact.lowercased() : trimmed
+}
+
+private func isHexString(_ value: String) -> Bool {
+    !value.isEmpty && value.unicodeScalars.allSatisfy { scalar in
+        (48...57).contains(Int(scalar.value))
+            || (65...70).contains(Int(scalar.value))
+            || (97...102).contains(Int(scalar.value))
+    }
 }

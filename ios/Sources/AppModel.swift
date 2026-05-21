@@ -252,6 +252,7 @@ final class AppModel: ObservableObject {
              "set_network_mesh_id",
              "set_network_join_requests_enabled",
              "add_participant",
+             "set_participant_endpoint_hints",
              "add_admin",
              "remove_participant",
              "remove_admin",

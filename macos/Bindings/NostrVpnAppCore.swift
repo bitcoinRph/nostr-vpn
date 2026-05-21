@@ -2183,6 +2183,7 @@ public struct NativeParticipantState {
     public var advertisedRoutes: [String]
     public var offersExitNode: Bool
     public var fipsEndpointNpub: String
+    public var fipsEndpointHints: [String]
     public var fipsTransportAddr: String
     public var fipsTransportType: String
     public var fipsSrttMs: UInt64
@@ -2197,7 +2198,7 @@ public struct NativeParticipantState {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(npub: String, pubkeyHex: String, alias: String, magicDnsAlias: String, magicDnsName: String, tunnelIp: String, isAdmin: Bool, reachable: Bool, txBytes: UInt64, rxBytes: UInt64, advertisedRoutes: [String], offersExitNode: Bool, fipsEndpointNpub: String, fipsTransportAddr: String, fipsTransportType: String, fipsSrttMs: UInt64, fipsPacketsSent: UInt64, fipsPacketsRecv: UInt64, fipsBytesSent: UInt64, fipsBytesRecv: UInt64, state: String, meshState: String, statusText: String, lastSeenText: String) {
+    public init(npub: String, pubkeyHex: String, alias: String, magicDnsAlias: String, magicDnsName: String, tunnelIp: String, isAdmin: Bool, reachable: Bool, txBytes: UInt64, rxBytes: UInt64, advertisedRoutes: [String], offersExitNode: Bool, fipsEndpointNpub: String, fipsEndpointHints: [String], fipsTransportAddr: String, fipsTransportType: String, fipsSrttMs: UInt64, fipsPacketsSent: UInt64, fipsPacketsRecv: UInt64, fipsBytesSent: UInt64, fipsBytesRecv: UInt64, state: String, meshState: String, statusText: String, lastSeenText: String) {
         self.npub = npub
         self.pubkeyHex = pubkeyHex
         self.alias = alias
@@ -2211,6 +2212,7 @@ public struct NativeParticipantState {
         self.advertisedRoutes = advertisedRoutes
         self.offersExitNode = offersExitNode
         self.fipsEndpointNpub = fipsEndpointNpub
+        self.fipsEndpointHints = fipsEndpointHints
         self.fipsTransportAddr = fipsTransportAddr
         self.fipsTransportType = fipsTransportType
         self.fipsSrttMs = fipsSrttMs
@@ -2271,6 +2273,9 @@ extension NativeParticipantState: Equatable, Hashable {
         if lhs.fipsEndpointNpub != rhs.fipsEndpointNpub {
             return false
         }
+        if lhs.fipsEndpointHints != rhs.fipsEndpointHints {
+            return false
+        }
         if lhs.fipsTransportAddr != rhs.fipsTransportAddr {
             return false
         }
@@ -2321,6 +2326,7 @@ extension NativeParticipantState: Equatable, Hashable {
         hasher.combine(advertisedRoutes)
         hasher.combine(offersExitNode)
         hasher.combine(fipsEndpointNpub)
+        hasher.combine(fipsEndpointHints)
         hasher.combine(fipsTransportAddr)
         hasher.combine(fipsTransportType)
         hasher.combine(fipsSrttMs)
@@ -2357,6 +2363,7 @@ public struct FfiConverterTypeNativeParticipantState: FfiConverterRustBuffer {
                 advertisedRoutes: FfiConverterSequenceString.read(from: &buf),
                 offersExitNode: FfiConverterBool.read(from: &buf),
                 fipsEndpointNpub: FfiConverterString.read(from: &buf),
+                fipsEndpointHints: FfiConverterSequenceString.read(from: &buf),
                 fipsTransportAddr: FfiConverterString.read(from: &buf),
                 fipsTransportType: FfiConverterString.read(from: &buf),
                 fipsSrttMs: FfiConverterUInt64.read(from: &buf),
@@ -2385,6 +2392,7 @@ public struct FfiConverterTypeNativeParticipantState: FfiConverterRustBuffer {
         FfiConverterSequenceString.write(value.advertisedRoutes, into: &buf)
         FfiConverterBool.write(value.offersExitNode, into: &buf)
         FfiConverterString.write(value.fipsEndpointNpub, into: &buf)
+        FfiConverterSequenceString.write(value.fipsEndpointHints, into: &buf)
         FfiConverterString.write(value.fipsTransportAddr, into: &buf)
         FfiConverterString.write(value.fipsTransportType, into: &buf)
         FfiConverterUInt64.write(value.fipsSrttMs, into: &buf)
@@ -3170,6 +3178,8 @@ public enum NativeAppAction {
     )
     case addAdmin(networkId: String, npub: String
     )
+    case resetNetworkInvite(networkId: String
+    )
     case importNetworkInvite(invite: String
     )
     /**
@@ -3200,6 +3210,8 @@ public enum NativeAppAction {
     case rejectJoinRequest(networkId: String, requesterNpub: String
     )
     case setParticipantAlias(npub: String, alias: String
+    )
+    case setParticipantEndpointHints(npub: String, endpointHints: [String]
     )
     case updateSettings(patch: SettingsPatch
     )
@@ -3267,36 +3279,42 @@ public struct FfiConverterTypeNativeAppAction: FfiConverterRustBuffer {
         case 19: return .addAdmin(networkId: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf)
         )
 
-        case 20: return .importNetworkInvite(invite: try FfiConverterString.read(from: &buf)
+        case 20: return .resetNetworkInvite(networkId: try FfiConverterString.read(from: &buf)
         )
 
-        case 21: return .manualAddNetwork(adminNpub: try FfiConverterString.read(from: &buf), meshNetworkId: try FfiConverterString.read(from: &buf)
+        case 21: return .importNetworkInvite(invite: try FfiConverterString.read(from: &buf)
         )
 
-        case 22: return .startInviteBroadcast
-
-        case 23: return .stopInviteBroadcast
-
-        case 24: return .startNearbyDiscovery
-
-        case 25: return .stopNearbyDiscovery
-
-        case 26: return .removeParticipant(networkId: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf)
+        case 22: return .manualAddNetwork(adminNpub: try FfiConverterString.read(from: &buf), meshNetworkId: try FfiConverterString.read(from: &buf)
         )
 
-        case 27: return .removeAdmin(networkId: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf)
+        case 23: return .startInviteBroadcast
+
+        case 24: return .stopInviteBroadcast
+
+        case 25: return .startNearbyDiscovery
+
+        case 26: return .stopNearbyDiscovery
+
+        case 27: return .removeParticipant(networkId: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf)
         )
 
-        case 28: return .acceptJoinRequest(networkId: try FfiConverterString.read(from: &buf), requesterNpub: try FfiConverterString.read(from: &buf)
+        case 28: return .removeAdmin(networkId: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf)
         )
 
-        case 29: return .rejectJoinRequest(networkId: try FfiConverterString.read(from: &buf), requesterNpub: try FfiConverterString.read(from: &buf)
+        case 29: return .acceptJoinRequest(networkId: try FfiConverterString.read(from: &buf), requesterNpub: try FfiConverterString.read(from: &buf)
         )
 
-        case 30: return .setParticipantAlias(npub: try FfiConverterString.read(from: &buf), alias: try FfiConverterString.read(from: &buf)
+        case 30: return .rejectJoinRequest(networkId: try FfiConverterString.read(from: &buf), requesterNpub: try FfiConverterString.read(from: &buf)
         )
 
-        case 31: return .updateSettings(patch: try FfiConverterTypeSettingsPatch.read(from: &buf)
+        case 31: return .setParticipantAlias(npub: try FfiConverterString.read(from: &buf), alias: try FfiConverterString.read(from: &buf)
+        )
+
+        case 32: return .setParticipantEndpointHints(npub: try FfiConverterString.read(from: &buf), endpointHints: try FfiConverterSequenceString.read(from: &buf)
+        )
+
+        case 33: return .updateSettings(patch: try FfiConverterTypeSettingsPatch.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3399,65 +3417,76 @@ public struct FfiConverterTypeNativeAppAction: FfiConverterRustBuffer {
             FfiConverterString.write(npub, into: &buf)
 
 
-        case let .importNetworkInvite(invite):
+        case let .resetNetworkInvite(networkId):
             writeInt(&buf, Int32(20))
+            FfiConverterString.write(networkId, into: &buf)
+
+
+        case let .importNetworkInvite(invite):
+            writeInt(&buf, Int32(21))
             FfiConverterString.write(invite, into: &buf)
 
 
         case let .manualAddNetwork(adminNpub,meshNetworkId):
-            writeInt(&buf, Int32(21))
+            writeInt(&buf, Int32(22))
             FfiConverterString.write(adminNpub, into: &buf)
             FfiConverterString.write(meshNetworkId, into: &buf)
 
 
         case .startInviteBroadcast:
-            writeInt(&buf, Int32(22))
-
-
-        case .stopInviteBroadcast:
             writeInt(&buf, Int32(23))
 
 
-        case .startNearbyDiscovery:
+        case .stopInviteBroadcast:
             writeInt(&buf, Int32(24))
 
 
-        case .stopNearbyDiscovery:
+        case .startNearbyDiscovery:
             writeInt(&buf, Int32(25))
 
 
-        case let .removeParticipant(networkId,npub):
+        case .stopNearbyDiscovery:
             writeInt(&buf, Int32(26))
-            FfiConverterString.write(networkId, into: &buf)
-            FfiConverterString.write(npub, into: &buf)
 
 
-        case let .removeAdmin(networkId,npub):
+        case let .removeParticipant(networkId,npub):
             writeInt(&buf, Int32(27))
             FfiConverterString.write(networkId, into: &buf)
             FfiConverterString.write(npub, into: &buf)
 
 
-        case let .acceptJoinRequest(networkId,requesterNpub):
+        case let .removeAdmin(networkId,npub):
             writeInt(&buf, Int32(28))
             FfiConverterString.write(networkId, into: &buf)
-            FfiConverterString.write(requesterNpub, into: &buf)
+            FfiConverterString.write(npub, into: &buf)
 
 
-        case let .rejectJoinRequest(networkId,requesterNpub):
+        case let .acceptJoinRequest(networkId,requesterNpub):
             writeInt(&buf, Int32(29))
             FfiConverterString.write(networkId, into: &buf)
             FfiConverterString.write(requesterNpub, into: &buf)
 
 
-        case let .setParticipantAlias(npub,alias):
+        case let .rejectJoinRequest(networkId,requesterNpub):
             writeInt(&buf, Int32(30))
+            FfiConverterString.write(networkId, into: &buf)
+            FfiConverterString.write(requesterNpub, into: &buf)
+
+
+        case let .setParticipantAlias(npub,alias):
+            writeInt(&buf, Int32(31))
             FfiConverterString.write(npub, into: &buf)
             FfiConverterString.write(alias, into: &buf)
 
 
+        case let .setParticipantEndpointHints(npub,endpointHints):
+            writeInt(&buf, Int32(32))
+            FfiConverterString.write(npub, into: &buf)
+            FfiConverterSequenceString.write(endpointHints, into: &buf)
+
+
         case let .updateSettings(patch):
-            writeInt(&buf, Int32(31))
+            writeInt(&buf, Int32(33))
             FfiConverterTypeSettingsPatch.write(patch, into: &buf)
 
         }

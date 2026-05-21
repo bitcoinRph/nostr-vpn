@@ -21,7 +21,7 @@ fn keep_endpoint_autoconfig_off(config: &mut AppConfig) {
 
 fn assert_generated_network_id(value: &str) {
     assert_ne!(value, "nostr-vpn");
-    assert_eq!(value.len(), 16);
+    assert_eq!(value.len(), 8);
     assert!(value.chars().all(|c| c.is_ascii_hexdigit()));
 }
 

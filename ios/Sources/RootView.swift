@@ -481,7 +481,7 @@ private struct JoinNetworkCard: View {
 
     private var canSubmitManual: Bool {
         let admin = manualAdminId.trimmingCharacters(in: .whitespacesAndNewlines)
-        let mesh = manualNetworkId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mesh = normalizeNetworkIdInput(manualNetworkId)
         return !admin.isEmpty && !mesh.isEmpty && isValidDeviceId(admin)
     }
 
@@ -542,7 +542,7 @@ private struct JoinNetworkCard: View {
                         .textFieldStyle(.roundedBorder)
                     Button("Add") {
                         let admin = manualAdminId.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let mesh = manualNetworkId.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let mesh = normalizeNetworkIdInput(manualNetworkId)
                         model.dispatch(
                             NativeActions.manualAddNetwork(adminNpub: admin, meshNetworkId: mesh),
                             status: "Adding network"
@@ -660,7 +660,7 @@ private struct ManualPairingInfoCard: View {
                 Text("Network ID")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                CopyLine(value: network.networkId, model: model)
+                CopyLine(value: network.networkId, displayValue: displayNetworkId(network.networkId), model: model)
             }
         }
     }
@@ -681,7 +681,23 @@ private struct InviteToMyNetworkCard: View {
                     Text("Share this code with another device to give it access to your network.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    CopyLine(value: model.state.activeNetworkInvite, model: model)
+                    HStack {
+                        Button {
+                            model.copy(model.state.activeNetworkInvite)
+                        } label: {
+                            Label("Copy Link", systemImage: model.copiedValue == model.state.activeNetworkInvite ? "checkmark" : "doc.on.doc")
+                        }
+                        .disabled(model.state.activeNetworkInvite.isEmpty)
+                        Button(role: .destructive) {
+                            model.dispatch(
+                                NativeActions.resetNetworkInvite(networkId: network.id),
+                                status: "Resetting invite"
+                            )
+                        } label: {
+                            Label("Reset", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(!network.localIsAdmin || model.actionInFlight)
+                    }
                     if let inviteUrl = URL(string: model.state.activeNetworkInvite) {
                         ShareLink(item: inviteUrl) {
                             Label("Share", systemImage: "square.and.arrow.up")
@@ -970,6 +986,7 @@ private struct DeviceDetailSheet: View {
     let network: NetworkState
     let participant: ParticipantState
     @State private var aliasDraft: String = ""
+    @State private var endpointHintsDraft: String = ""
     @State private var pendingRemove = false
 
     private var isMe: Bool { isSelf(participant, state: model.state) }
@@ -1016,6 +1033,9 @@ private struct DeviceDetailSheet: View {
                     if !participant.fipsTransportAddr.isEmpty {
                         labelValueRow("Endpoint", participant.fipsTransportAddr)
                     }
+                    if !participant.fipsEndpointHints.isEmpty {
+                        labelValueRow("Address hints", participant.fipsEndpointHints.joined(separator: ", "))
+                    }
                 }
 
                 if localIsAdmin {
@@ -1036,6 +1056,24 @@ private struct DeviceDetailSheet: View {
                         .buttonStyle(.bordered)
 
                         if !isMe {
+                            TextField("Address hints", text: $endpointHintsDraft)
+                                .textFieldStyle(.roundedBorder)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .onAppear { endpointHintsDraft = participant.fipsEndpointHints.joined(separator: ", ") }
+                            Button {
+                                model.dispatch(
+                                    NativeActions.setParticipantEndpointHints(
+                                        npub: participant.npub,
+                                        endpointHints: endpointHints(from: endpointHintsDraft)
+                                    ),
+                                    status: "Saving address hints"
+                                )
+                            } label: {
+                                Label("Save hints", systemImage: "network")
+                            }
+                            .buttonStyle(.bordered)
+
                             Button {
                                 if participant.isAdmin {
                                     model.dispatch(
@@ -1082,6 +1120,13 @@ private struct DeviceDetailSheet: View {
             .padding()
         }
         .background(AppColors.background)
+    }
+
+    private func endpointHints(from value: String) -> [String] {
+        value
+            .components(separatedBy: CharacterSet(charactersIn: ", \n\r\t"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     private func labelValueRow(_ label: String, _ value: String, copyable: Bool = false) -> some View {
@@ -1567,21 +1612,58 @@ private struct NoticeCard: View {
 
 private struct CopyLine: View {
     let value: String
+    var displayValue: String? = nil
     @ObservedObject var model: AppModel
 
     var body: some View {
         HStack {
-            Text(value.isEmpty ? "-" : value)
+            Text((displayValue ?? value).isEmpty ? "-" : (displayValue ?? value))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
-            Button(model.copiedValue == value ? "Copied" : "Copy") {
+            Button {
                 model.copy(value)
+            } label: {
+                Label("Copy", systemImage: model.copiedValue == value ? "checkmark" : "doc.on.doc")
             }
             .disabled(value.isEmpty)
         }
+    }
+}
+
+private func displayNetworkId(_ value: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.count > 4, isHexString(trimmed) else {
+        return trimmed
+    }
+    return stride(from: 0, to: trimmed.count, by: 4)
+        .map { offset -> String in
+            let start = trimmed.index(trimmed.startIndex, offsetBy: offset)
+            let end = trimmed.index(start, offsetBy: min(4, trimmed.distance(from: start, to: trimmed.endIndex)))
+            return String(trimmed[start..<end])
+        }
+        .joined(separator: "-")
+}
+
+private func normalizeNetworkIdInput(_ value: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let compactScalars = trimmed.unicodeScalars.filter {
+        !$0.properties.isWhitespace && $0 != "-"
+    }
+    let compact = String(String.UnicodeScalarView(compactScalars))
+    if compact.isEmpty && trimmed.unicodeScalars.allSatisfy({ $0.properties.isWhitespace || $0 == "-" }) {
+        return ""
+    }
+    return !compact.isEmpty && isHexString(compact) ? compact.lowercased() : trimmed
+}
+
+private func isHexString(_ value: String) -> Bool {
+    !value.isEmpty && value.unicodeScalars.allSatisfy { scalar in
+        (48...57).contains(Int(scalar.value))
+            || (65...70).contains(Int(scalar.value))
+            || (97...102).contains(Int(scalar.value))
     }
 }
 

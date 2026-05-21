@@ -109,6 +109,7 @@ pub struct ParticipantView {
     pub advertised_routes: Vec<String>,
     pub offers_exit_node: bool,
     pub fips_endpoint_npub: String,
+    pub fips_endpoint_hints: Vec<String>,
     pub fips_transport_addr: String,
     pub fips_transport_type: String,
     pub fips_srtt_ms: Option<u64>,

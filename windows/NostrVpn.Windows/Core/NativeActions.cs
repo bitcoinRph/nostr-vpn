@@ -21,6 +21,7 @@ public static class NativeActions
     public static string AcceptJoinRequest(string networkId, string requesterNpub) => AppCoreClient.Action(new { type = "accept_join_request", networkId, requesterNpub });
     public static string RejectJoinRequest(string networkId, string requesterNpub) => AppCoreClient.Action(new { type = "reject_join_request", networkId, requesterNpub });
     public static string ImportNetworkInvite(string invite) => AppCoreClient.Action(new { type = "import_network_invite", invite });
+    public static string ResetNetworkInvite(string networkId) => AppCoreClient.Action(new { type = "reset_network_invite", networkId });
     public static string StartInviteBroadcast() => AppCoreClient.Action(new { type = "start_invite_broadcast" });
     public static string StopInviteBroadcast() => AppCoreClient.Action(new { type = "stop_invite_broadcast" });
     public static string StartNearbyDiscovery() => AppCoreClient.Action(new { type = "start_nearby_discovery" });
@@ -30,6 +31,7 @@ public static class NativeActions
     public static string AddAdmin(string networkId, string npub) => AppCoreClient.Action(new { type = "add_admin", networkId, npub });
     public static string RemoveAdmin(string networkId, string npub) => AppCoreClient.Action(new { type = "remove_admin", networkId, npub });
     public static string SetParticipantAlias(string npub, string alias) => AppCoreClient.Action(new { type = "set_participant_alias", npub, alias });
+    public static string SetParticipantEndpointHints(string npub, List<string> endpointHints) => AppCoreClient.Action(new { type = "set_participant_endpoint_hints", npub, endpointHints });
     public static string UpdateSettings(SettingsPatch patch) => AppCoreClient.Action(new { type = "update_settings", patch });
 }
 

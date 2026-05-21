@@ -121,6 +121,7 @@ private fun DeviceDetailDialog(
     val manageNetwork = network?.takeIf { it.localIsAdmin }
     val manageDispatch = dispatch
     var aliasDraft by remember { mutableStateOf(participant.magicDnsAlias) }
+    var endpointHintsDraft by remember { mutableStateOf(participant.fipsEndpointHints.joinToString(", ")) }
     var pendingRemove by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -154,6 +155,10 @@ private fun DeviceDetailDialog(
                 }
                 Text("FIPS path", style = MaterialTheme.typography.labelMedium, color = Muted)
                 Text(participant.fipsPathLabel(state))
+                if (participant.fipsEndpointHints.isNotEmpty()) {
+                    Text("Address hints", style = MaterialTheme.typography.labelMedium, color = Muted)
+                    Text(participant.fipsEndpointHints.joinToString(", "))
+                }
                 if (manageNetwork != null && manageDispatch != null) {
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
@@ -168,6 +173,21 @@ private fun DeviceDetailDialog(
                             .put("npub", participant.npub).put("alias", aliasDraft))
                     }) { Text("Save alias") }
                     if (!isSelf) {
+                        OutlinedTextField(
+                            value = endpointHintsDraft,
+                            onValueChange = { endpointHintsDraft = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("Address hints") },
+                        )
+                        Button(onClick = {
+                            manageDispatch(NativeActions.setParticipantEndpointHints(
+                                participant.npub,
+                                endpointHintsDraft.split(',', '\n', '\r', '\t', ' ')
+                                    .map { it.trim() }
+                                    .filter { it.isNotEmpty() },
+                            ))
+                        }) { Text("Save hints") }
                         OutlinedButton(onClick = {
                             val type = if (participant.isAdmin) "remove_admin" else "add_admin"
                             manageDispatch(JSONObject().put("type", type)
@@ -608,21 +628,21 @@ internal fun Notice(text: String) {
 }
 
 @Composable
-internal fun CopyLine(value: String) {
+internal fun CopyLine(value: String, displayValue: String = value) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(value, modifier = Modifier.weight(1f), color = Muted, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+        Text(displayValue, modifier = Modifier.weight(1f), color = Muted, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
         CopyButton(value)
     }
 }
 
 @Composable
-internal fun CopyButton(value: String) {
+internal fun CopyButton(value: String, text: String = "Copy") {
     val context = LocalContext.current
     TextButton(enabled = value.isNotBlank(), onClick = {
         val clipboard = context.getSystemService(ClipboardManager::class.java)
         clipboard.setPrimaryClip(ClipData.newPlainText("Nostr VPN", value))
     }, modifier = Modifier.widthIn(min = 64.dp)) {
-        Text("Copy", maxLines = 1, softWrap = false)
+        Text(text, maxLines = 1, softWrap = false)
     }
 }
 

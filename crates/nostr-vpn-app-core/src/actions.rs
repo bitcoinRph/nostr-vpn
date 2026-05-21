@@ -54,6 +54,9 @@ pub enum NativeAppAction {
         network_id: String,
         npub: String,
     },
+    ResetNetworkInvite {
+        network_id: String,
+    },
     ImportNetworkInvite {
         invite: String,
     },
@@ -92,6 +95,10 @@ pub enum NativeAppAction {
         npub: String,
         alias: String,
     },
+    SetParticipantEndpointHints {
+        npub: String,
+        endpoint_hints: Vec<String>,
+    },
     UpdateSettings {
         patch: SettingsPatch,
     },
@@ -117,6 +124,24 @@ mod tests {
         assert_eq!(
             encoded,
             r#"{"type":"set_network_enabled","networkId":"net-1","enabled":true}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<NativeAppAction>(&encoded).expect("parse action"),
+            action
+        );
+    }
+
+    #[test]
+    fn participant_endpoint_hint_action_uses_camel_case_field() {
+        let action = NativeAppAction::SetParticipantEndpointHints {
+            npub: "npub1peer".to_string(),
+            endpoint_hints: vec!["peer.example.com:51820".to_string()],
+        };
+
+        let encoded = serde_json::to_string(&action).expect("serialize action");
+        assert_eq!(
+            encoded,
+            r#"{"type":"set_participant_endpoint_hints","npub":"npub1peer","endpointHints":["peer.example.com:51820"]}"#
         );
         assert_eq!(
             serde_json::from_str::<NativeAppAction>(&encoded).expect("parse action"),

@@ -101,8 +101,12 @@ class MainActivity : ComponentActivity() {
                     vpnPermissionLauncher.launch(intent)
                 }
             }
+            fun actionRequiresTunnelRefresh(type: String): Boolean =
+                type == "set_participant_endpoint_hints"
+
             fun dispatchNow(action: JSONObject) {
                 val wasEnabled = state.vpnEnabled
+                val actionType = action.optString("type")
                 try {
                     applyUserActionState(core.dispatch(action))
                 } catch (error: Exception) {
@@ -115,6 +119,8 @@ class MainActivity : ComponentActivity() {
                         Intent(this, NostrVpnService::class.java)
                             .setAction(NostrVpnService.ACTION_DISCONNECT),
                     )
+                } else if (wasEnabled && state.vpnEnabled && actionRequiresTunnelRefresh(actionType)) {
+                    startVpnTunnel()
                 }
             }
             fun requiredLocalNetworkPermission(): String? =

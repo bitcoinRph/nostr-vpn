@@ -199,6 +199,7 @@ struct ParticipantState: Decodable, Identifiable {
     var reachable = false
     var offersExitNode = false
     var fipsEndpointNpub = ""
+    var fipsEndpointHints: [String] = []
     var fipsTransportAddr = ""
     var fipsTransportType = ""
     var fipsSrttMs: UInt64 = 0
@@ -220,7 +221,7 @@ struct ParticipantState: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case npub, pubkeyHex, alias, magicDnsAlias, magicDnsName, tunnelIp
         case isAdmin, reachable, offersExitNode
-        case fipsEndpointNpub, fipsTransportAddr, fipsTransportType, fipsSrttMs
+        case fipsEndpointNpub, fipsEndpointHints, fipsTransportAddr, fipsTransportType, fipsSrttMs
         case fipsPacketsSent, fipsPacketsRecv, fipsBytesSent, fipsBytesRecv
         case state, meshState, statusText, lastSeenText, lastSignalText
     }
@@ -239,6 +240,7 @@ struct ParticipantState: Decodable, Identifiable {
         reachable = container.bool(.reachable)
         offersExitNode = container.bool(.offersExitNode)
         fipsEndpointNpub = container.string(.fipsEndpointNpub)
+        fipsEndpointHints = container.array(.fipsEndpointHints)
         fipsTransportAddr = container.string(.fipsTransportAddr)
         fipsTransportType = container.string(.fipsTransportType)
         fipsSrttMs = container.uint64(.fipsSrttMs)

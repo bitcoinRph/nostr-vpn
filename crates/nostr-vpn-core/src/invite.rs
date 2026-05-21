@@ -24,6 +24,8 @@ pub struct NetworkInvite {
     pub network_name: String,
     pub network_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub invite_secret: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub inviter_npub: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub inviter_node_name: String,
@@ -74,6 +76,7 @@ pub fn parse_network_invite(value: &str) -> Result<NetworkInvite> {
     if invite.network_id.is_empty() {
         return Err(anyhow!("invite network id is empty"));
     }
+    invite.invite_secret = invite.invite_secret.trim().to_string();
 
     invite.admins = normalized_invite_pubkeys(&invite.admins)?;
     if invite.inviter_npub.trim().is_empty() {

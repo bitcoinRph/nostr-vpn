@@ -1,5 +1,5 @@
 use super::*;
-use nostr_vpn_core::config::PendingOutboundJoinRequest;
+use nostr_vpn_core::config::{PendingOutboundJoinRequest, normalize_runtime_network_id};
 
 #[test]
 fn default_relays_match_hashtree_defaults() {
@@ -27,6 +27,14 @@ fn generated_config_auto_populates_keys() {
     assert!(!config.node.advertise_exit_node);
     assert!(config.node.advertised_routes.is_empty());
     assert!(config.effective_advertised_routes().is_empty());
+    assert_eq!(config.networks[0].network_id.len(), 8);
+    assert!(
+        config.networks[0]
+            .network_id
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit())
+    );
+    assert!(!config.networks[0].invite_secret.is_empty());
 }
 
 #[test]
@@ -594,13 +602,27 @@ fn record_inbound_join_request_ignores_mismatched_mesh_id() {
     let requester = Keys::generate().public_key().to_hex();
     let mut config = AppConfig::generated();
     config.networks[0].network_id = "mesh-home".to_string();
+    let invite_secret = config.networks[0].invite_secret.clone();
 
     let recorded = config
-        .record_inbound_join_request("mesh-other", &requester, "alice-phone", 1_726_000_000)
+        .record_inbound_join_request(
+            "mesh-other",
+            &invite_secret,
+            &requester,
+            "alice-phone",
+            1_726_000_000,
+        )
         .expect("record join request");
 
     assert!(recorded.is_none());
     assert!(config.networks[0].inbound_join_requests.is_empty());
+}
+
+#[test]
+fn grouped_hex_network_ids_normalize_to_compact_lowercase() {
+    assert_eq!(normalize_runtime_network_id(" FD5F-4753 "), "fd5f4753");
+    assert_eq!(normalize_runtime_network_id("----"), "");
+    assert_eq!(normalize_runtime_network_id("mesh-home"), "mesh-home");
 }
 
 #[test]
@@ -609,9 +631,16 @@ fn record_inbound_join_request_updates_matching_listening_network() {
     let mut config = AppConfig::generated();
     config.networks[0].name = "Home".to_string();
     config.networks[0].network_id = "mesh-home".to_string();
+    let invite_secret = config.networks[0].invite_secret.clone();
 
     let recorded = config
-        .record_inbound_join_request("mesh-home", &requester, "alice-phone", 1_726_000_000)
+        .record_inbound_join_request(
+            "mesh-home",
+            &invite_secret,
+            &requester,
+            "alice-phone",
+            1_726_000_000,
+        )
         .expect("record join request");
 
     assert_eq!(recorded.as_deref(), Some("Home"));
@@ -627,18 +656,66 @@ fn record_inbound_join_request_updates_matching_listening_network() {
 }
 
 #[test]
+fn record_inbound_join_request_ignores_wrong_invite_secret() {
+    let requester = Keys::generate().public_key().to_hex();
+    let mut config = AppConfig::generated();
+    config.networks[0].network_id = "mesh-home".to_string();
+    config.networks[0].invite_secret = "expected-secret".to_string();
+
+    let recorded = config
+        .record_inbound_join_request(
+            "mesh-home",
+            "wrong-secret",
+            &requester,
+            "alice-phone",
+            1_726_000_000,
+        )
+        .expect("record join request");
+
+    assert!(recorded.is_none());
+    assert!(config.networks[0].inbound_join_requests.is_empty());
+}
+
+#[test]
+fn reset_network_invite_rotates_the_join_request_secret() {
+    let mut config = AppConfig::generated();
+    let network_id = config.networks[0].id.clone();
+    let previous = config.networks[0].invite_secret.clone();
+
+    config
+        .reset_network_invite(&network_id)
+        .expect("reset invite");
+
+    assert_ne!(config.networks[0].invite_secret, previous);
+    assert!(!config.networks[0].invite_secret.is_empty());
+}
+
+#[test]
 fn reject_inbound_join_request_removes_matching_request() {
     let requester = Keys::generate().public_key().to_hex();
     let other = Keys::generate().public_key().to_hex();
     let mut config = AppConfig::generated();
     let network_id = config.networks[0].id.clone();
     config.networks[0].network_id = "mesh-home".to_string();
+    let invite_secret = config.networks[0].invite_secret.clone();
 
     config
-        .record_inbound_join_request("mesh-home", &requester, "alice-phone", 1_726_000_000)
+        .record_inbound_join_request(
+            "mesh-home",
+            &invite_secret,
+            &requester,
+            "alice-phone",
+            1_726_000_000,
+        )
         .expect("record requester");
     config
-        .record_inbound_join_request("mesh-home", &other, "bob-phone", 1_726_000_001)
+        .record_inbound_join_request(
+            "mesh-home",
+            &invite_secret,
+            &other,
+            "bob-phone",
+            1_726_000_001,
+        )
         .expect("record other");
 
     config

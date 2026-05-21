@@ -39,6 +39,8 @@ struct RootView: View {
     @State private var lastSyncedMagicDnsSuffix = ""
     @State private var lastSyncedWireguardExitConfig: String? = nil
     @State private var lastSyncedParticipantAliases: [String: String] = [:]
+    @State private var participantEndpointHintDrafts: [String: String] = [:]
+    @State private var lastSyncedParticipantEndpointHints: [String: String] = [:]
 
     private var state: NativeAppState {
         manager.state
@@ -153,7 +155,7 @@ struct RootView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             detailValueRow("Your Device ID", state.ownNpub)
-            detailValueRow("Network ID", network.networkId)
+            detailValueRow("Network ID", network.networkId, displayValue: displayNetworkId(network.networkId))
         }
     }
 
@@ -692,6 +694,19 @@ struct RootView: View {
             }
 
             if !isSelf(participant) {
+                HStack(spacing: 8) {
+                    label("Hints")
+                    TextField("host:port", text: participantEndpointHintsBinding(participant))
+                    Button {
+                        manager.setParticipantEndpointHints(
+                            npub: participant.npub,
+                            endpointHints: endpointHints(from: participantEndpointHintDrafts[participant.pubkeyHex] ?? "")
+                        )
+                    } label: {
+                        Label("Save", systemImage: "network")
+                    }
+                    .disabled(manager.actionInFlight)
+                }
                 deviceActionButtons(participant, network: network)
             }
         }
@@ -715,6 +730,7 @@ struct RootView: View {
                 metric("Role", deviceRoleText(participant))
                 metric("State", deviceStatusText(participant))
                 metric("FIPS path", fipsPathText(participant))
+                metric("Address hints", participant.fipsEndpointHints.isEmpty ? "-" : participant.fipsEndpointHints.joined(separator: ", "))
                 metric("Last seen", participant.lastSeenText.isEmpty ? "-" : participant.lastSeenText)
                 metric("Sent", formatBytes(participant.txBytes))
                 metric("Received", formatBytes(participant.rxBytes))
@@ -773,8 +789,8 @@ struct RootView: View {
         }
     }
 
-    private func detailValueRow(_ title: String, _ value: String) -> some View {
-        let displayValue = value.isEmpty ? "-" : value
+    private func detailValueRow(_ title: String, _ value: String, displayValue customDisplayValue: String? = nil) -> some View {
+        let displayValue = value.isEmpty ? "-" : customDisplayValue ?? value
         return VStack(alignment: .leading, spacing: 4) {
             Text(displayValue)
                 .font(.subheadline.weight(.semibold))
@@ -843,20 +859,21 @@ struct RootView: View {
                     .frame(width: 150, height: 150)
                 VStack(alignment: .leading, spacing: 12) {
                     sectionHeader("Invite Devices", systemImage: "qrcode")
-                    Text("Your invite")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     HStack(spacing: 8) {
-                        Text(invite.isEmpty ? "No invite" : invite)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
-                            .padding(.horizontal, 10)
-                            .frame(height: 32)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                        copyButton(value: invite, copied: .invite, systemImage: "doc.on.doc")
-                            .disabled(invite.isEmpty)
+                        Button {
+                            manager.copy(invite, as: .invite)
+                        } label: {
+                            Label("Copy Link", systemImage: copyIndicator(.invite, peerNpub: nil) ? "checkmark" : "doc.on.doc")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(invite.isEmpty)
+                        Button(role: .destructive) {
+                            manager.resetNetworkInvite(networkId: network.id)
+                        } label: {
+                            Label("Reset", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!network.localIsAdmin || manager.actionInFlight || !network.enabled)
                         Button {
                             manager.share(invite)
                         } label: {
@@ -1377,7 +1394,7 @@ struct RootView: View {
                     }
                     GridRow {
                         label("Network ID")
-                        Text(network.networkId)
+                        Text(displayNetworkId(network.networkId))
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .textSelection(.enabled)
@@ -1710,6 +1727,23 @@ struct RootView: View {
         )
     }
 
+    private func participantEndpointHintsBinding(_ participant: NativeParticipantState) -> Binding<String> {
+        Binding(
+            get: {
+                participantEndpointHintDrafts[participant.pubkeyHex]
+                    ?? participant.fipsEndpointHints.joined(separator: ", ")
+            },
+            set: { participantEndpointHintDrafts[participant.pubkeyHex] = $0 }
+        )
+    }
+
+    private func endpointHints(from value: String) -> [String] {
+        value
+            .components(separatedBy: CharacterSet(charactersIn: ", \n\r\t"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
     private func addNetwork(defaultName: String = "") {
         let name = networkNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
         manager.addNetwork(name.isEmpty ? defaultName : name)
@@ -1758,6 +1792,14 @@ struct RootView: View {
                     participantAliasDrafts[key] = alias
                 }
                 lastSyncedParticipantAliases[key] = alias
+
+                let endpointHints = participant.fipsEndpointHints.joined(separator: ", ")
+                let previousEndpointHints = lastSyncedParticipantEndpointHints[key]
+                if participantEndpointHintDrafts[key] == nil
+                    || participantEndpointHintDrafts[key] == previousEndpointHints {
+                    participantEndpointHintDrafts[key] = endpointHints
+                }
+                lastSyncedParticipantEndpointHints[key] = endpointHints
             }
         }
 
@@ -2150,6 +2192,40 @@ private func short(_ value: String, prefix: Int, suffix: Int) -> String {
         return value
     }
     return "\(value.prefix(prefix))...\(value.suffix(suffix))"
+}
+
+private func displayNetworkId(_ value: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.count > 4, isHexString(trimmed) else {
+        return trimmed
+    }
+    return stride(from: 0, to: trimmed.count, by: 4)
+        .map { offset -> String in
+            let start = trimmed.index(trimmed.startIndex, offsetBy: offset)
+            let end = trimmed.index(start, offsetBy: min(4, trimmed.distance(from: start, to: trimmed.endIndex)))
+            return String(trimmed[start..<end])
+        }
+        .joined(separator: "-")
+}
+
+private func normalizeNetworkIdInput(_ value: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let compactScalars = trimmed.unicodeScalars.filter {
+        !$0.properties.isWhitespace && $0 != "-"
+    }
+    let compact = String(String.UnicodeScalarView(compactScalars))
+    if compact.isEmpty && trimmed.unicodeScalars.allSatisfy({ $0.properties.isWhitespace || $0 == "-" }) {
+        return ""
+    }
+    return !compact.isEmpty && isHexString(compact) ? compact.lowercased() : trimmed
+}
+
+private func isHexString(_ value: String) -> Bool {
+    !value.isEmpty && value.unicodeScalars.allSatisfy { scalar in
+        (48...57).contains(Int(scalar.value))
+            || (65...70).contains(Int(scalar.value))
+            || (97...102).contains(Int(scalar.value))
+    }
 }
 
 private func cleanIp(_ value: String) -> String {

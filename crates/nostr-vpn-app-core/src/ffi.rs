@@ -860,6 +860,10 @@ impl NativeAppRuntime {
                 self.config.add_admin_to_network(&network_id, &npub)?;
                 self.save_reload_and_refresh()
             }
+            NativeAppAction::ResetNetworkInvite { network_id } => {
+                self.config.reset_network_invite(&network_id)?;
+                self.save_reload_and_refresh()
+            }
             NativeAppAction::ImportNetworkInvite { invite } => {
                 self.import_network_invite(&invite)?;
                 if !self.vpn_enabled {
@@ -902,6 +906,14 @@ impl NativeAppRuntime {
                 self.config.set_peer_alias(&npub, &alias)?;
                 self.save_reload_and_refresh()
             }
+            NativeAppAction::SetParticipantEndpointHints {
+                npub,
+                endpoint_hints,
+            } => {
+                self.config
+                    .set_fips_peer_endpoint_hints(&npub, &endpoint_hints)?;
+                self.save_reload_and_refresh()
+            }
             NativeAppAction::UpdateSettings { patch } => {
                 self.apply_settings_patch(patch)?;
                 self.save_reload_and_refresh()
@@ -935,6 +947,7 @@ impl NativeAppRuntime {
             v: NETWORK_INVITE_VERSION,
             network_name: String::new(),
             network_id: mesh_id.to_string(),
+            invite_secret: String::new(),
             inviter_npub: admin.to_string(),
             inviter_node_name: String::new(),
             inviter_endpoints: Vec::new(),
@@ -1924,6 +1937,7 @@ impl NativeAppRuntime {
             fips_endpoint_npub: daemon_peer
                 .map(|peer| peer.fips_endpoint_npub.clone())
                 .unwrap_or_default(),
+            fips_endpoint_hints: self.config.fips_peer_endpoint_hints(participant),
             fips_transport_addr: daemon_peer
                 .map(|peer| peer.fips_transport_addr.clone())
                 .unwrap_or_default(),
@@ -3084,6 +3098,74 @@ mod tests {
 
         let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
         assert_eq!(saved.peer_alias(&own_pubkey).as_deref(), Some("my-iphone"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn participant_endpoint_hint_action_updates_network_state_for_ui_shells() {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-peer-hints-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+
+        let peer = Keys::generate();
+        let peer_hex = peer.public_key().to_hex();
+        let peer_npub = peer.public_key().to_bech32().expect("peer npub");
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        runtime.last_error.clear();
+        runtime.mobile_runtime = true;
+        runtime.config_path = dir.join("config.toml");
+        create_test_network(&mut runtime, "Home");
+        runtime.config.networks[0].participants = vec![peer_hex.clone()];
+
+        runtime.dispatch(NativeAppAction::SetParticipantEndpointHints {
+            npub: peer_npub.clone(),
+            endpoint_hints: vec![
+                "peer.example.com:51820".to_string(),
+                " 192.168.1.23:51821 ".to_string(),
+            ],
+        });
+
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        let state = runtime.state();
+        let participant = state.networks[0]
+            .participants
+            .iter()
+            .find(|participant| participant.pubkey_hex == peer_hex)
+            .expect("peer participant");
+        assert_eq!(
+            participant.fips_endpoint_hints,
+            vec![
+                "192.168.1.23:51821".to_string(),
+                "peer.example.com:51820".to_string()
+            ]
+        );
+
+        let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
+        assert_eq!(
+            saved.fips_peer_endpoint_hints(&peer_npub),
+            participant.fips_endpoint_hints
+        );
+
+        runtime.dispatch(NativeAppAction::SetParticipantEndpointHints {
+            npub: peer_npub,
+            endpoint_hints: Vec::new(),
+        });
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        assert!(
+            runtime.state().networks[0]
+                .participants
+                .iter()
+                .find(|participant| participant.pubkey_hex == peer_hex)
+                .expect("peer participant")
+                .fips_endpoint_hints
+                .is_empty()
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

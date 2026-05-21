@@ -70,6 +70,13 @@ pub(crate) struct AliasRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct EndpointHintsRequest {
+    pub npub: String,
+    pub endpoint_hints: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct QrMatrixRequest {
     pub text: String,
 }

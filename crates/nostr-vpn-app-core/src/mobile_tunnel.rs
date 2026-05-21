@@ -85,6 +85,8 @@ pub(crate) struct MobileTunnelConfig {
     #[serde(default)]
     pub(crate) node_name: String,
     pub(crate) network_id: String,
+    #[serde(default)]
+    pub(crate) invite_secret: String,
     pub(crate) local_address: String,
     #[serde(default)]
     pub(crate) advertised_endpoint: String,
@@ -129,6 +131,8 @@ pub(crate) struct MobileTunnelConfig {
     pub(crate) join_requests_enabled: bool,
     #[serde(default)]
     pub(crate) pending_join_request_recipient: String,
+    #[serde(default)]
+    pub(crate) pending_join_invite_secret: String,
     #[serde(default)]
     pub(crate) pending_join_requested_at: u64,
     #[serde(default)]
@@ -247,11 +251,18 @@ impl MobileTunnelConfig {
             } else {
                 (None, Vec::new(), Vec::new())
             };
-        let (pending_join_request_recipient, pending_join_requested_at) = app
-            .active_network_opt()
-            .and_then(|network| network.outbound_join_request.as_ref())
-            .map(|request| (request.recipient.clone(), request.requested_at))
-            .unwrap_or_default();
+        let (pending_join_request_recipient, pending_join_invite_secret, pending_join_requested_at) =
+            app.active_network_opt()
+                .and_then(|network| {
+                    network.outbound_join_request.as_ref().map(|request| {
+                        (
+                            request.recipient.clone(),
+                            network.invite_secret.clone(),
+                            request.requested_at,
+                        )
+                    })
+                })
+                .unwrap_or_default();
 
         Ok(Self {
             config_path: config_path.to_string_lossy().to_string(),
@@ -259,6 +270,9 @@ impl MobileTunnelConfig {
             identity_nsec: app.nostr.secret_key.clone(),
             node_name: app.node_name.trim().to_string(),
             network_id,
+            invite_secret: app
+                .active_network_opt()
+                .map_or_else(String::new, |network| network.invite_secret.clone()),
             local_address,
             advertised_endpoint: app.node.endpoint.trim().to_string(),
             listen_port: app.node.listen_port,
@@ -274,6 +288,7 @@ impl MobileTunnelConfig {
             wireguard_exit,
             join_requests_enabled: app.join_requests_enabled(),
             pending_join_request_recipient,
+            pending_join_invite_secret,
             pending_join_requested_at,
             error: String::new(),
         })
@@ -1174,6 +1189,7 @@ fn record_mobile_join_request(
     app.ensure_defaults();
     let changed = match app.record_inbound_join_request(
         &request.network_id,
+        &request.invite_secret,
         sender_pubkey,
         &request.requester_node_name,
         requested_at,
@@ -1682,6 +1698,7 @@ fn pending_mobile_join_request_frame(
         requested_at: config.pending_join_requested_at,
         request: MeshJoinRequest {
             network_id: normalize_runtime_network_id(&config.network_id),
+            invite_secret: config.pending_join_invite_secret.trim().to_string(),
             requester_node_name: config.node_name.trim().to_string(),
         },
     };
@@ -2131,6 +2148,7 @@ fn empty_config() -> MobileTunnelConfig {
         identity_nsec: String::new(),
         node_name: String::new(),
         network_id: String::new(),
+        invite_secret: String::new(),
         local_address: String::new(),
         advertised_endpoint: String::new(),
         listen_port: 0,
@@ -2146,6 +2164,7 @@ fn empty_config() -> MobileTunnelConfig {
         wireguard_exit: None,
         join_requests_enabled: false,
         pending_join_request_recipient: String::new(),
+        pending_join_invite_secret: String::new(),
         pending_join_requested_at: 0,
         error: String::new(),
     }
@@ -2168,6 +2187,7 @@ mod tests {
             name: "Test".to_string(),
             enabled: true,
             network_id: "test".to_string(),
+            invite_secret: "join-secret".to_string(),
             participants: vec![peer.to_string()],
             admins: vec![own],
             listen_for_join_requests: true,
@@ -2214,6 +2234,7 @@ mod tests {
             name: "Test".to_string(),
             enabled: true,
             network_id: "test".to_string(),
+            invite_secret: "join-secret".to_string(),
             participants: vec![peer.to_string()],
             admins: vec![own],
             listen_for_join_requests: true,
@@ -2254,6 +2275,7 @@ mod tests {
             name: "Test".to_string(),
             enabled: true,
             network_id: "test".to_string(),
+            invite_secret: "join-secret".to_string(),
             participants: Vec::new(),
             admins: vec![admin.clone()],
             listen_for_join_requests: false,
@@ -2311,6 +2333,7 @@ mod tests {
             name: "Test".to_string(),
             enabled: true,
             network_id: "test".to_string(),
+            invite_secret: "join-secret".to_string(),
             participants: Vec::new(),
             admins: vec![own],
             listen_for_join_requests: true,
@@ -2361,6 +2384,7 @@ mod tests {
                 requested_at: 1_778_998_000,
                 request: MeshJoinRequest {
                     network_id: "mesh-home".to_string(),
+                    invite_secret: String::new(),
                     requester_node_name: "iPhone".to_string(),
                 },
             }
@@ -2386,6 +2410,7 @@ mod tests {
             requested_at: 2,
             request: MeshJoinRequest {
                 network_id: "mesh-home".to_string(),
+                invite_secret: String::new(),
                 requester_node_name: "iPhone".to_string(),
             },
         };
@@ -2422,6 +2447,7 @@ mod tests {
             name: "Home".to_string(),
             enabled: true,
             network_id: "mesh-home".to_string(),
+            invite_secret: "join-secret".to_string(),
             participants: vec![own.clone()],
             admins: vec![own],
             listen_for_join_requests: true,
@@ -2436,6 +2462,7 @@ mod tests {
         let dirty = AtomicBool::new(false);
         let request = MeshJoinRequest {
             network_id: "mesh-home".to_string(),
+            invite_secret: "join-secret".to_string(),
             requester_node_name: "iPhone".to_string(),
         };
 
@@ -2520,6 +2547,7 @@ mod tests {
             name: "Home".to_string(),
             enabled: true,
             network_id: network_id.to_string(),
+            invite_secret: "join-secret".to_string(),
             participants: vec![admin_pubkey.to_string()],
             admins: vec![admin_pubkey.to_string()],
             listen_for_join_requests: true,
@@ -2576,6 +2604,7 @@ mod tests {
             peers: vec![admin_peer],
             peer_hints: requester_peer_hints,
             pending_join_request_recipient: admin_pubkey,
+            pending_join_invite_secret: "join-secret".to_string(),
             pending_join_requested_at: requested_at,
             ..empty_config()
         }
@@ -2744,6 +2773,7 @@ mod tests {
             name: "Test".to_string(),
             enabled: true,
             network_id: "test".to_string(),
+            invite_secret: "join-secret".to_string(),
             participants: vec![peer.to_string()],
             admins: vec![own],
             listen_for_join_requests: true,
@@ -2796,6 +2826,7 @@ mod tests {
             name: "Test".to_string(),
             enabled: true,
             network_id: "test".to_string(),
+            invite_secret: "join-secret".to_string(),
             participants: vec![peer.to_string()],
             admins: vec![own],
             listen_for_join_requests: true,
@@ -2872,6 +2903,7 @@ mod tests {
             name: "Test".to_string(),
             enabled: true,
             network_id: "test".to_string(),
+            invite_secret: "join-secret".to_string(),
             participants: vec![peer.to_string()],
             admins: vec![own],
             listen_for_join_requests: true,

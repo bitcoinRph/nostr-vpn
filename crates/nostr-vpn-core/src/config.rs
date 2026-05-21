@@ -23,11 +23,12 @@ pub use crate::network_routes::{
 
 use crate::config_defaults::{
     current_unix_timestamp, default_autoconnect, default_close_to_tray_on_close, default_endpoint,
-    default_fips_advertise_endpoint, default_lan_discovery_enabled, default_launch_on_startup,
-    default_listen_for_join_requests, default_listen_port, default_nat_discovery_timeout_secs,
-    default_nat_enabled, default_nat_stun_servers, default_network_enabled, default_network_id,
-    default_node_id, default_relays, default_tunnel_ip, generate_nostr_identity, is_true, is_zero,
-    needs_generated_network_id, npub_for_pubkey_hex,
+    default_fips_advertise_endpoint, default_invite_secret, default_lan_discovery_enabled,
+    default_launch_on_startup, default_listen_for_join_requests, default_listen_port,
+    default_nat_discovery_timeout_secs, default_nat_enabled, default_nat_stun_servers,
+    default_network_enabled, default_network_id, default_node_id, default_relays,
+    default_tunnel_ip, generate_nostr_identity, is_true, is_zero, needs_generated_network_id,
+    npub_for_pubkey_hex,
 };
 pub use crate::config_defaults::{
     maybe_autoconfigure_node, needs_endpoint_autoconfig, needs_tunnel_ip_autoconfig,
@@ -579,6 +580,8 @@ pub struct NetworkConfig {
     pub enabled: bool,
     #[serde(default)]
     pub network_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub invite_secret: String,
     #[serde(default)]
     pub participants: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -646,6 +649,7 @@ impl Default for AppConfig {
                 name: default_network_name(1),
                 enabled: default_network_enabled(),
                 network_id: default_network_id(),
+                invite_secret: default_invite_secret(),
                 participants: Vec::new(),
                 admins: Vec::new(),
                 listen_for_join_requests: default_listen_for_join_requests(),
@@ -840,8 +844,13 @@ impl AppConfig {
                 network.id = uniquify_network_entry_id(network.id.clone(), &mut used_ids);
             }
 
+            network.network_id = normalize_runtime_network_id(&network.network_id);
             if network.network_id.trim().is_empty() {
                 network.network_id = default_network_id();
+            }
+            network.invite_secret = network.invite_secret.trim().to_string();
+            if network.invite_secret.is_empty() {
+                network.invite_secret = default_invite_secret();
             }
             network.invite_inviter =
                 normalize_nostr_pubkey(&network.invite_inviter).unwrap_or_default();
@@ -1051,6 +1060,7 @@ impl AppConfig {
             name,
             enabled,
             network_id: default_network_id(),
+            invite_secret: default_invite_secret(),
             participants: Vec::new(),
             admins: Vec::new(),
             listen_for_join_requests: default_listen_for_join_requests(),
@@ -1150,6 +1160,7 @@ impl AppConfig {
     pub fn record_inbound_join_request(
         &mut self,
         requested_network_id: &str,
+        requested_invite_secret: &str,
         requester: &str,
         requester_node_name: &str,
         requested_at: u64,
@@ -1167,6 +1178,11 @@ impl AppConfig {
         }) else {
             return Ok(None);
         };
+        if !network.invite_secret.trim().is_empty()
+            && network.invite_secret.trim() != requested_invite_secret.trim()
+        {
+            return Ok(None);
+        }
 
         if network
             .participants
@@ -1232,6 +1248,14 @@ impl AppConfig {
             .ok_or_else(|| anyhow::anyhow!("network not found"))?;
         network.network_id = normalized;
 
+        Ok(())
+    }
+
+    pub fn reset_network_invite(&mut self, network_id: &str) -> Result<()> {
+        let network = self
+            .network_by_id_mut(network_id)
+            .ok_or_else(|| anyhow::anyhow!("network not found"))?;
+        network.invite_secret = default_invite_secret();
         Ok(())
     }
 
@@ -1634,6 +1658,45 @@ impl AppConfig {
         entry.dedup();
         self.normalize_fips_peer_endpoints();
         Ok(())
+    }
+
+    pub fn set_fips_peer_endpoint_hints(&mut self, peer: &str, endpoints: &[String]) -> Result<()> {
+        let peer_pubkey = normalize_nostr_pubkey(peer)?;
+        let peer_npub = npub_for_pubkey_hex(&peer_pubkey);
+        let mut normalized = Vec::new();
+        for endpoint in endpoints {
+            let endpoint = endpoint.trim();
+            if endpoint.is_empty() {
+                continue;
+            }
+            let Some(endpoint) = normalize_fips_peer_endpoint_hint(endpoint) else {
+                return Err(anyhow!(
+                    "FIPS address hint must be a usable UDP host:port, for example 192.168.1.10:51820 or peer.example.com:51820"
+                ));
+            };
+            normalized.push(endpoint);
+        }
+        normalized.sort();
+        normalized.dedup();
+
+        if normalized.is_empty() {
+            self.fips_peer_endpoints.remove(&peer_npub);
+        } else {
+            self.fips_peer_endpoints.insert(peer_npub, normalized);
+        }
+        self.normalize_fips_peer_endpoints();
+        Ok(())
+    }
+
+    pub fn fips_peer_endpoint_hints(&self, peer: &str) -> Vec<String> {
+        let Ok(peer_pubkey) = normalize_nostr_pubkey(peer) else {
+            return Vec::new();
+        };
+        let peer_npub = npub_for_pubkey_hex(&peer_pubkey);
+        self.fips_peer_endpoints
+            .get(&peer_npub)
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn ensure_single_active_network(&mut self) {
@@ -2239,6 +2302,51 @@ mod tests {
             vec![(peer_public_key, vec!["10.203.0.12:51820".to_string()])]
         );
         assert!(config.has_fips_static_peer_endpoints());
+    }
+
+    #[test]
+    fn set_fips_peer_endpoint_hints_replaces_and_removes_peer_hints() {
+        let (_, peer_public_key) = generate_nostr_identity();
+        let peer_public_key_hex =
+            normalize_nostr_pubkey(&peer_public_key).expect("valid peer public key");
+        let mut config = AppConfig::default();
+
+        config
+            .set_fips_peer_endpoint_hints(
+                &peer_public_key,
+                &[
+                    " peer.example.com:51820 ".to_string(),
+                    "192.168.1.23:51821".to_string(),
+                    "peer.example.com:51820".to_string(),
+                ],
+            )
+            .expect("set hints");
+
+        assert_eq!(
+            config.fips_peer_endpoint_hints(&peer_public_key_hex),
+            vec![
+                "192.168.1.23:51821".to_string(),
+                "peer.example.com:51820".to_string()
+            ]
+        );
+
+        let error = config
+            .set_fips_peer_endpoint_hints(&peer_public_key, &["198.51.100.10:51820".to_string()])
+            .expect_err("documentation endpoint is rejected")
+            .to_string();
+        assert!(error.contains("host:port"), "{error}");
+        assert_eq!(
+            config.fips_peer_endpoint_hints(&peer_public_key),
+            vec![
+                "192.168.1.23:51821".to_string(),
+                "peer.example.com:51820".to_string()
+            ]
+        );
+
+        config
+            .set_fips_peer_endpoint_hints(&peer_public_key, &[])
+            .expect("clear hints");
+        assert!(config.fips_peer_endpoint_hints(&peer_public_key).is_empty());
     }
 
     #[cfg(unix)]

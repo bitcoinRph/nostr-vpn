@@ -87,6 +87,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => !ActionInFlight);
         ToggleVpnCommand = new AsyncRelayCommand(_ => ToggleVpnAsync(), _ => !ActionInFlight && State.VpnControlSupported && HasActiveNetwork);
         CopyInviteCommand = new RelayCommand(_ => CopyText(State.ActiveNetworkInvite));
+        ResetInviteCommand = new AsyncRelayCommand(_ => ResetInviteAsync(), _ => !ActionInFlight && ActiveNetwork?.LocalIsAdmin == true);
         CopyThisDeviceCommand = new RelayCommand(_ => CopyText(ThisDeviceCopyValue), _ => !string.IsNullOrWhiteSpace(ThisDeviceCopyValue));
         CopyPeerCommand = new RelayCommand(parameter => CopyText(parameter as string ?? ""));
         ImportInviteCommand = new AsyncRelayCommand(_ => ImportInviteAsync(InviteInput), _ => !ActionInFlight && !string.IsNullOrWhiteSpace(InviteInput));
@@ -486,6 +487,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public bool HasIncomingJoinRequests => State.Networks.Any(network => network.InboundJoinRequests.Count > 0);
     public bool ActiveNetworkHasIncomingJoinRequests => ActiveNetwork?.InboundJoinRequests.Count > 0;
     public bool ShowActiveNetworkInviteCard => ActiveNetwork?.Enabled == true;
+    public string ActiveNetworkDisplayNetworkId => DisplayNetworkId(ActiveNetwork?.NetworkId ?? "");
     public string HeroSubtitle => $"{State.ConnectedPeerCount} of {State.ExpectedPeerCount} connected";
     public string VpnButtonText => State.VpnEnabled ? "On" : "Off";
     /// Mirrors `AppManager.vpnStatusText` on macOS so the header and the tray
@@ -591,6 +593,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public ICommand RefreshCommand { get; }
     public ICommand ToggleVpnCommand { get; }
     public ICommand CopyInviteCommand { get; }
+    public ICommand ResetInviteCommand { get; }
     public ICommand CopyThisDeviceCommand { get; }
     public ICommand CopyPeerCommand { get; }
     public ICommand ImportInviteCommand { get; }
@@ -803,10 +806,18 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public Task SaveActiveNetworkMeshIdAsync()
     {
         var network = ActiveNetwork;
-        var meshId = NetworkMeshIdDraft.Trim();
+        var meshId = NormalizeNetworkIdInput(NetworkMeshIdDraft);
         return network is null || string.IsNullOrWhiteSpace(meshId)
             ? Task.CompletedTask
             : DispatchAsync(NativeActions.SetNetworkMeshId(network.Id, meshId), "Saving network ID");
+    }
+
+    private Task ResetInviteAsync()
+    {
+        var network = ActiveNetwork;
+        return network is null
+            ? Task.CompletedTask
+            : DispatchAsync(NativeActions.ResetNetworkInvite(network.Id), "Resetting invite");
     }
 
     public Task RequestActiveNetworkJoinAsync()
@@ -836,6 +847,22 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         return ActiveNetwork?.LocalIsAdmin == true
             ? DispatchAsync(NativeActions.SetParticipantAlias(participant.Npub, alias.Trim()), "Saving alias")
             : Task.CompletedTask;
+    }
+
+    public Task SetParticipantEndpointHintsAsync(NativeParticipantState participant, string hints)
+    {
+        if (ActiveNetwork?.LocalIsAdmin != true || participant.IsSelf)
+        {
+            return Task.CompletedTask;
+        }
+        var parsed = (hints ?? string.Empty)
+            .Split([',', '\n', '\r', '\t', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        return DispatchAsync(
+            NativeActions.SetParticipantEndpointHints(participant.Npub, parsed),
+            "Saving address hints");
     }
 
     public void CopyText(string value)
@@ -1075,7 +1102,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     private async Task ManualAddNetworkAsync()
     {
         var admin = (ManualJoinAdminId ?? string.Empty).Trim();
-        var mesh = (ManualJoinMeshId ?? string.Empty).Trim();
+        var mesh = NormalizeNetworkIdInput(ManualJoinMeshId);
         if (admin.Length == 0 || mesh.Length == 0 || ManualJoinAdminInvalid)
         {
             return;
@@ -1249,7 +1276,29 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         MagicDnsSuffix = state.MagicDnsSuffix;
         WireguardExitConfig = state.WireguardExitConfig;
         NetworkNameDraft = active?.Name ?? "";
-        NetworkMeshIdDraft = active?.NetworkId ?? "";
+        NetworkMeshIdDraft = DisplayNetworkId(active?.NetworkId ?? "");
+    }
+
+    private static string NormalizeNetworkIdInput(string value)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+        var compact = new string(trimmed.Where(ch => !char.IsWhiteSpace(ch) && ch != '-').ToArray());
+        if (compact.Length == 0 && trimmed.All(ch => char.IsWhiteSpace(ch) || ch == '-'))
+        {
+            return "";
+        }
+        return compact.Length > 0 && compact.All(Uri.IsHexDigit) ? compact.ToLowerInvariant() : trimmed;
+    }
+
+    private static string DisplayNetworkId(string value)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+        if (trimmed.Length <= 4 || trimmed.Any(ch => !Uri.IsHexDigit(ch)))
+        {
+            return trimmed;
+        }
+        return string.Join("-", Enumerable.Range(0, (trimmed.Length + 3) / 4)
+            .Select(index => trimmed.Substring(index * 4, Math.Min(4, trimmed.Length - index * 4))));
     }
 
     private static string DisplayNetworkName(NativeNetworkState? network)
@@ -1281,6 +1330,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(HasIncomingJoinRequests));
         OnPropertyChanged(nameof(ActiveNetworkHasIncomingJoinRequests));
         OnPropertyChanged(nameof(ShowActiveNetworkInviteCard));
+        OnPropertyChanged(nameof(ActiveNetworkDisplayNetworkId));
         OnPropertyChanged(nameof(HeroSubtitle));
         OnPropertyChanged(nameof(VpnButtonText));
         OnPropertyChanged(nameof(VpnStatusText));

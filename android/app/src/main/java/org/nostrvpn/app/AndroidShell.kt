@@ -553,7 +553,7 @@ private fun NetworkSetupCard(
             }
             if (manualExpanded) {
                 val adminTrim = manualAdminId.trim()
-                val meshTrim = manualNetworkId.trim()
+                val meshTrim = normalizeNetworkIdInput(manualNetworkId)
                 val adminInvalid = adminTrim.isNotEmpty() && !isValidDeviceId(adminTrim)
                 val canSubmit = adminTrim.isNotEmpty() && meshTrim.isNotEmpty() && !adminInvalid
                 Text(
@@ -687,7 +687,14 @@ private fun AddDevicesDialog(
                     )
                     if (state.activeNetworkInvite.isNotBlank()) {
                         QrCode(invite = state.activeNetworkInvite, qrJson = qrJson)
-                        CopyLine(state.activeNetworkInvite)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CopyButton(state.activeNetworkInvite, "Copy link")
+                            OutlinedButton(onClick = {
+                                dispatch(NativeActions.resetNetworkInvite(network.id))
+                            }) {
+                                Text("Reset")
+                            }
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Switch(
@@ -736,7 +743,7 @@ private fun AddDevicesDialog(
                 Text("Your Device ID", style = MaterialTheme.typography.bodySmall, color = Muted)
                 CopyLine(state.ownNpub)
                 Text("Network ID", style = MaterialTheme.typography.bodySmall, color = Muted)
-                CopyLine(network.networkId)
+                CopyLine(network.networkId, displayNetworkId(network.networkId))
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Add by Device ID", style = MaterialTheme.typography.titleMedium)
@@ -948,3 +955,23 @@ private fun selfUpdateButtonText(state: AndroidSelfUpdateState): String =
         state.available -> "Download update"
         else -> "Check for updates"
     }
+
+private fun displayNetworkId(value: String): String {
+    val trimmed = value.trim()
+    if (trimmed.length <= 4 || !trimmed.all { it.isHexDigit() }) {
+        return trimmed
+    }
+    return trimmed.chunked(4).joinToString("-")
+}
+
+private fun normalizeNetworkIdInput(value: String): String {
+    val trimmed = value.trim()
+    val compact = trimmed.filter { !it.isWhitespace() && it != '-' }
+    if (compact.isEmpty() && trimmed.all { it.isWhitespace() || it == '-' }) {
+        return ""
+    }
+    return if (compact.isNotEmpty() && compact.all { it.isHexDigit() }) compact.lowercase() else trimmed
+}
+
+private fun Char.isHexDigit(): Boolean =
+    this in '0'..'9' || lowercaseChar() in 'a'..'f'

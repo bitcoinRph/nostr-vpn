@@ -2517,11 +2517,13 @@ fn persist_inbound_join_request(
     sender_pubkey: &str,
     requested_at: u64,
     network_id: &str,
+    invite_secret: &str,
     requester_node_name: &str,
     vpn_status: &mut String,
 ) {
     match app.record_inbound_join_request(
         network_id,
+        invite_secret,
         sender_pubkey,
         requester_node_name,
         requested_at,
@@ -2606,6 +2608,7 @@ fn drain_fips_mesh_events(
                     &sender_pubkey,
                     requested_at,
                     &request.network_id,
+                    &request.invite_secret,
                     &request.requester_node_name,
                     vpn_status,
                 );
@@ -2765,6 +2768,7 @@ async fn send_pending_fips_join_requests(
     }
     let request = MeshJoinRequest {
         network_id: normalize_runtime_network_id(&network.network_id),
+        invite_secret: network.invite_secret.clone(),
         requester_node_name: app.node_name.trim().to_string(),
     };
 

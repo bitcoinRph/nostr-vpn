@@ -253,6 +253,7 @@ pub(crate) fn active_network_invite_code(config: &AppConfig) -> Result<String> {
         v: nostr_vpn_core::invite::NETWORK_INVITE_VERSION,
         network_name: String::new(),
         network_id: roster.network_id,
+        invite_secret: active_network.invite_secret.clone(),
         inviter_npub: String::new(),
         inviter_node_name: String::new(),
         inviter_endpoints: active_inviter_endpoints(config),

@@ -7,7 +7,7 @@ fn legacy_prefixed_network_ids_are_normalized_at_runtime() {
 
     config.ensure_defaults();
 
-    assert_eq!(config.networks[0].network_id, "nostr-vpn:1234abcd5678ef90");
+    assert_eq!(config.networks[0].network_id, "1234abcd5678ef90");
     assert_eq!(config.effective_network_id(), "1234abcd5678ef90");
 }
 
@@ -498,6 +498,7 @@ fn active_network_helpers_ignore_inactive_networks() {
             name: "oma".to_string(),
             enabled: true,
             network_id: "mesh-home".to_string(),
+            invite_secret: "home-secret".to_string(),
             participants: vec![peer_a.clone()],
             admins: Vec::new(),
             listen_for_join_requests: true,
@@ -512,6 +513,7 @@ fn active_network_helpers_ignore_inactive_networks() {
             name: "lauri".to_string(),
             enabled: false,
             network_id: "mesh-work".to_string(),
+            invite_secret: "work-secret".to_string(),
             participants: vec![peer_b.clone()],
             admins: Vec::new(),
             listen_for_join_requests: true,

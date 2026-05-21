@@ -2,6 +2,7 @@ use std::net::{IpAddr, UdpSocket};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use nostr_sdk::prelude::{Keys, PublicKey, ToBech32};
 use uuid::Uuid;
 
@@ -18,10 +19,26 @@ pub(crate) fn default_relays() -> Vec<String> {
 
 pub fn normalize_runtime_network_id(value: &str) -> String {
     let trimmed = value.trim();
-    trimmed
+    let without_prefix = trimmed
         .strip_prefix(LEGACY_NETWORK_ID_COMPAT_PREFIX)
         .unwrap_or(trimmed)
-        .to_string()
+        .trim();
+    let compact = without_prefix
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && *ch != '-')
+        .collect::<String>();
+    if compact.is_empty()
+        && without_prefix
+            .chars()
+            .all(|ch| ch.is_whitespace() || ch == '-')
+    {
+        return String::new();
+    }
+    if !compact.is_empty() && compact.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        compact.to_ascii_lowercase()
+    } else {
+        without_prefix.to_string()
+    }
 }
 
 pub fn normalize_nostr_pubkey(value: &str) -> Result<String> {
@@ -95,7 +112,11 @@ pub(crate) const fn default_listen_port() -> u16 {
 }
 
 pub(crate) fn default_network_id() -> String {
-    Uuid::new_v4().simple().to_string()[..16].to_string()
+    Uuid::new_v4().simple().to_string()[..8].to_string()
+}
+
+pub(crate) fn default_invite_secret() -> String {
+    URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes())
 }
 
 pub(crate) fn needs_generated_network_id(value: &str) -> bool {

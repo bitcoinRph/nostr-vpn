@@ -20,9 +20,9 @@ use tower_http::services::{ServeDir, ServeFile};
 mod ui_types;
 
 use crate::ui_types::{
-    AliasRequest, InviteRequest, JoinRequestAction, NameRequest, NetworkEnabledRequest,
-    NetworkIdRequest, NetworkMeshRequest, NetworkNameRequest, NetworkPeerRequest,
-    ParticipantRequest, QrMatrixRequest, QrMatrixResponse,
+    AliasRequest, EndpointHintsRequest, InviteRequest, JoinRequestAction, NameRequest,
+    NetworkEnabledRequest, NetworkIdRequest, NetworkMeshRequest, NetworkNameRequest,
+    NetworkPeerRequest, ParticipantRequest, QrMatrixRequest, QrMatrixResponse,
 };
 
 const NVPN_BIN_ENV: &str = "NVPN_CLI_PATH";
@@ -129,6 +129,7 @@ async fn main() -> Result<()> {
         .route("/api/request_network_join", post(request_network_join))
         .route("/api/add_participant", post(add_participant))
         .route("/api/add_admin", post(add_admin))
+        .route("/api/reset_network_invite", post(reset_network_invite))
         .route("/api/import_network_invite", post(import_network_invite))
         .route("/api/start_invite_broadcast", post(start_invite_broadcast))
         .route("/api/stop_invite_broadcast", post(stop_invite_broadcast))
@@ -139,6 +140,10 @@ async fn main() -> Result<()> {
         .route("/api/accept_join_request", post(accept_join_request))
         .route("/api/reject_join_request", post(reject_join_request))
         .route("/api/set_participant_alias", post(set_participant_alias))
+        .route(
+            "/api/set_participant_endpoint_hints",
+            post(set_participant_endpoint_hints),
+        )
         .route("/api/qr_matrix", post(qr_matrix))
         .route("/api/update_settings", post(update_settings))
         .with_state(state.clone());
@@ -291,6 +296,18 @@ async fn add_admin(
     )
 }
 
+async fn reset_network_invite(
+    State(state): State<ServerState>,
+    Json(request): Json<NetworkIdRequest>,
+) -> ApiResult<UiStateResponse> {
+    dispatch(
+        &state,
+        NativeAppAction::ResetNetworkInvite {
+            network_id: request.network_id,
+        },
+    )
+}
+
 async fn import_network_invite(
     State(state): State<ServerState>,
     Json(request): Json<InviteRequest>,
@@ -380,6 +397,19 @@ async fn set_participant_alias(
         NativeAppAction::SetParticipantAlias {
             npub: request.npub,
             alias: request.alias,
+        },
+    )
+}
+
+async fn set_participant_endpoint_hints(
+    State(state): State<ServerState>,
+    Json(request): Json<EndpointHintsRequest>,
+) -> ApiResult<UiStateResponse> {
+    dispatch(
+        &state,
+        NativeAppAction::SetParticipantEndpointHints {
+            npub: request.npub,
+            endpoint_hints: request.endpoint_hints,
         },
     )
 }

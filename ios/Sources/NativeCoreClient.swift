@@ -117,6 +117,10 @@ enum NativeActions {
         ["type": "import_network_invite", "invite": invite]
     }
 
+    static func resetNetworkInvite(networkId: String) -> [String: Any] {
+        ["type": "reset_network_invite", "networkId": networkId]
+    }
+
     static func startInviteBroadcast() -> [String: Any] {
         ["type": "start_invite_broadcast"]
     }
@@ -172,6 +176,10 @@ enum NativeActions {
 
     static func setParticipantAlias(npub: String, alias: String) -> [String: Any] {
         ["type": "set_participant_alias", "npub": npub, "alias": alias]
+    }
+
+    static func setParticipantEndpointHints(npub: String, endpointHints: [String]) -> [String: Any] {
+        ["type": "set_participant_endpoint_hints", "npub": npub, "endpointHints": endpointHints]
     }
 
     static func addAdmin(networkId: String, npub: String) -> [String: Any] {

@@ -118,6 +118,7 @@ public sealed class NativeParticipantState
     public List<string> AdvertisedRoutes { get; set; } = [];
     public bool OffersExitNode { get; set; }
     public string FipsEndpointNpub { get; set; } = "";
+    public List<string> FipsEndpointHints { get; set; } = [];
     public string FipsTransportAddr { get; set; } = "";
     public string FipsTransportType { get; set; } = "";
     public ulong FipsSrttMs { get; set; }
@@ -207,6 +208,8 @@ public sealed class NativeParticipantState
             return "Offline";
         }
     }
+    public string FipsEndpointHintsText => FipsEndpointHints.Count == 0 ? "-" : string.Join(", ", FipsEndpointHints);
+    public string FipsEndpointHintsEditText => string.Join(", ", FipsEndpointHints);
 
     private static string FirstNonEmpty(params string[] values)
     {
