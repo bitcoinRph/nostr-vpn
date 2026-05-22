@@ -69,9 +69,35 @@
     connectToNonRosterFipsPeers: true,
     fipsNostrDiscoveryEnabled: true,
     fipsBootstrapEnabled: true,
+    fipsBootstrapPeers: '',
     fipsHostInboundTcpPorts: '',
     autoconnect: false,
   };
+
+  // The bootstrap/transit peer list is edited as one "npub addr, addr" line per
+  // peer, round-tripped to the npub -> addresses map the backend stores.
+  function bootstrapPeersToText(peers: Record<string, string[]>): string {
+    return Object.entries(peers ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([npub, addrs]) => `${npub} ${addrs.join(', ')}`.trim())
+      .join('\n');
+  }
+
+  function textToBootstrapPeers(text: string): Record<string, string[]> {
+    const peers: Record<string, string[]> = {};
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const [npub, ...rest] = trimmed.split(/\s+/);
+      const addrs = rest
+        .join(' ')
+        .split(/[\s,]+/)
+        .map((addr) => addr.trim())
+        .filter(Boolean);
+      if (npub && addrs.length > 0) peers[npub] = addrs;
+    }
+    return peers;
+  }
 
   $: activeNetwork = state ? state.networks.find((network) => network.enabled) ?? state.networks[0] ?? null : null;
   $: shownNetwork = state
@@ -177,9 +203,17 @@
       connectToNonRosterFipsPeers: next.connectToNonRosterFipsPeers,
       fipsNostrDiscoveryEnabled: next.fipsNostrDiscoveryEnabled,
       fipsBootstrapEnabled: next.fipsBootstrapEnabled,
+      fipsBootstrapPeers: bootstrapPeersToText(next.fipsBootstrapPeers),
       fipsHostInboundTcpPorts: next.fipsHostInboundTcpPorts,
       autoconnect: next.autoconnect,
     };
+  }
+
+  function resetBootstrapPeers() {
+    settingsDraft.fipsBootstrapPeers = bootstrapPeersToText(
+      state?.fipsBootstrapPeerDefaults ?? {},
+    );
+    settingsDirty = true;
   }
 
   function syncWireGuard(next: UiState) {
@@ -805,6 +839,7 @@
         connectToNonRosterFipsPeers: settingsDraft.connectToNonRosterFipsPeers,
         fipsNostrDiscoveryEnabled: settingsDraft.fipsNostrDiscoveryEnabled,
         fipsBootstrapEnabled: settingsDraft.fipsBootstrapEnabled,
+        fipsBootstrapPeers: textToBootstrapPeers(settingsDraft.fipsBootstrapPeers),
         fipsHostInboundTcpPorts: settingsDraft.fipsHostInboundTcpPorts,
         autoconnect: settingsDraft.autoconnect,
       },
@@ -1797,6 +1832,20 @@
                 on:change={() => (settingsDirty = true)}
               />
             </label>
+
+            {#if settingsDraft.fipsBootstrapEnabled}
+              <label>
+                <span>Bootstrap servers</span>
+                <textarea
+                  rows="4"
+                  bind:value={settingsDraft.fipsBootstrapPeers}
+                  on:input={() => (settingsDirty = true)}
+                ></textarea>
+              </label>
+              <button type="button" class="secondary-button" on:click={resetBootstrapPeers}>
+                Reset to defaults
+              </button>
+            {/if}
 
             <div class="button-row">
               <button type="submit" class="secondary-button" disabled={Boolean(busyAction)}>

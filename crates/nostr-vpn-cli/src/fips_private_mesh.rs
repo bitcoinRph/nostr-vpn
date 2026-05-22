@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use anyhow::{Context, Result, anyhow};
+use fips_core::config::TcpConfig;
 use fips_endpoint::{
     Config, ConnectPolicy, FipsEndpoint, FipsEndpointError, FipsEndpointMessage, FipsEndpointPeer,
     NostrDiscoveryPolicy, PeerAddress, PeerConfig as FipsPeerConfig, RoutingMode,
@@ -9,6 +10,7 @@ use fips_endpoint::{
 use nostr_sdk::prelude::{PublicKey, ToBech32};
 use nostr_vpn_core::config::{
     AppConfig, WireGuardExitConfig, derive_mesh_tunnel_ip, normalize_nostr_pubkey,
+    split_peer_transport_addr,
 };
 use nostr_vpn_core::data_plane::{MeshPeerStatus, PrivatePacket};
 use nostr_vpn_core::fips_control::{
@@ -1391,6 +1393,17 @@ fn fips_endpoint_config(
         mtu: Some(mesh_mtu.underlay_udp),
         ..UdpConfig::default()
     });
+    // Outbound TCP transport so peers reachable only over tcp:443 (e.g. on
+    // networks that block UDP outright) can still be dialed. bind_addr=None keeps
+    // it outbound-only — no listener.
+    let needs_tcp = peers.iter().any(|peer| {
+        peer.addresses
+            .iter()
+            .any(|hint| split_peer_transport_addr(&hint.addr).0 == "tcp")
+    });
+    if needs_tcp {
+        config.transports.tcp = TransportInstances::Single(TcpConfig::default());
+    }
     config.peers = peers
         .iter()
         .map(|peer| FipsPeerConfig {
@@ -1400,7 +1413,8 @@ fn fips_endpoint_config(
                 .addresses
                 .iter()
                 .map(|hint| {
-                    let mut addr = PeerAddress::new("udp", hint.addr.clone());
+                    let (transport, addr) = split_peer_transport_addr(&hint.addr);
+                    let mut addr = PeerAddress::new(transport, addr);
                     if let Some(seen_at_ms) = hint.seen_at_ms {
                         addr = addr.with_seen_at_ms(seen_at_ms);
                     }

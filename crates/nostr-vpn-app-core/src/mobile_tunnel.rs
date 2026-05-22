@@ -17,6 +17,7 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
+use fips_core::config::TcpConfig;
 use fips_endpoint::{
     Config as FipsConfig, ConnectPolicy, FipsEndpoint, FipsEndpointMessage, FipsEndpointPeer,
     FipsEndpointRelayStatus, NostrDiscoveryPolicy, PeerAddress, PeerConfig as FipsPeerConfig,
@@ -25,6 +26,7 @@ use fips_endpoint::{
 use nostr_vpn_core::config::{
     AppConfig, MESH_TUNNEL_IPV4_CIDR, WireGuardExitConfig, derive_mesh_tunnel_ip,
     maybe_autoconfigure_node, normalize_nostr_pubkey, normalize_runtime_network_id,
+    split_peer_transport_addr,
 };
 use nostr_vpn_core::fips_control::{
     FipsControlFragmentBuffer, FipsControlFrame, NetworkRoster, PeerCapabilities, PeerEndpointHint,
@@ -97,6 +99,11 @@ pub(crate) struct MobileTunnelConfig {
     pub(crate) peers: Vec<FipsMeshPeerConfig>,
     #[serde(default)]
     peer_hints: HashMap<String, Vec<FipsPeerAddressHint>>,
+    /// Bootstrap/transit peers (npub -> transport-tagged hints), kept separate
+    /// from learned `peer_hints` because these are dialed as fallback transit
+    /// (fanout), whereas learned hints only seed direct reconnects.
+    #[serde(default)]
+    bootstrap_peers: HashMap<String, Vec<FipsPeerAddressHint>>,
     pub(crate) route_targets: Vec<String>,
     #[serde(default)]
     pub(crate) nostr_relays: Vec<String>,
@@ -291,7 +298,8 @@ impl MobileTunnelConfig {
             listen_port: app.node.listen_port,
             mtu: DEFAULT_MOBILE_MTU,
             peers,
-            peer_hints: mobile_seed_peer_hints(app),
+            peer_hints: mobile_static_peer_hints(app),
+            bootstrap_peers: mobile_bootstrap_peer_hints(app),
             route_targets,
             nostr_relays: app.nostr.relays.clone(),
             stun_servers: app.nat.stun_servers.clone(),
@@ -982,7 +990,8 @@ async fn handle_mobile_control_frame(
                     &source_pubkey,
                     &capabilities,
                 )?;
-                refresh_mobile_endpoint_peers(endpoint, mesh_peers, peer_hints).await?;
+                refresh_mobile_endpoint_peers(endpoint, mesh_peers, peer_hints, config_state)
+                    .await?;
             }
         }
         FipsControlFrame::Ping {
@@ -1074,7 +1083,7 @@ async fn apply_mobile_roster_frame(
     if updated.pending_join_request_recipient.trim().is_empty() {
         join_request_active.store(false, Ordering::Relaxed);
     }
-    refresh_mobile_endpoint_peers(endpoint, mesh_peers, peer_hints).await
+    refresh_mobile_endpoint_peers(endpoint, mesh_peers, peer_hints, config_state).await
 }
 
 async fn reply_mobile_ping(
@@ -1644,6 +1653,7 @@ async fn refresh_mobile_endpoint_peers(
     endpoint: &FipsEndpoint,
     mesh_peers: &Arc<RwLock<Vec<FipsMeshPeerConfig>>>,
     peer_hints: &Arc<RwLock<HashMap<String, Vec<FipsPeerAddressHint>>>>,
+    config_state: &Arc<RwLock<MobileTunnelConfig>>,
 ) -> Result<()> {
     let peers = mesh_peers
         .read()
@@ -1653,8 +1663,13 @@ async fn refresh_mobile_endpoint_peers(
         .read()
         .map_err(|_| anyhow!("mobile FIPS peer hint lock poisoned"))?
         .clone();
+    let bootstrap = config_state
+        .read()
+        .map_err(|_| anyhow!("mobile FIPS config lock poisoned"))?
+        .bootstrap_peers
+        .clone();
     endpoint
-        .update_peers(fips_peer_configs_from_mesh(&peers, &hints))
+        .update_peers(fips_peer_configs_from_mesh(&peers, &hints, &bootstrap))
         .await
         .context("mobile FIPS peer update failed")?;
     Ok(())
@@ -1762,6 +1777,7 @@ fn mobile_endpoint_hints_with_candidates(
 fn fips_peer_configs_from_mesh(
     peers: &[FipsMeshPeerConfig],
     peer_hints: &HashMap<String, Vec<FipsPeerAddressHint>>,
+    bootstrap_peers: &HashMap<String, Vec<FipsPeerAddressHint>>,
 ) -> Vec<FipsPeerConfig> {
     let mut configs = Vec::new();
     let mut included = std::collections::HashSet::new();
@@ -1775,19 +1791,35 @@ fn fips_peer_configs_from_mesh(
         ));
     }
 
-    let bootstrap = bootstrap_pubkey_hex_set();
     for (participant, hints) in peer_hints {
         if included.contains(participant) || hints.is_empty() {
             continue;
         }
         if let Ok(peer) = FipsMeshPeerConfig::from_participant_pubkey(participant, Vec::new()) {
-            // Bootstrap nodes ferry frames as fallback transit; other static
-            // hints stay plain peers (route targets come from the roster).
+            // Learned non-roster hints seed direct reconnects but not fallback
+            // fanout.
             configs.push(fips_peer_config_from_hint(
                 &peer.endpoint_npub,
                 Some(hints),
-                bootstrap.contains(participant),
+                false,
             ));
+            included.insert(participant.clone());
+        }
+    }
+
+    // Bootstrap/transit peers ferry frames as fallback transit; route targets
+    // still come exclusively from the roster.
+    for (participant, hints) in bootstrap_peers {
+        if included.contains(participant) || hints.is_empty() {
+            continue;
+        }
+        if let Ok(peer) = FipsMeshPeerConfig::from_participant_pubkey(participant, Vec::new()) {
+            configs.push(fips_peer_config_from_hint(
+                &peer.endpoint_npub,
+                Some(hints),
+                true,
+            ));
+            included.insert(participant.clone());
         }
     }
 
@@ -1805,7 +1837,8 @@ fn fips_peer_config_from_hint(
         .into_iter()
         .flatten()
         .map(|hint| {
-            let mut addr = PeerAddress::new("udp", hint.addr.clone());
+            let (transport, addr) = split_peer_transport_addr(&hint.addr);
+            let mut addr = PeerAddress::new(transport, addr);
             if let Some(seen_at_ms) = hint.seen_at_ms {
                 addr = addr.with_seen_at_ms(seen_at_ms);
             }
@@ -1831,21 +1864,10 @@ fn mobile_static_peer_hints(app: &AppConfig) -> HashMap<String, Vec<FipsPeerAddr
     hints
 }
 
-/// Static address hints seeded into the live peer-hint map at startup:
-/// operator-configured static peers plus the built-in bootstrap nodes. Both
-/// are dialed directly so peers can reach each other without relay discovery.
-/// Persistence only ever writes learned per-source endpoints (see
-/// `persist_mobile_peer_hints`), so seeding here does not pollute the config.
-fn mobile_seed_peer_hints(app: &AppConfig) -> HashMap<String, Vec<FipsPeerAddressHint>> {
-    let mut hints = mobile_static_peer_hints(app);
-    for (participant, addrs) in fips_address_hints(app.fips_bootstrap_peer_endpoints()) {
-        let entry = hints.entry(participant).or_default();
-        for addr in addrs {
-            if !entry.iter().any(|existing| existing.addr == addr.addr) {
-                entry.push(addr);
-            }
-        }
-    }
+/// The configured bootstrap/transit peers as address hints, dialed as fallback
+/// transit (separate from learned `peer_hints`).
+fn mobile_bootstrap_peer_hints(app: &AppConfig) -> HashMap<String, Vec<FipsPeerAddressHint>> {
+    let mut hints = fips_address_hints(app.fips_bootstrap_peer_endpoints());
     for value in hints.values_mut() {
         value.sort_by(|left, right| left.addr.cmp(&right.addr));
         value.dedup_by(|left, right| left.addr == right.addr);
@@ -1863,25 +1885,22 @@ fn fips_address_hints(
             let hints = endpoints
                 .into_iter()
                 .filter_map(|endpoint| {
-                    let hint = PeerEndpointHint::udp(endpoint.trim().to_string());
+                    // Validate the host:port part but keep the transport tag, so
+                    // tcp: bootstrap addresses survive into the peer config.
+                    let (transport, rest) = split_peer_transport_addr(endpoint.trim());
+                    let hint = PeerEndpointHint::udp(rest);
                     peer_endpoint_hint_addr(&hint).map(|addr| FipsPeerAddressHint {
-                        addr,
+                        addr: if transport == "udp" {
+                            addr
+                        } else {
+                            format!("{transport}:{addr}")
+                        },
                         seen_at_ms: None,
                     })
                 })
                 .collect::<Vec<_>>();
             (!hints.is_empty()).then_some((participant, hints))
         })
-        .collect()
-}
-
-/// Hex pubkeys of the built-in bootstrap nodes. Used to mark them as fallback
-/// transit (rather than plain peers) when lowering the live hint map into fips
-/// peer configs.
-fn bootstrap_pubkey_hex_set() -> std::collections::HashSet<String> {
-    nostr_vpn_core::config::DEFAULT_FIPS_BOOTSTRAP_PEERS
-        .iter()
-        .filter_map(|(npub, _)| normalize_nostr_pubkey(npub).ok())
         .collect()
 }
 
@@ -1983,7 +2002,18 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
         public: Some(false),
         ..UdpConfig::default()
     });
-    config.peers = fips_peer_configs_from_mesh(&mobile.peers, &mobile.peer_hints);
+    config.peers =
+        fips_peer_configs_from_mesh(&mobile.peers, &mobile.peer_hints, &mobile.bootstrap_peers);
+    // Outbound TCP transport so peers reachable only over tcp:443 (UDP-blocked
+    // networks) can still be dialed. bind_addr=None keeps it outbound-only.
+    let needs_tcp = config.peers.iter().any(|peer| {
+        peer.addresses
+            .iter()
+            .any(|addr| addr.transport.eq_ignore_ascii_case("tcp"))
+    });
+    if needs_tcp {
+        config.transports.tcp = TransportInstances::Single(TcpConfig::default());
+    }
     config
 }
 
@@ -2211,6 +2241,7 @@ fn empty_config() -> MobileTunnelConfig {
         mtu: DEFAULT_MOBILE_MTU,
         peers: Vec::new(),
         peer_hints: HashMap::new(),
+        bootstrap_peers: HashMap::new(),
         route_targets: Vec::new(),
         nostr_relays: Vec::new(),
         stun_servers: Vec::new(),
@@ -2372,7 +2403,8 @@ mod tests {
                 seen_at_ms: None,
             }]
         );
-        let endpoint_config = fips_peer_configs_from_mesh(&config.peers, &config.peer_hints);
+        let endpoint_config =
+            fips_peer_configs_from_mesh(&config.peers, &config.peer_hints, &config.bootstrap_peers);
         let endpoint_peer = endpoint_config
             .iter()
             .find(|peer| peer.npub == admin_npub)

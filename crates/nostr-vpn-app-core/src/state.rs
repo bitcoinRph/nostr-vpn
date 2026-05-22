@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 pub use nostr_vpn_core::diagnostics::{HealthIssue, NetworkSummary, PortMappingStatus};
@@ -303,6 +305,7 @@ pub struct SettingsPatch {
     pub connect_to_non_roster_fips_peers: Option<bool>,
     pub fips_nostr_discovery_enabled: Option<bool>,
     pub fips_bootstrap_enabled: Option<bool>,
+    pub fips_bootstrap_peers: Option<HashMap<String, Vec<String>>>,
     pub fips_host_inbound_tcp_ports: Option<String>,
     pub autoconnect: Option<bool>,
     pub launch_on_startup: Option<bool>,

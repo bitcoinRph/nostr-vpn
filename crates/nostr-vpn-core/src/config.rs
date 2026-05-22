@@ -53,48 +53,76 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_RELAYS: &[&str] = &[];
 
-/// Built-in public FIPS bootstrap nodes, dialed as fallback transit so peers can
-/// reach each other when direct NAT traversal and relays fail. UDP-only here on
-/// purpose: every node also advertises tcp:443 / tor endpoints, but the app only
-/// configures a UDP transport, so we keep the dialable subset. Keyed by npub ->
-/// "host:port".
-pub const DEFAULT_FIPS_BOOTSTRAP_PEERS: &[(&str, &str)] = &[
+/// Built-in public FIPS bootstrap nodes, used to seed the editable peer list
+/// (`fips_bootstrap_peers`). Dialed as fallback transit so peers can reach each
+/// other when direct NAT traversal and relays fail. Addresses are transport
+/// tagged (`udp:` / `tcp:`); the `tcp:443` entries let clients on networks that
+/// block UDP outright still reach the overlay. (`tor:` endpoints are omitted —
+/// no Tor transport.) Keyed by npub.
+pub const DEFAULT_FIPS_BOOTSTRAP_PEERS: &[(&str, &[&str])] = &[
     // test-de01
     (
         "npub1260n42s06vzc7796w0fh3ny7zcpw6tlk4gq3940gmfrzl5c9pv2s3657q8",
-        "217.160.76.169:2121",
+        &["udp:217.160.76.169:2121"],
     ),
     // test-es01
     (
         "npub17lpmzulpc98d8ff727k6e98atxn3phzupzsqqwe54ytduym747ws4tw5zm",
-        "82.223.139.182:2121",
+        &["udp:82.223.139.182:2121"],
     ),
     // test-uk01
     (
         "npub1u0z26dc4qeneu5rvwvmpfhtwh3522ed6rlgxr9jarrfnjrc6ew4qxjysrs",
-        "88.208.241.33:2121",
+        &["udp:88.208.241.33:2121"],
     ),
     // test-us01
     (
         "npub1qmc3cvfz0yu2hx96nq3gp55zdan2qclealn7xshgr448d3nh6lks7zel98",
-        "217.77.8.91:2121",
+        &["udp:217.77.8.91:2121", "tcp:217.77.8.91:443"],
     ),
     // test-us02
     (
         "npub10yffd020a4ag8zcy75f9pruq3rnghvvhd5hphl9s62zgp35s560qrksp9u",
-        "23.182.128.74:2121",
+        &["udp:23.182.128.74:2121", "tcp:23.182.128.74:443"],
     ),
     // test-us03
     (
         "npub136yqae6na688fs75g95ppps3lxe07fvxefj77938zf47uhm6074sxw8ctm",
-        "54.183.70.180:2121",
+        &["udp:54.183.70.180:2121", "tcp:54.183.70.180:443"],
     ),
     // test-us04
     (
         "npub1gd7ye2qp2lphhzx75fynnjzaxx4dqanddecet0wtt5ss5ek8h9ps62wdkf",
-        "74.208.245.160:2121",
+        &["udp:74.208.245.160:2121"],
     ),
 ];
+
+/// The default bootstrap peer list as an owned map, used to seed configs and to
+/// power "reset to defaults".
+pub fn default_fips_bootstrap_peers() -> HashMap<String, Vec<String>> {
+    DEFAULT_FIPS_BOOTSTRAP_PEERS
+        .iter()
+        .map(|(npub, addrs)| {
+            (
+                (*npub).to_string(),
+                addrs.iter().map(|addr| (*addr).to_string()).collect(),
+            )
+        })
+        .collect()
+}
+
+/// Split a transport-tagged peer address ("udp:host:port" / "tcp:host:port")
+/// into `(transport, host:port)`. A bare "host:port" defaults to udp. Used to
+/// lower bootstrap/transit address strings into fips `PeerAddress` values.
+pub fn split_peer_transport_addr(value: &str) -> (String, String) {
+    let value = value.trim();
+    for transport in ["udp", "tcp", "tor"] {
+        if let Some(rest) = value.strip_prefix(&format!("{transport}:")) {
+            return (transport.to_string(), rest.trim().to_string());
+        }
+    }
+    ("udp".to_string(), value.to_string())
+}
 
 pub fn normalize_fips_peer_endpoint_hint(endpoint: &str) -> Option<String> {
     let endpoint = endpoint.trim();
@@ -203,13 +231,20 @@ pub struct AppConfig {
         skip_serializing_if = "is_true"
     )]
     pub fips_nostr_discovery_enabled: bool,
-    /// Dial the built-in public bootstrap nodes as fallback transit so peers can
-    /// still reach each other when direct NAT traversal and relays fail.
+    /// Master switch for dialing the bootstrap/transit peer list below. When off,
+    /// the list is kept but not dialed.
     #[serde(
         default = "default_fips_bootstrap_enabled",
         skip_serializing_if = "is_true"
     )]
     pub fips_bootstrap_enabled: bool,
+    /// Editable transit/bootstrap peers (npub -> transport-tagged addresses),
+    /// seeded from `DEFAULT_FIPS_BOOTSTRAP_PEERS`. This is the single list that
+    /// holds both the built-in nodes and any custom peers the user adds. Always
+    /// serialized so edits (including clearing it) persist across loads; "reset
+    /// to defaults" restores the built-in set.
+    #[serde(default = "default_fips_bootstrap_peers")]
+    pub fips_bootstrap_peers: HashMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fips_host_inbound_tcp_ports: Vec<u16>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -780,6 +815,7 @@ impl Default for AppConfig {
             connect_to_non_roster_fips_peers: default_connect_to_non_roster_fips_peers(),
             fips_nostr_discovery_enabled: default_fips_nostr_discovery_enabled(),
             fips_bootstrap_enabled: default_fips_bootstrap_enabled(),
+            fips_bootstrap_peers: default_fips_bootstrap_peers(),
             fips_host_inbound_tcp_ports: Vec::new(),
             mesh_mtu_profile: String::new(),
             mesh_underlay_udp_mtu: 0,
@@ -1763,25 +1799,65 @@ impl AppConfig {
             .any(|endpoints| endpoints.iter().any(|endpoint| !endpoint.trim().is_empty()))
     }
 
-    /// Built-in bootstrap nodes used as fallback transit, returned as
-    /// `(npub, [host:port])`. Empty when bootstrap is disabled. Our own identity
-    /// is filtered out so a node that happens to be a bootstrap server does not
-    /// try to dial itself.
+    /// The configured transit/bootstrap peers as `(npub, [addr])`, sorted. Empty
+    /// when the bootstrap master switch is off. Our own identity is filtered out
+    /// so a node that happens to be a bootstrap server does not dial itself.
     pub fn fips_bootstrap_peer_endpoints(&self) -> Vec<(String, Vec<String>)> {
         if !self.fips_bootstrap_enabled {
             return Vec::new();
         }
         let own_pubkey = self.own_nostr_pubkey_hex().ok();
-        DEFAULT_FIPS_BOOTSTRAP_PEERS
+        let mut peers = self
+            .fips_bootstrap_peers
             .iter()
-            .filter(
-                |(npub, _)| match (own_pubkey.as_deref(), normalize_nostr_pubkey(npub)) {
+            .filter(|(npub, addrs)| {
+                if addrs.iter().all(|addr| addr.trim().is_empty()) {
+                    return false;
+                }
+                match (own_pubkey.as_deref(), normalize_nostr_pubkey(npub)) {
                     (Some(own), Ok(hex)) => own != hex,
                     _ => true,
-                },
-            )
-            .map(|(npub, addr)| ((*npub).to_string(), vec![(*addr).to_string()]))
-            .collect()
+                }
+            })
+            .map(|(npub, addrs)| (npub.clone(), addrs.clone()))
+            .collect::<Vec<_>>();
+        peers.sort_by(|left, right| left.0.cmp(&right.0));
+        peers
+    }
+
+    /// Restore the bootstrap/transit peer list to the built-in defaults.
+    pub fn reset_fips_bootstrap_peers(&mut self) {
+        self.fips_bootstrap_peers = default_fips_bootstrap_peers();
+    }
+
+    /// Replace the bootstrap/transit peer list, normalizing keys to npub and
+    /// validating each transport-tagged address. Invalid entries are dropped.
+    pub fn set_fips_bootstrap_peers(&mut self, peers: HashMap<String, Vec<String>>) {
+        let mut normalized = HashMap::new();
+        for (key, addrs) in peers {
+            let Ok(pubkey) = normalize_nostr_pubkey(&key) else {
+                continue;
+            };
+            let npub = npub_for_pubkey_hex(&pubkey);
+            let mut valid = Vec::new();
+            for addr in addrs {
+                let (transport, rest) = split_peer_transport_addr(&addr);
+                if let Some(host_port) = normalize_fips_peer_endpoint_hint(&rest) {
+                    let tagged = if transport == "udp" {
+                        host_port
+                    } else {
+                        format!("{transport}:{host_port}")
+                    };
+                    if !valid.contains(&tagged) {
+                        valid.push(tagged);
+                    }
+                }
+            }
+            if !valid.is_empty() {
+                normalized.insert(npub, valid);
+            }
+        }
+        self.fips_bootstrap_peers = normalized;
     }
 
     pub fn add_fips_peer_endpoint_hints(&mut self, peer: &str, endpoints: &[String]) -> Result<()> {

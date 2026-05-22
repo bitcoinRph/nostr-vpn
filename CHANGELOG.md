@@ -7,8 +7,13 @@ All notable changes to this project are documented in this file.
 ### Added
 
 - Built-in public FIPS bootstrap nodes, dialed as fallback transit so peers can
-  still reach each other when direct NAT traversal and relays fail. Exposed as a
-  "Use bootstrap servers" toggle in settings on every platform (default on).
+  still reach each other when direct NAT traversal and relays fail. They seed a
+  single editable peer list in config (shared with any custom transit peers);
+  the web settings show it with inline editing and a "reset to defaults" button,
+  and every platform has a "Use bootstrap servers" master toggle (default on).
+- Outbound TCP transport so bootstrap/transit peers advertised on `tcp:443` can
+  be reached on networks that block UDP outright. Peer addresses are transport
+  tagged (`udp:` / `tcp:`).
 
 ### Changed
 

@@ -144,6 +144,8 @@ export type UiState = {
   connectToNonRosterFipsPeers: boolean;
   fipsNostrDiscoveryEnabled: boolean;
   fipsBootstrapEnabled: boolean;
+  fipsBootstrapPeers: Record<string, string[]>;
+  fipsBootstrapPeerDefaults: Record<string, string[]>;
   fipsHostInboundTcpPorts: string;
   magicDnsSuffix: string;
   magicDnsStatus: string;

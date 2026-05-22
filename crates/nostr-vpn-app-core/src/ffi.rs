@@ -667,6 +667,12 @@ impl NativeAppRuntime {
             fips_nostr_discovery_enabled: !config_unavailable
                 && self.config.fips_nostr_discovery_enabled,
             fips_bootstrap_enabled: !config_unavailable && self.config.fips_bootstrap_enabled,
+            fips_bootstrap_peers: if config_unavailable {
+                std::collections::HashMap::new()
+            } else {
+                self.config.fips_bootstrap_peers.clone()
+            },
+            fips_bootstrap_peer_defaults: nostr_vpn_core::config::default_fips_bootstrap_peers(),
             fips_host_inbound_tcp_ports: if config_unavailable {
                 String::new()
             } else {
@@ -1406,6 +1412,9 @@ impl NativeAppRuntime {
         }
         if let Some(value) = patch.fips_bootstrap_enabled {
             self.config.fips_bootstrap_enabled = value;
+        }
+        if let Some(value) = patch.fips_bootstrap_peers {
+            self.config.set_fips_bootstrap_peers(value);
         }
         if let Some(value) = patch.fips_host_inbound_tcp_ports {
             self.config.fips_host_inbound_tcp_ports = parse_tcp_ports(&value);

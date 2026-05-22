@@ -60,6 +60,45 @@ fn fips_discovery_and_bootstrap_default_on() {
 }
 
 #[test]
+fn fips_bootstrap_peers_are_seeded_editable_and_resettable() {
+    let mut config = AppConfig::generated();
+    // Seeded from the built-in defaults.
+    assert_eq!(
+        config.fips_bootstrap_peers.len(),
+        DEFAULT_FIPS_BOOTSTRAP_PEERS.len()
+    );
+
+    // Editable: replacing the list normalizes keys to npub, keeps non-empty
+    // addresses, and drops entries with an invalid pubkey key.
+    let mut custom = std::collections::HashMap::new();
+    custom.insert(
+        "npub1260n42s06vzc7796w0fh3ny7zcpw6tlk4gq3940gmfrzl5c9pv2s3657q8".to_string(),
+        vec!["tcp:45.79.10.10:443".to_string(), "  ".to_string()],
+    );
+    custom.insert(
+        "not-a-valid-pubkey".to_string(),
+        vec!["45.79.10.11:2121".to_string()],
+    );
+    config.set_fips_bootstrap_peers(custom);
+    assert_eq!(config.fips_bootstrap_peers.len(), 1);
+    let addrs = config.fips_bootstrap_peer_endpoints();
+    assert_eq!(addrs.len(), 1);
+    assert_eq!(addrs[0].1, vec!["tcp:45.79.10.10:443".to_string()]);
+
+    // Editing persists across a serialize/load round trip.
+    let encoded = toml::to_string(&config).expect("serialize");
+    let decoded: AppConfig = toml::from_str(&encoded).expect("parse");
+    assert_eq!(decoded.fips_bootstrap_peers.len(), 1);
+
+    // Resettable to the built-in defaults.
+    config.reset_fips_bootstrap_peers();
+    assert_eq!(
+        config.fips_bootstrap_peers.len(),
+        DEFAULT_FIPS_BOOTSTRAP_PEERS.len()
+    );
+}
+
+#[test]
 fn fips_bootstrap_disabled_yields_no_peers() {
     let config = AppConfig {
         fips_bootstrap_enabled: false,
