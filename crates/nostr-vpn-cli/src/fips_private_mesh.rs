@@ -871,11 +871,11 @@ impl FipsPrivateMeshRuntime {
             .collect())
     }
 
-    /// Snapshot `(endpoint_npub, transport_addr)` pairs for every peer that
-    /// currently has an authenticated FIPS link, including open-discovery
+    /// Snapshot `(endpoint_npub, transport-tagged addr)` pairs for every peer
+    /// that currently has an authenticated FIPS link, including open-discovery
     /// transit peers outside the private-network roster. Used by the daemon
-    /// heartbeat to update the on-disk recent-peers cache so restarts can
-    /// seed useful overlay peers before relay discovery has warmed up.
+    /// heartbeat to update the on-disk recent-peers cache so restarts can seed
+    /// useful overlay peers before relay discovery has warmed up.
     pub(crate) async fn authenticated_peer_transport_addrs(&self) -> Result<Vec<(String, String)>> {
         let peers = self
             .endpoint
@@ -884,7 +884,10 @@ impl FipsPrivateMeshRuntime {
             .context("failed to snapshot FIPS endpoint peers")?;
         Ok(peers
             .into_iter()
-            .filter_map(|peer| peer.transport_addr.map(|addr| (peer.npub, addr)))
+            .filter_map(|peer| {
+                tag_authenticated_transport_addr(peer.transport_addr, peer.transport_type)
+                    .map(|addr| (peer.npub, addr))
+            })
             .collect())
     }
 
@@ -1753,6 +1756,31 @@ fn local_interface_address_for_tunnel(tunnel_ip: &str) -> String {
 
 fn strip_cidr(value: &str) -> &str {
     value.split('/').next().unwrap_or(value)
+}
+
+fn tag_authenticated_transport_addr(
+    addr: Option<String>,
+    transport_type: Option<String>,
+) -> Option<String> {
+    let addr = addr?;
+    let addr = addr.trim();
+    if addr.is_empty() {
+        return None;
+    }
+
+    let (addr_transport, host_port) = split_peer_transport_addr(addr);
+    let transport = transport_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(addr_transport.as_str())
+        .to_ascii_lowercase();
+
+    match transport.as_str() {
+        "udp" => Some(host_port),
+        "tcp" => Some(format!("tcp:{host_port}")),
+        _ => None,
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -3659,7 +3687,7 @@ mod tests {
         drain_event_batch, fips_endpoint_config, fips_endpoint_peers_from_mesh,
         fips_lan_discovery_scope, linux_cap_eff_has_net_admin, linux_tun_setup_error,
         other_endpoint_peer_statuses, parse_fips_nostr_discovery_policy, strip_cidr,
-        unix_timestamp,
+        tag_authenticated_transport_addr, unix_timestamp,
     };
     use fips_endpoint::{
         Config, ConnectPolicy, FipsEndpointPeer, NostrDiscoveryPolicy,
@@ -3697,6 +3725,28 @@ mod tests {
             Some(fips_endpoint::NostrDiscoveryPolicy::Disabled)
         );
         assert_eq!(parse_fips_nostr_discovery_policy("wat"), None);
+    }
+
+    #[test]
+    fn authenticated_transport_addr_preserves_tcp_type_and_legacy_udp() {
+        assert_eq!(
+            tag_authenticated_transport_addr(
+                Some("203.0.113.20:51820".to_string()),
+                Some("udp".to_string())
+            ),
+            Some("203.0.113.20:51820".to_string())
+        );
+        assert_eq!(
+            tag_authenticated_transport_addr(
+                Some("203.0.113.20:443".to_string()),
+                Some("tcp".to_string())
+            ),
+            Some("tcp:203.0.113.20:443".to_string())
+        );
+        assert_eq!(
+            tag_authenticated_transport_addr(Some("tcp:203.0.113.20:443".to_string()), None),
+            Some("tcp:203.0.113.20:443".to_string())
+        );
     }
 
     #[test]

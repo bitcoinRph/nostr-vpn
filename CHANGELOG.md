@@ -19,8 +19,8 @@ All notable changes to this project are documented in this file.
 - Manual network join in the web UI for joining a network by id without an
   invite, with full device id and grouped network id display.
 - Outbound TCP transport so bootstrap/transit peers advertised on `tcp:443` can
-  be reached on networks that block UDP outright. Peer addresses are transport
-  tagged (`udp:` / `tcp:`).
+  be reached on networks that block UDP outright. Peer addresses can be
+  transport-tagged (`tcp:` / `udp:`), while bare addresses remain UDP.
 
 ### Changed
 
@@ -54,6 +54,8 @@ All notable changes to this project are documented in this file.
 - Docker FIPS e2e scripts with static local topologies now disable public
   relay/bootstrap discovery so outside peers cannot perturb deterministic
   continuity checks.
+- Recent FIPS peer caches preserve learned TCP transport tags while continuing
+  to accept old bare UDP endpoint entries.
 - FIPS peer discovery settings and roster propagation for stale peers.
 - Windows exit-node list build.
 

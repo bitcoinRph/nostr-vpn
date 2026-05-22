@@ -17,6 +17,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::config::split_peer_transport_addr;
 use serde::{Deserialize, Serialize};
 
 const CURRENT_VERSION: u8 = 1;
@@ -46,15 +47,15 @@ impl RecentPeerEndpoints {
 
     /// Record a successful handshake against `addr` for `participant`.
     ///
-    /// Returns `true` if the in-memory state changed (caller should persist
-    /// to disk). Returns `false` and ignores LAN, loopback, link-local,
-    /// CGNAT, or unparseable addresses — those are not useful as restart
-    /// hints.
+    /// Bare `host:port` and `udp:host:port` are stored as legacy-compatible
+    /// UDP hints; `tcp:host:port` keeps its tag. Returns `true` if the
+    /// in-memory state changed (caller should persist to disk). Returns
+    /// `false` and ignores LAN, loopback, link-local, CGNAT, or unparseable
+    /// addresses — those are not useful as restart hints.
     pub fn note_success(&mut self, participant: &str, addr: &str, success_at: u64) -> bool {
-        let addr = addr.trim();
-        if !is_persistable_endpoint(addr) {
+        let Some(addr) = normalize_persistable_endpoint(addr) else {
             return false;
-        }
+        };
 
         let endpoints = self.entries.entry(participant.to_string()).or_default();
 
@@ -67,7 +68,7 @@ impl RecentPeerEndpoints {
         }
 
         endpoints.push(RecentPeerEndpoint {
-            addr: addr.to_string(),
+            addr,
             last_success_at: success_at,
         });
         true
@@ -200,19 +201,34 @@ struct SerializedRecentPeers<'a> {
     entries: &'a HashMap<String, Vec<RecentPeerEndpoint>>,
 }
 
-/// True for addresses we'd actually want to retry across a daemon restart:
-/// IP literals with a port, on public-routable space.
-fn is_persistable_endpoint(addr: &str) -> bool {
+/// Return an address we'd actually want to retry across a daemon restart:
+/// IP literals with a port, on public-routable space. The returned string keeps
+/// TCP transport tags and normalizes UDP/bare hints to bare `host:port` for
+/// compatibility with existing recent-peer JSON.
+fn normalize_persistable_endpoint(addr: &str) -> Option<String> {
     if addr.is_empty() {
-        return false;
+        return None;
     }
-    let Ok(socket_addr) = addr.parse::<std::net::SocketAddr>() else {
-        return false;
+    let (transport, host_port) = split_peer_transport_addr(addr);
+    let transport = transport.to_ascii_lowercase();
+    if transport != "udp" && transport != "tcp" {
+        return None;
+    }
+    let Ok(socket_addr) = host_port.parse::<std::net::SocketAddr>() else {
+        return None;
     };
     if socket_addr.port() == 0 {
-        return false;
+        return None;
     }
-    !is_private_or_local_ip(&socket_addr.ip())
+    if is_private_or_local_ip(&socket_addr.ip()) {
+        return None;
+    }
+    let host_port = socket_addr.to_string();
+    if transport == "tcp" {
+        Some(format!("tcp:{host_port}"))
+    } else {
+        Some(host_port)
+    }
 }
 
 fn is_private_or_local_ip(ip: &std::net::IpAddr) -> bool {
@@ -258,27 +274,41 @@ mod tests {
 
     #[test]
     fn public_ipv4_is_persistable() {
-        assert!(is_persistable_endpoint("203.0.113.5:51820"));
-        assert!(is_persistable_endpoint("8.8.8.8:53"));
+        assert_eq!(
+            normalize_persistable_endpoint("203.0.113.5:51820"),
+            Some("203.0.113.5:51820".to_string())
+        );
+        assert_eq!(
+            normalize_persistable_endpoint("8.8.8.8:53"),
+            Some("8.8.8.8:53".to_string())
+        );
+        assert_eq!(
+            normalize_persistable_endpoint("tcp:203.0.113.5:443"),
+            Some("tcp:203.0.113.5:443".to_string())
+        );
+        assert_eq!(
+            normalize_persistable_endpoint("udp:203.0.113.5:51820"),
+            Some("203.0.113.5:51820".to_string())
+        );
     }
 
     #[test]
     fn private_ranges_are_excluded() {
-        assert!(!is_persistable_endpoint("10.0.0.1:51820"));
-        assert!(!is_persistable_endpoint("192.168.1.1:51820"));
-        assert!(!is_persistable_endpoint("172.16.0.1:51820"));
-        assert!(!is_persistable_endpoint("100.64.0.1:51820"));
-        assert!(!is_persistable_endpoint("198.18.0.1:51820"));
-        assert!(!is_persistable_endpoint("127.0.0.1:51820"));
-        assert!(!is_persistable_endpoint("[fe80::1]:51820"));
-        assert!(!is_persistable_endpoint("[fd00::1]:51820"));
+        assert_eq!(normalize_persistable_endpoint("10.0.0.1:51820"), None);
+        assert_eq!(normalize_persistable_endpoint("192.168.1.1:51820"), None);
+        assert_eq!(normalize_persistable_endpoint("172.16.0.1:51820"), None);
+        assert_eq!(normalize_persistable_endpoint("100.64.0.1:51820"), None);
+        assert_eq!(normalize_persistable_endpoint("198.18.0.1:51820"), None);
+        assert_eq!(normalize_persistable_endpoint("127.0.0.1:51820"), None);
+        assert_eq!(normalize_persistable_endpoint("[fe80::1]:51820"), None);
+        assert_eq!(normalize_persistable_endpoint("[fd00::1]:51820"), None);
     }
 
     #[test]
     fn malformed_or_zero_port_rejected() {
-        assert!(!is_persistable_endpoint(""));
-        assert!(!is_persistable_endpoint("203.0.113.5"));
-        assert!(!is_persistable_endpoint("203.0.113.5:0"));
-        assert!(!is_persistable_endpoint("not-an-address"));
+        assert_eq!(normalize_persistable_endpoint(""), None);
+        assert_eq!(normalize_persistable_endpoint("203.0.113.5"), None);
+        assert_eq!(normalize_persistable_endpoint("203.0.113.5:0"), None);
+        assert_eq!(normalize_persistable_endpoint("not-an-address"), None);
     }
 }
