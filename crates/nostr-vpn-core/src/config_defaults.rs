@@ -87,6 +87,14 @@ pub(crate) fn default_connect_to_non_roster_fips_peers() -> bool {
     true
 }
 
+pub(crate) fn default_fips_bootstrap_enabled() -> bool {
+    true
+}
+
+pub(crate) fn default_fips_nostr_discovery_enabled() -> bool {
+    true
+}
+
 pub(crate) fn default_close_to_tray_on_close() -> bool {
     true
 }

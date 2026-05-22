@@ -44,6 +44,57 @@ fn generated_config_auto_populates_keys() {
 }
 
 #[test]
+fn fips_discovery_and_bootstrap_default_on() {
+    let config = AppConfig::generated();
+
+    assert!(config.fips_nostr_discovery_enabled);
+    assert!(config.fips_bootstrap_enabled);
+
+    let bootstrap = config.fips_bootstrap_peer_endpoints();
+    assert_eq!(bootstrap.len(), DEFAULT_FIPS_BOOTSTRAP_PEERS.len());
+    assert!(
+        bootstrap
+            .iter()
+            .all(|(npub, addrs)| npub.starts_with("npub1") && addrs.iter().all(|a| a.contains(':')))
+    );
+}
+
+#[test]
+fn fips_bootstrap_disabled_yields_no_peers() {
+    let config = AppConfig {
+        fips_bootstrap_enabled: false,
+        ..AppConfig::default()
+    };
+
+    assert!(config.fips_bootstrap_peer_endpoints().is_empty());
+}
+
+#[test]
+fn fips_discovery_and_bootstrap_off_round_trip() {
+    let config = AppConfig {
+        fips_nostr_discovery_enabled: false,
+        fips_bootstrap_enabled: false,
+        ..AppConfig::default()
+    };
+
+    let encoded = toml::to_string(&config).expect("serialize config");
+    assert!(encoded.contains("fips_nostr_discovery_enabled = false"));
+    assert!(encoded.contains("fips_bootstrap_enabled = false"));
+
+    let decoded: AppConfig = toml::from_str(&encoded).expect("parse config");
+    assert!(!decoded.fips_nostr_discovery_enabled);
+    assert!(!decoded.fips_bootstrap_enabled);
+}
+
+#[test]
+fn fips_discovery_and_bootstrap_default_on_when_missing() {
+    let config: AppConfig = toml::from_str("").expect("parse empty config");
+
+    assert!(config.fips_nostr_discovery_enabled);
+    assert!(config.fips_bootstrap_enabled);
+}
+
+#[test]
 fn fips_host_inbound_ports_are_normalized() {
     let mut config = AppConfig {
         fips_host_inbound_tcp_ports: vec![443, 22, 22],

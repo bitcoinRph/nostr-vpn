@@ -76,6 +76,7 @@ const MOBILE_HANDSHAKE_RESEND_BACKOFF: f64 = 1.5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct MobileTunnelConfig {
     #[serde(default)]
     pub(crate) config_path: String,
@@ -105,6 +106,11 @@ pub(crate) struct MobileTunnelConfig {
     pub(crate) share_local_candidates: bool,
     #[serde(default = "default_true")]
     pub(crate) connect_to_non_roster_fips_peers: bool,
+    /// Find/advertise peers over Nostr relays. When false, the tunnel still
+    /// dials static + bootstrap peers and (when allowed) LAN, but does not use
+    /// relays for endpoint discovery or advertising.
+    #[serde(default = "default_true")]
+    pub(crate) nostr_discovery_enabled: bool,
     /// When the user has WG upstream enabled + configured, the OS-side
     /// (`NEPacketTunnelProvider` on iOS, `VpnService` on Android) is
     /// expected to:
@@ -285,12 +291,13 @@ impl MobileTunnelConfig {
             listen_port: app.node.listen_port,
             mtu: DEFAULT_MOBILE_MTU,
             peers,
-            peer_hints: mobile_static_peer_hints(app),
+            peer_hints: mobile_seed_peer_hints(app),
             route_targets,
             nostr_relays: app.nostr.relays.clone(),
             stun_servers: app.nat.stun_servers.clone(),
             share_local_candidates: app.lan_discovery_enabled,
             connect_to_non_roster_fips_peers: app.connect_to_non_roster_fips_peers,
+            nostr_discovery_enabled: app.fips_nostr_discovery_enabled,
             excluded_routes,
             dns_servers,
             wireguard_exit,
@@ -1768,15 +1775,18 @@ fn fips_peer_configs_from_mesh(
         ));
     }
 
+    let bootstrap = bootstrap_pubkey_hex_set();
     for (participant, hints) in peer_hints {
         if included.contains(participant) || hints.is_empty() {
             continue;
         }
         if let Ok(peer) = FipsMeshPeerConfig::from_participant_pubkey(participant, Vec::new()) {
+            // Bootstrap nodes ferry frames as fallback transit; other static
+            // hints stay plain peers (route targets come from the roster).
             configs.push(fips_peer_config_from_hint(
                 &peer.endpoint_npub,
                 Some(hints),
-                false,
+                bootstrap.contains(participant),
             ));
         }
     }
@@ -1813,11 +1823,44 @@ fn fips_peer_config_from_hint(
 }
 
 fn mobile_static_peer_hints(app: &AppConfig) -> HashMap<String, Vec<FipsPeerAddressHint>> {
-    app.fips_static_peer_endpoints()
+    let mut hints = fips_address_hints(app.fips_static_peer_endpoints());
+    for value in hints.values_mut() {
+        value.sort_by(|left, right| left.addr.cmp(&right.addr));
+        value.dedup_by(|left, right| left.addr == right.addr);
+    }
+    hints
+}
+
+/// Static address hints seeded into the live peer-hint map at startup:
+/// operator-configured static peers plus the built-in bootstrap nodes. Both
+/// are dialed directly so peers can reach each other without relay discovery.
+/// Persistence only ever writes learned per-source endpoints (see
+/// `persist_mobile_peer_hints`), so seeding here does not pollute the config.
+fn mobile_seed_peer_hints(app: &AppConfig) -> HashMap<String, Vec<FipsPeerAddressHint>> {
+    let mut hints = mobile_static_peer_hints(app);
+    for (participant, addrs) in fips_address_hints(app.fips_bootstrap_peer_endpoints()) {
+        let entry = hints.entry(participant).or_default();
+        for addr in addrs {
+            if !entry.iter().any(|existing| existing.addr == addr.addr) {
+                entry.push(addr);
+            }
+        }
+    }
+    for value in hints.values_mut() {
+        value.sort_by(|left, right| left.addr.cmp(&right.addr));
+        value.dedup_by(|left, right| left.addr == right.addr);
+    }
+    hints
+}
+
+fn fips_address_hints(
+    endpoints: Vec<(String, Vec<String>)>,
+) -> HashMap<String, Vec<FipsPeerAddressHint>> {
+    endpoints
         .into_iter()
         .filter_map(|(participant, endpoints)| {
             let participant = normalize_nostr_pubkey(&participant).ok()?;
-            let mut hints = endpoints
+            let hints = endpoints
                 .into_iter()
                 .filter_map(|endpoint| {
                     let hint = PeerEndpointHint::udp(endpoint.trim().to_string());
@@ -1827,14 +1870,18 @@ fn mobile_static_peer_hints(app: &AppConfig) -> HashMap<String, Vec<FipsPeerAddr
                     })
                 })
                 .collect::<Vec<_>>();
-            hints.sort_by(|left, right| left.addr.cmp(&right.addr));
-            hints.dedup_by(|left, right| left.addr == right.addr);
-            if hints.is_empty() {
-                None
-            } else {
-                Some((participant, hints))
-            }
+            (!hints.is_empty()).then_some((participant, hints))
         })
+        .collect()
+}
+
+/// Hex pubkeys of the built-in bootstrap nodes. Used to mark them as fallback
+/// transit (rather than plain peers) when lowering the live hint map into fips
+/// peer configs.
+fn bootstrap_pubkey_hex_set() -> std::collections::HashSet<String> {
+    nostr_vpn_core::config::DEFAULT_FIPS_BOOTSTRAP_PEERS
+        .iter()
+        .filter_map(|(npub, _)| normalize_nostr_pubkey(npub).ok())
         .collect()
 }
 
@@ -1875,10 +1922,11 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
     config.node.limits.max_links = MOBILE_MAX_FIPS_LINKS;
     let join_request_pending = !mobile.pending_join_request_recipient.trim().is_empty()
         && mobile.pending_join_requested_at != 0;
-    let nostr_enabled = mobile.join_requests_enabled
-        || join_request_pending
-        || !mobile.peers.is_empty()
-        || !mobile.peer_hints.is_empty();
+    let nostr_enabled = mobile.nostr_discovery_enabled
+        && (mobile.join_requests_enabled
+            || join_request_pending
+            || !mobile.peers.is_empty()
+            || !mobile.peer_hints.is_empty());
     config.node.discovery.nostr.enabled = nostr_enabled;
     // Publish only the generic `udp:nat` overlay advert so roster peers can
     // bootstrap encrypted traversal offers to mobile nodes. LAN addresses are
@@ -2168,6 +2216,7 @@ fn empty_config() -> MobileTunnelConfig {
         stun_servers: Vec::new(),
         share_local_candidates: false,
         connect_to_non_roster_fips_peers: true,
+        nostr_discovery_enabled: true,
         excluded_routes: Vec::new(),
         dns_servers: Vec::new(),
         wireguard_exit: None,
@@ -2352,6 +2401,9 @@ mod tests {
             shared_roster_updated_at: 0,
             shared_roster_signed_by: String::new(),
         }];
+        // Isolate the admin-listener behavior from the built-in bootstrap nodes,
+        // which would otherwise populate config.peers as fallback transit.
+        app.fips_bootstrap_enabled = false;
         app.ensure_defaults();
 
         let mobile = MobileTunnelConfig::from_app(&app).expect("mobile config");
@@ -2366,6 +2418,37 @@ mod tests {
             NostrDiscoveryPolicy::Open
         );
         assert!(config.peers.is_empty());
+    }
+
+    #[test]
+    fn mobile_config_seeds_bootstrap_transit_peers() {
+        let app = AppConfig::generated();
+        let mobile = MobileTunnelConfig::from_app(&app).expect("mobile config");
+        let config = fips_endpoint_config("nostr-vpn:test", &mobile);
+
+        let bootstrap_count = nostr_vpn_core::config::DEFAULT_FIPS_BOOTSTRAP_PEERS.len();
+        assert_eq!(config.peers.len(), bootstrap_count);
+        assert!(
+            config
+                .peers
+                .iter()
+                .all(|peer| peer.discovery_fallback_transit)
+        );
+        assert!(mobile.nostr_discovery_enabled);
+    }
+
+    #[test]
+    fn mobile_config_omits_bootstrap_and_relays_when_disabled() {
+        let mut app = AppConfig::generated();
+        app.fips_bootstrap_enabled = false;
+        app.fips_nostr_discovery_enabled = false;
+        app.ensure_defaults();
+        let mobile = MobileTunnelConfig::from_app(&app).expect("mobile config");
+        let config = fips_endpoint_config("nostr-vpn:test", &mobile);
+
+        assert!(config.peers.is_empty());
+        assert!(!config.node.discovery.nostr.enabled);
+        assert!(!config.node.discovery.nostr.advertise);
     }
 
     #[test]

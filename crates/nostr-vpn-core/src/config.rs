@@ -25,7 +25,8 @@ pub use crate::network_routes::{
 use crate::config_defaults::{
     current_unix_timestamp, default_autoconnect, default_close_to_tray_on_close,
     default_connect_to_non_roster_fips_peers, default_endpoint, default_fips_advertise_endpoint,
-    default_fips_host_tunnel_enabled, default_invite_secret, default_lan_discovery_enabled,
+    default_fips_bootstrap_enabled, default_fips_host_tunnel_enabled,
+    default_fips_nostr_discovery_enabled, default_invite_secret, default_lan_discovery_enabled,
     default_launch_on_startup, default_listen_for_join_requests, default_listen_port,
     default_nat_discovery_timeout_secs, default_nat_enabled, default_nat_stun_servers,
     default_network_enabled, default_network_id, default_node_id, default_relays,
@@ -51,6 +52,49 @@ use crate::network_routes::is_exit_node_route;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_RELAYS: &[&str] = &[];
+
+/// Built-in public FIPS bootstrap nodes, dialed as fallback transit so peers can
+/// reach each other when direct NAT traversal and relays fail. UDP-only here on
+/// purpose: every node also advertises tcp:443 / tor endpoints, but the app only
+/// configures a UDP transport, so we keep the dialable subset. Keyed by npub ->
+/// "host:port".
+pub const DEFAULT_FIPS_BOOTSTRAP_PEERS: &[(&str, &str)] = &[
+    // test-de01
+    (
+        "npub1260n42s06vzc7796w0fh3ny7zcpw6tlk4gq3940gmfrzl5c9pv2s3657q8",
+        "217.160.76.169:2121",
+    ),
+    // test-es01
+    (
+        "npub17lpmzulpc98d8ff727k6e98atxn3phzupzsqqwe54ytduym747ws4tw5zm",
+        "82.223.139.182:2121",
+    ),
+    // test-uk01
+    (
+        "npub1u0z26dc4qeneu5rvwvmpfhtwh3522ed6rlgxr9jarrfnjrc6ew4qxjysrs",
+        "88.208.241.33:2121",
+    ),
+    // test-us01
+    (
+        "npub1qmc3cvfz0yu2hx96nq3gp55zdan2qclealn7xshgr448d3nh6lks7zel98",
+        "217.77.8.91:2121",
+    ),
+    // test-us02
+    (
+        "npub10yffd020a4ag8zcy75f9pruq3rnghvvhd5hphl9s62zgp35s560qrksp9u",
+        "23.182.128.74:2121",
+    ),
+    // test-us03
+    (
+        "npub136yqae6na688fs75g95ppps3lxe07fvxefj77938zf47uhm6074sxw8ctm",
+        "54.183.70.180:2121",
+    ),
+    // test-us04
+    (
+        "npub1gd7ye2qp2lphhzx75fynnjzaxx4dqanddecet0wtt5ss5ek8h9ps62wdkf",
+        "74.208.245.160:2121",
+    ),
+];
 
 pub fn normalize_fips_peer_endpoint_hint(endpoint: &str) -> Option<String> {
     let endpoint = endpoint.trim();
@@ -151,6 +195,21 @@ pub struct AppConfig {
         skip_serializing_if = "is_true"
     )]
     pub connect_to_non_roster_fips_peers: bool,
+    /// Find/advertise FIPS peers over Nostr relays. When false, the node still
+    /// connects to LAN, static, and bootstrap peers but does not use relays for
+    /// endpoint discovery or advertising.
+    #[serde(
+        default = "default_fips_nostr_discovery_enabled",
+        skip_serializing_if = "is_true"
+    )]
+    pub fips_nostr_discovery_enabled: bool,
+    /// Dial the built-in public bootstrap nodes as fallback transit so peers can
+    /// still reach each other when direct NAT traversal and relays fail.
+    #[serde(
+        default = "default_fips_bootstrap_enabled",
+        skip_serializing_if = "is_true"
+    )]
+    pub fips_bootstrap_enabled: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fips_host_inbound_tcp_ports: Vec<u16>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -719,6 +778,8 @@ impl Default for AppConfig {
             fips_advertise_endpoint: default_fips_advertise_endpoint(),
             fips_host_tunnel_enabled: default_fips_host_tunnel_enabled(),
             connect_to_non_roster_fips_peers: default_connect_to_non_roster_fips_peers(),
+            fips_nostr_discovery_enabled: default_fips_nostr_discovery_enabled(),
+            fips_bootstrap_enabled: default_fips_bootstrap_enabled(),
             fips_host_inbound_tcp_ports: Vec::new(),
             mesh_mtu_profile: String::new(),
             mesh_underlay_udp_mtu: 0,
@@ -1700,6 +1761,27 @@ impl AppConfig {
         self.fips_peer_endpoints
             .values()
             .any(|endpoints| endpoints.iter().any(|endpoint| !endpoint.trim().is_empty()))
+    }
+
+    /// Built-in bootstrap nodes used as fallback transit, returned as
+    /// `(npub, [host:port])`. Empty when bootstrap is disabled. Our own identity
+    /// is filtered out so a node that happens to be a bootstrap server does not
+    /// try to dial itself.
+    pub fn fips_bootstrap_peer_endpoints(&self) -> Vec<(String, Vec<String>)> {
+        if !self.fips_bootstrap_enabled {
+            return Vec::new();
+        }
+        let own_pubkey = self.own_nostr_pubkey_hex().ok();
+        DEFAULT_FIPS_BOOTSTRAP_PEERS
+            .iter()
+            .filter(
+                |(npub, _)| match (own_pubkey.as_deref(), normalize_nostr_pubkey(npub)) {
+                    (Some(own), Ok(hex)) => own != hex,
+                    _ => true,
+                },
+            )
+            .map(|(npub, addr)| ((*npub).to_string(), vec![(*addr).to_string()]))
+            .collect()
     }
 
     pub fn add_fips_peer_endpoint_hints(&mut self, peer: &str, endpoints: &[String]) -> Result<()> {

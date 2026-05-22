@@ -1279,6 +1279,10 @@ struct FipsEndpointTransportConfig {
     listen_port: u16,
     advertised_endpoint: String,
     advertise_endpoint: bool,
+    /// Find/advertise peers over Nostr relays. When false, the endpoint still
+    /// dials static/bootstrap peers and does LAN discovery, but does not use
+    /// relays for endpoint discovery or advertising.
+    nostr_discovery_enabled: bool,
     stun_servers: Vec<String>,
     nostr_relays: Vec<String>,
     share_local_candidates: bool,
@@ -1325,9 +1329,16 @@ fn fips_endpoint_config(
     let advertise_udp = transport
         .map(|transport| transport.advertise_endpoint)
         .unwrap_or(false);
-    let nostr_enabled = advertise_udp || !peers.is_empty();
+    // The "find peers over Nostr relays" toggle. When off we neither advertise
+    // nor stream adverts/DMs, but static + bootstrap peers (config.peers below)
+    // are still dialed directly and LAN discovery still runs.
+    let nostr_discovery_enabled = transport
+        .map(|transport| transport.nostr_discovery_enabled)
+        .unwrap_or(true);
+    let advertise_on_nostr = nostr_discovery_enabled && advertise_udp;
+    let nostr_enabled = nostr_discovery_enabled && (advertise_udp || !peers.is_empty());
     config.node.discovery.nostr.enabled = nostr_enabled;
-    config.node.discovery.nostr.advertise = advertise_udp;
+    config.node.discovery.nostr.advertise = advertise_on_nostr;
     // Open discovery by default (unless the user opts into configured-only
     // discovery) so we can FIPS-handshake with any nvpn node we see on relays,
     // not just configured roster peers. This is what lets us route app-mesh
@@ -1369,7 +1380,7 @@ fn fips_endpoint_config(
     }
     config.transports.udp = TransportInstances::Single(UdpConfig {
         bind_addr,
-        advertise_on_nostr: Some(advertise_udp),
+        advertise_on_nostr: Some(advertise_on_nostr),
         public: Some(external_addr.is_some()),
         external_addr,
         outbound_only: Some(transport.is_none()),
@@ -1539,6 +1550,7 @@ pub(crate) struct FipsPrivateTunnelConfig {
     pub(crate) local_advertised_routes: Vec<String>,
     pub(crate) wireguard_exit: WireGuardExitConfig,
     pub(crate) exit_node_leak_protection: bool,
+    nostr_discovery_enabled: bool,
     nostr_discovery_policy: NostrDiscoveryPolicy,
     mesh_mtu: MeshMtu,
     #[cfg(target_os = "linux")]
@@ -1611,10 +1623,18 @@ impl FipsPrivateTunnelConfig {
             .map(|participant| normalize_fips_endpoint_npub(&participant))
             .collect::<std::collections::HashSet<_>>();
         let tunnel_endpoint_hosts = fips_tunnel_endpoint_hosts(app, network_id);
-        let operator_static = filter_static_tunnel_endpoints(
+        let mut operator_static = filter_static_tunnel_endpoints(
             app.fips_static_peer_endpoints(),
             &tunnel_endpoint_hosts,
         );
+        // Built-in public bootstrap nodes as fallback transit. They share the
+        // same `discovery_fallback_transit` path as operator-configured static
+        // peers, so they ferry frames when direct traversal fails but never
+        // become roster route targets.
+        operator_static.extend(filter_static_tunnel_endpoints(
+            app.fips_bootstrap_peer_endpoints(),
+            &tunnel_endpoint_hosts,
+        ));
         let mut recent_peer_endpoints = recent_peers
             .map(|cache| cache.as_static_peer_endpoints_with_seen_at())
             .unwrap_or_default();
@@ -1669,6 +1689,7 @@ impl FipsPrivateTunnelConfig {
             local_advertised_routes: crate::runtime_effective_advertised_routes(app),
             wireguard_exit: app.wireguard_exit.clone(),
             exit_node_leak_protection: app.exit_node_leak_protection,
+            nostr_discovery_enabled: app.fips_nostr_discovery_enabled,
             nostr_discovery_policy: fips_nostr_discovery_policy_from_app(app),
             mesh_mtu: private_mesh_mtu_from_app(Some(app)),
             #[cfg(target_os = "linux")]
@@ -1770,6 +1791,7 @@ impl FipsPrivateTunnelRuntime {
             listen_port: config.listen_port,
             advertised_endpoint: config.advertised_endpoint.clone(),
             advertise_endpoint: config.advertise_endpoint,
+            nostr_discovery_enabled: config.nostr_discovery_enabled,
             stun_servers: config.stun_servers.clone(),
             nostr_relays: config.nostr_relays.clone(),
             share_local_candidates: config.share_local_candidates,
@@ -3020,6 +3042,7 @@ impl FipsPrivateTunnelRuntime {
             listen_port: config.listen_port,
             advertised_endpoint: config.advertised_endpoint.clone(),
             advertise_endpoint: config.advertise_endpoint,
+            nostr_discovery_enabled: config.nostr_discovery_enabled,
             stun_servers: config.stun_servers.clone(),
             nostr_relays: config.nostr_relays.clone(),
             share_local_candidates: config.share_local_candidates,
@@ -4548,6 +4571,7 @@ mod tests {
             listen_port: 51820,
             advertised_endpoint: "192.168.50.20:51820".to_string(),
             advertise_endpoint: true,
+            nostr_discovery_enabled: true,
             stun_servers: vec!["stun:stun.example.org:3478".to_string()],
             nostr_relays: vec!["wss://relay.example.org".to_string()],
             share_local_candidates: true,
@@ -4603,6 +4627,46 @@ mod tests {
     }
 
     #[test]
+    fn endpoint_config_disables_nostr_when_discovery_off() {
+        let keys = Keys::generate();
+        let participant_pubkey = keys.public_key().to_hex();
+        let peer = FipsMeshPeerConfig::from_participant_pubkey(
+            &participant_pubkey,
+            vec!["10.44.1.2/32".to_string()],
+        )
+        .expect("peer config");
+        let transport = FipsEndpointTransportConfig {
+            listen_port: 51820,
+            advertised_endpoint: "192.168.50.20:51820".to_string(),
+            advertise_endpoint: true,
+            nostr_discovery_enabled: false,
+            stun_servers: vec!["stun:stun.example.org:3478".to_string()],
+            nostr_relays: vec!["wss://relay.example.org".to_string()],
+            share_local_candidates: true,
+        };
+
+        let endpoint_peers = fips_endpoint_peers_from_mesh(&[peer], Vec::new(), Vec::new());
+        let config = fips_endpoint_config(
+            &endpoint_peers,
+            Some(&transport),
+            super::resolve_private_mesh_mtu(None, None, None),
+            NostrDiscoveryPolicy::Open,
+        );
+
+        // Relay discovery + advertising are off, but the peer is still dialed
+        // directly so static/bootstrap connectivity keeps working.
+        assert!(!config.node.discovery.nostr.enabled);
+        assert!(!config.node.discovery.nostr.advertise);
+        let udp = match config.transports.udp {
+            fips_endpoint::TransportInstances::Single(udp) => udp,
+            _ => panic!("expected one UDP transport"),
+        };
+        assert!(!udp.advertise_on_nostr());
+        assert!(udp.accept_connections());
+        assert_eq!(config.peers.len(), 1);
+    }
+
+    #[test]
     fn endpoint_config_keeps_static_transit_peers_outside_mesh_routes() {
         let bob_keys = Keys::generate();
         let charlie_keys = Keys::generate();
@@ -4620,6 +4684,7 @@ mod tests {
             listen_port: 51820,
             advertised_endpoint: "10.203.0.10:51820".to_string(),
             advertise_endpoint: false,
+            nostr_discovery_enabled: true,
             stun_servers: Vec::new(),
             nostr_relays: Vec::new(),
             share_local_candidates: false,

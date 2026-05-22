@@ -595,6 +595,10 @@ struct SetArgs {
     fips_host_tunnel_enabled: Option<bool>,
     #[arg(long, num_args = 0..=1, default_missing_value = "true")]
     connect_to_non_roster_fips_peers: Option<bool>,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    fips_nostr_discovery_enabled: Option<bool>,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    fips_bootstrap_enabled: Option<bool>,
     #[arg(long)]
     fips_host_inbound_tcp_ports: Option<String>,
     #[arg(long = "fips-peer-endpoint")]
@@ -914,6 +918,8 @@ async fn run_command(command: Command) -> Result<()> {
                         "effective_advertised_routes": runtime_effective_advertised_routes(&app),
                         "fips_host_tunnel_enabled": app.fips_host_tunnel_enabled,
                         "connect_to_non_roster_fips_peers": app.connect_to_non_roster_fips_peers,
+                        "fips_nostr_discovery_enabled": app.fips_nostr_discovery_enabled,
+                        "fips_bootstrap_enabled": app.fips_bootstrap_enabled,
                         "fips_host_inbound_tcp_ports": app.fips_host_inbound_tcp_ports,
                         "wireguard_exit": wireguard_exit_status_json(&app),
                         "daemon": daemon_status_json_value(&daemon),
@@ -954,6 +960,11 @@ async fn run_command(command: Command) -> Result<()> {
                     "connect_to_non_roster_fips_peers: {}",
                     app.connect_to_non_roster_fips_peers
                 );
+                println!(
+                    "fips_nostr_discovery_enabled: {}",
+                    app.fips_nostr_discovery_enabled
+                );
+                println!("fips_bootstrap_enabled: {}", app.fips_bootstrap_enabled);
                 if !app.fips_host_inbound_tcp_ports.is_empty() {
                     println!(
                         "fips_host_inbound_tcp_ports: {}",
@@ -1130,6 +1141,12 @@ async fn run_command(command: Command) -> Result<()> {
             }
             if let Some(value) = args.connect_to_non_roster_fips_peers {
                 app.connect_to_non_roster_fips_peers = value;
+            }
+            if let Some(value) = args.fips_nostr_discovery_enabled {
+                app.fips_nostr_discovery_enabled = value;
+            }
+            if let Some(value) = args.fips_bootstrap_enabled {
+                app.fips_bootstrap_enabled = value;
             }
             if let Some(value) = args.fips_host_inbound_tcp_ports {
                 app.fips_host_inbound_tcp_ports = parse_tcp_ports_arg(&value)?;

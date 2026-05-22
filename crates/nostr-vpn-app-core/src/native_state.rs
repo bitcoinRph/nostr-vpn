@@ -189,6 +189,8 @@ pub struct NativeAppState {
     pub wireguard_exit_config: String,
     pub fips_host_tunnel_enabled: bool,
     pub connect_to_non_roster_fips_peers: bool,
+    pub fips_nostr_discovery_enabled: bool,
+    pub fips_bootstrap_enabled: bool,
     pub fips_host_inbound_tcp_ports: String,
     pub magic_dns_suffix: String,
     pub magic_dns_status: String,

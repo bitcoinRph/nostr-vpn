@@ -664,6 +664,9 @@ impl NativeAppRuntime {
             fips_host_tunnel_enabled: !config_unavailable && self.config.fips_host_tunnel_enabled,
             connect_to_non_roster_fips_peers: !config_unavailable
                 && self.config.connect_to_non_roster_fips_peers,
+            fips_nostr_discovery_enabled: !config_unavailable
+                && self.config.fips_nostr_discovery_enabled,
+            fips_bootstrap_enabled: !config_unavailable && self.config.fips_bootstrap_enabled,
             fips_host_inbound_tcp_ports: if config_unavailable {
                 String::new()
             } else {
@@ -1397,6 +1400,12 @@ impl NativeAppRuntime {
         }
         if let Some(value) = patch.connect_to_non_roster_fips_peers {
             self.config.connect_to_non_roster_fips_peers = value;
+        }
+        if let Some(value) = patch.fips_nostr_discovery_enabled {
+            self.config.fips_nostr_discovery_enabled = value;
+        }
+        if let Some(value) = patch.fips_bootstrap_enabled {
+            self.config.fips_bootstrap_enabled = value;
         }
         if let Some(value) = patch.fips_host_inbound_tcp_ports {
             self.config.fips_host_inbound_tcp_ports = parse_tcp_ports(&value);
