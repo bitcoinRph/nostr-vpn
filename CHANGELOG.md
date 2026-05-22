@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Built-in public FIPS bootstrap nodes, dialed as fallback transit so peers can
+  still reach each other when direct NAT traversal and relays fail. Exposed as a
+  "Use bootstrap servers" toggle in settings on every platform (default on).
+
+### Changed
+
+- New "Find peers over relays" settings toggle (default on) to disable
+  finding/advertising FIPS peers over Nostr relays; static, bootstrap, and LAN
+  connectivity keep working when it is off. Available on web, macOS, iOS,
+  Android, Windows, and Linux, and via `nvpn set --fips-nostr-discovery-enabled`
+  / `--fips-bootstrap-enabled`.
+
 ## 4.0.39 - 2026-05-22
 
 ### Added

@@ -16,6 +16,7 @@ case "${NVPN_RELEASE_GATE_DOCKER_E2E:-1}" in
     ;;
   *)
     ./scripts/e2e-join-request-docker.sh
+    ./scripts/e2e-bootstrap-discovery-docker.sh
     NVPN_FIPS_NOSTR_DISCOVERY_POLICY="${NVPN_FIPS_NOSTR_DISCOVERY_POLICY:-configured_only}" \
       ./scripts/e2e-fips-routed-udp-docker.sh
     NVPN_FIPS_NOSTR_DISCOVERY_POLICY="${NVPN_FIPS_NOSTR_DISCOVERY_POLICY:-configured_only}" \
