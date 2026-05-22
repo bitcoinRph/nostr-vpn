@@ -22,6 +22,10 @@ const APP_ID: &str = "to.iris.nvpn";
 const DEFAULT_UPDATE_POLL_INTERVAL_SECS: u32 = 6 * 60 * 60;
 const SEARCH_VISIBILITY_THRESHOLD: usize = 7;
 
+thread_local! {
+    static TRAY_APP_HOLD: RefCell<Option<gio::ApplicationHoldGuard>> = const { RefCell::new(None) };
+}
+
 type AppRef = Rc<RefCell<AppModel>>;
 
 #[derive(Clone, Default)]
@@ -125,6 +129,8 @@ struct AppModel {
     drafts: Drafts,
     notice: String,
     tray: tray::TrayRuntime,
+    tray_available: bool,
+    tray_error: Option<String>,
     update: updater::UpdateState,
     update_policy: UpdateAutoCheckPolicy,
     update_sender: Sender<updater::UpdateEvent>,
@@ -152,6 +158,8 @@ impl AppModel {
         let mut drafts = Drafts::default();
         drafts.sync_from_state(&state);
         let tray = tray::TrayRuntime::start(&state);
+        let tray_available = tray.is_available();
+        let tray_error = tray.last_error();
         let diagnostics_expanded = !state.health.is_empty();
         let (update_sender, update_receiver) = mpsc::channel();
         let update = updater::UpdateState {
@@ -177,6 +185,8 @@ impl AppModel {
             drafts,
             notice: String::new(),
             tray,
+            tray_available,
+            tray_error,
             update,
             update_policy,
             update_sender,
@@ -416,6 +426,9 @@ fn build_ui(app: &adw::Application, runtime: &AppRuntime, present: bool) {
         header_vpn_switch.clone(),
     )));
     *runtime.model.borrow_mut() = Some(model.clone());
+    if model.borrow().tray_available {
+        update_tray_application_hold(true, window.application());
+    }
 
     {
         let model = model.clone();
@@ -439,10 +452,16 @@ fn build_ui(app: &adw::Application, runtime: &AppRuntime, present: bool) {
         let model = model.clone();
         window.connect_close_request(move |window| {
             let model = model.borrow();
-            if model.state.close_to_tray_on_close && !model.allow_close {
+            if should_close_to_tray(
+                model.state.close_to_tray_on_close,
+                model.tray.is_available(),
+                model.allow_close,
+            ) {
+                update_tray_application_hold(true, window.application());
                 window.set_visible(false);
                 glib::Propagation::Stop
             } else {
+                release_tray_application_hold();
                 glib::Propagation::Proceed
             }
         });
@@ -540,6 +559,10 @@ fn state_needs_render(previous: &NativeAppState, next: &NativeAppState) -> bool 
 }
 
 fn drain_tray_commands(app: &AppRef) {
+    if sync_tray_status(app) {
+        render(app);
+    }
+
     let commands = app.borrow_mut().tray.drain();
     for command in commands {
         match command {
@@ -716,6 +739,7 @@ fn drain_update_events(app: &AppRef) {
 
 fn show_window(app: &AppRef) {
     let window = app.borrow().window.clone();
+    window.set_visible(true);
     window.present();
 }
 
@@ -725,9 +749,59 @@ fn quit_app(app: &AppRef) {
         model.allow_close = true;
         model.window.clone()
     };
+    release_tray_application_hold();
     if let Some(application) = window.application() {
         application.quit();
     }
+}
+
+fn should_close_to_tray(
+    close_to_tray_on_close: bool,
+    tray_available: bool,
+    allow_close: bool,
+) -> bool {
+    close_to_tray_on_close && tray_available && !allow_close
+}
+
+fn sync_tray_status(app: &AppRef) -> bool {
+    let (changed, available, application) = {
+        let mut model = app.borrow_mut();
+        let available = model.tray.is_available();
+        let error = model.tray.last_error();
+        let changed = available != model.tray_available || error != model.tray_error;
+        if changed {
+            model.tray_available = available;
+            model.tray_error = error;
+        }
+        (changed, available, model.window.application())
+    };
+
+    if changed {
+        update_tray_application_hold(available, application);
+    }
+
+    changed
+}
+
+fn update_tray_application_hold(available: bool, application: Option<gtk::Application>) {
+    TRAY_APP_HOLD.with(|hold| {
+        let mut hold = hold.borrow_mut();
+        if available {
+            if hold.is_none() {
+                if let Some(application) = application {
+                    *hold = Some(application.hold());
+                }
+            }
+        } else {
+            hold.take();
+        }
+    });
+}
+
+fn release_tray_application_hold() {
+    TRAY_APP_HOLD.with(|hold| {
+        hold.borrow_mut().take();
+    });
 }
 
 fn start_service_settlement_polling(app: &AppRef) {
@@ -2670,12 +2744,23 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
             },
         );
     }
+    let (service_settling, tray_error, update, tray_available) = {
+        let model = app.borrow();
+        (
+            model.service_settling,
+            model.tray_error.clone(),
+            model.update.clone(),
+            model.tray_available,
+        )
+    };
+
     if state.tray_behavior_supported {
-        switch_row(
+        switch_row_enabled(
             app,
             &system,
             "Tray on close",
             state.close_to_tray_on_close,
+            tray_available,
             |enabled| NativeAppAction::UpdateSettings {
                 patch: SettingsPatch {
                     close_to_tray_on_close: Some(enabled),
@@ -2684,15 +2769,6 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
             },
         );
     }
-
-    let (service_settling, tray_error, update) = {
-        let model = app.borrow();
-        (
-            model.service_settling,
-            model.tray.last_error(),
-            model.update.clone(),
-        )
-    };
 
     let status_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     status_row.append(&badge(
@@ -2901,7 +2977,10 @@ fn build_diagnostics(parent: &gtk::Box, state: &NativeAppState) {
     metrics.set_column_spacing(10);
     metrics.set_row_spacing(10);
     metrics.set_max_children_per_line(3);
-    let peer_count = format!("{}/{}", state.connected_peer_count, state.expected_peer_count);
+    let peer_count = format!(
+        "{}/{}",
+        state.connected_peer_count, state.expected_peer_count
+    );
     let fips_peer_count = format!(
         "{}/{}",
         state.fips_connected_peer_count, state.fips_roster_peer_count
@@ -4041,6 +4120,14 @@ mod tests {
         assert_eq!(offsets.get(Page::Devices), 120.0);
         assert_eq!(offsets.get(Page::ExitNodes), 260.0);
         assert_eq!(offsets.get(Page::Share), 0.0);
+    }
+
+    #[test]
+    fn close_to_tray_requires_setting_tray_and_non_quit_close() {
+        assert!(should_close_to_tray(true, true, false));
+        assert!(!should_close_to_tray(false, true, false));
+        assert!(!should_close_to_tray(true, false, false));
+        assert!(!should_close_to_tray(true, true, true));
     }
 
     #[test]
