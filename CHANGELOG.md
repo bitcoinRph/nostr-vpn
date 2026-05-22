@@ -56,6 +56,8 @@ All notable changes to this project are documented in this file.
   continuity checks.
 - Linux musl CLI release builds no longer depend on Cargo pre-extracting the
   `rustables` registry source before the nftables header workaround is applied.
+- macOS release builds include regenerated app-core bindings and project
+  versions for the new FIPS discovery/bootstrap settings.
 - Recent FIPS peer caches preserve learned TCP transport tags while continuing
   to accept old bare UDP endpoint entries.
 - FIPS peer discovery settings and roster propagation for stale peers.
