@@ -4,11 +4,34 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.39 - 2026-05-22
+
+### Added
+
+- Embedded `.fips` host tunnel: `.fips` hosts now route through a fips-core TUN
+  with the fips-core host firewall instead of the legacy path.
+- Import WireGuard configuration files directly from the web and Android apps.
+- Manual network join in the web UI for joining a network by id without an
+  invite, with full device id and grouped network id display.
+
+### Changed
+
+- Linux desktop GUI reaches settings parity with macOS, supports close-to-tray,
+  and now launches hidden on startup.
+- Diagnostics surface per-peer FIPS stats on both desktop and mobile.
+- Invite QR codes are larger and rendered as SVG for sharper scanning, and
+  invite secrets and group network ids now rotate.
+- Device lists hide the search field when short, normal button colors are
+  muted, and macOS device/exit-node/rename fields no longer rebuild the whole
+  root view on each keystroke, keeping text input responsive on large rosters.
+- StartOS packaging refresh: web UI binds off the VPN interface, ships the
+  Nostr VPN icon, and is prepared for app submission; Umbrel app submission
+  packaging and updated app-store port.
+
 ### Fixed
 
-- macOS device search, exit-node search, and admin device rename fields no
-  longer rebuild the whole root view on each keystroke, improving text input
-  responsiveness on large rosters.
+- FIPS peer discovery settings and roster propagation for stale peers.
+- Windows exit-node list build.
 
 ## 4.0.38 - 2026-05-20
 
