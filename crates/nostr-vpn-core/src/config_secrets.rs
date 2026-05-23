@@ -133,10 +133,17 @@ fn persist_field(path: &Path, kind: ConfigSecret, value: &mut String) -> Result<
                     platform::store_name()
                 )
             }),
-            Ok(None) | Err(_) => {
+            Ok(None) | Err(_) if platform::allows_plaintext_fallback() => {
                 *value = secret;
                 Ok(())
             }
+            Ok(None) | Err(_) => Err(write_error).with_context(|| {
+                format!(
+                    "failed to store {} in {}; refusing to write it to the config file",
+                    kind.display_name(),
+                    platform::store_name()
+                )
+            }),
         },
     }
 }
@@ -232,6 +239,10 @@ mod platform {
         "the System Keychain"
     }
 
+    pub(super) fn allows_plaintext_fallback() -> bool {
+        true
+    }
+
     pub(super) fn hydrate_config_secrets(
         path: &Path,
         config: &mut crate::config::AppConfig,
@@ -320,6 +331,10 @@ mod platform {
         "the iOS Keychain"
     }
 
+    pub(super) fn allows_plaintext_fallback() -> bool {
+        false
+    }
+
     pub(super) fn hydrate_config_secrets(
         path: &Path,
         config: &mut crate::config::AppConfig,
@@ -390,6 +405,10 @@ mod platform {
 
     pub(super) fn store_name() -> &'static str {
         "the Android Keystore"
+    }
+
+    pub(super) fn allows_plaintext_fallback() -> bool {
+        false
     }
 
     pub(super) fn hydrate_config_secrets(
@@ -468,6 +487,10 @@ mod platform {
 
     pub(super) fn store_name() -> &'static str {
         "a Windows DPAPI-protected sidecar"
+    }
+
+    pub(super) fn allows_plaintext_fallback() -> bool {
+        false
     }
 
     pub(super) fn hydrate_config_secrets(
@@ -605,6 +628,10 @@ mod platform {
         "a private Linux secret sidecar"
     }
 
+    pub(super) fn allows_plaintext_fallback() -> bool {
+        false
+    }
+
     pub(super) fn hydrate_config_secrets(
         path: &Path,
         config: &mut crate::config::AppConfig,
@@ -677,6 +704,10 @@ mod platform {
 
     pub(super) fn store_name() -> &'static str {
         "the platform secret store"
+    }
+
+    pub(super) fn allows_plaintext_fallback() -> bool {
+        true
     }
 
     pub(super) fn hydrate_config_secrets(

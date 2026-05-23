@@ -324,7 +324,7 @@ impl NativeAppRuntime {
             .try_exists()
             .with_context(|| format!("failed to inspect config {}", config_path.display()))?;
         let persist_identity_defaults = config_exists
-            && config_file_missing_persisted_identity(&config_path).with_context(|| {
+            && config_file_needs_identity_persistence(&config_path).with_context(|| {
                 format!(
                     "failed to inspect persisted identity in {}",
                     config_path.display()
@@ -2717,7 +2717,7 @@ fn native_config_path(data_dir: &str) -> PathBuf {
     }
 }
 
-fn config_file_missing_persisted_identity(path: &Path) -> Result<bool> {
+fn config_file_needs_identity_persistence(path: &Path) -> Result<bool> {
     let raw =
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&raw).context("failed to parse config TOML")?;
@@ -2736,7 +2736,18 @@ fn config_file_missing_persisted_identity(path: &Path) -> Result<bool> {
         .unwrap_or_default()
         .trim();
 
-    Ok(secret_key.is_empty() || public_key.is_empty())
+    Ok(secret_key.is_empty() || public_key.is_empty() || !is_persisted_secret_marker(secret_key))
+}
+
+fn is_persisted_secret_marker(value: &str) -> bool {
+    matches!(
+        value.trim(),
+        "stored-in-system-keychain"
+            | "stored-in-ios-keychain"
+            | "stored-in-android-keystore"
+            | "stored-in-windows-dpapi"
+            | "stored-in-private-secret-file"
+    )
 }
 
 fn default_config_path() -> PathBuf {
@@ -3038,6 +3049,33 @@ mod tests {
         assert!(saved.networks.is_empty());
         assert!(!saved.nostr.secret_key.trim().is_empty());
         assert!(!saved.nostr.public_key.trim().is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn startup_rewrites_plaintext_identity_configs() {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-identity-rewrite-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+        let path = dir.join("config.toml");
+
+        fs::write(
+            &path,
+            "[nostr]\nsecret_key = \"nsec1example\"\npublic_key = \"npub1example\"\n",
+        )
+        .expect("write plaintext config");
+        assert!(config_file_needs_identity_persistence(&path).expect("inspect plaintext config"));
+
+        fs::write(
+            &path,
+            "[nostr]\nsecret_key = \"stored-in-ios-keychain\"\npublic_key = \"npub1example\"\n",
+        )
+        .expect("write marker config");
+        assert!(!config_file_needs_identity_persistence(&path).expect("inspect marker config"));
 
         let _ = fs::remove_dir_all(&dir);
     }
