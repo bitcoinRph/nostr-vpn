@@ -15,7 +15,7 @@ struct RootView: View {
            let network = model.state.networks.first(where: { $0.id == shownNetworkId }) {
             return network
         }
-        return model.activeNetwork
+        return model.activeNetwork ?? model.state.networks.first
     }
 
     private var incomingJoinRequestCount: Int {
@@ -26,7 +26,7 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if model.activeNetwork == nil {
+            if model.state.networks.isEmpty {
                 NavigationStack {
                     AddNetworkPage(
                         model: model,
@@ -1340,13 +1340,33 @@ private struct DeviceSettingsCard: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
-            TextField("Port", text: $port)
+            TextField("Listen Port", text: $port)
                 .keyboardType(.numberPad)
                 .textFieldStyle(.roundedBorder)
-            Toggle("Autoconnect", isOn: Binding(
+            SettingsToggleGroupLabel("General")
+            Toggle("Start VPN automatically", isOn: Binding(
                 get: { model.state.autoconnect },
                 set: { value in
                     model.dispatch(NativeActions.updateSettings(["autoconnect": value]), status: "Saving")
+                }
+            ))
+            SettingsToggleGroupLabel("FIPS")
+            Toggle("Connect to non-roster FIPS peers", isOn: Binding(
+                get: { model.state.connectToNonRosterFipsPeers },
+                set: { value in
+                    model.dispatch(NativeActions.updateSettings(["connectToNonRosterFipsPeers": value]), status: "Saving")
+                }
+            ))
+            Toggle("Find peers over relays", isOn: Binding(
+                get: { model.state.fipsNostrDiscoveryEnabled },
+                set: { value in
+                    model.dispatch(NativeActions.updateSettings(["fipsNostrDiscoveryEnabled": value]), status: "Saving")
+                }
+            ))
+            Toggle("Use bootstrap servers", isOn: Binding(
+                get: { model.state.fipsBootstrapEnabled },
+                set: { value in
+                    model.dispatch(NativeActions.updateSettings(["fipsBootstrapEnabled": value]), status: "Saving")
                 }
             ))
             Button("Save") {
@@ -1374,6 +1394,21 @@ private struct DeviceSettingsCard: View {
             endpoint = model.state.endpoint
             port = String(model.state.listenPort)
         }
+    }
+}
+
+private struct SettingsToggleGroupLabel: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.top, 4)
     }
 }
 
@@ -1591,6 +1626,9 @@ private struct DiagnosticsCard: View {
             Text("Diagnostics")
                 .font(.headline)
             Metric("Runtime", state.runtimeStatusDetail.isEmpty ? state.platform : state.runtimeStatusDetail)
+            Metric("Peers", "\(state.connectedPeerCount)/\(state.expectedPeerCount)")
+            Metric("Roster FIPS", "\(state.fipsConnectedPeerCount)/\(state.fipsRosterPeerCount) direct")
+            Metric("Other FIPS", "\(state.nonFipsRosterPeerCount)")
             Metric("MagicDNS", state.magicDnsStatus)
             Metric("Version", state.appVersion)
             Metric("Config", state.configPath)

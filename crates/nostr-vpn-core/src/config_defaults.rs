@@ -79,12 +79,28 @@ pub(crate) fn default_fips_advertise_endpoint() -> bool {
     true
 }
 
+pub(crate) fn default_fips_host_tunnel_enabled() -> bool {
+    false
+}
+
+pub(crate) fn default_connect_to_non_roster_fips_peers() -> bool {
+    true
+}
+
+pub(crate) fn default_fips_bootstrap_enabled() -> bool {
+    true
+}
+
+pub(crate) fn default_fips_nostr_discovery_enabled() -> bool {
+    true
+}
+
 pub(crate) fn default_close_to_tray_on_close() -> bool {
     true
 }
 
 pub(crate) fn default_network_enabled() -> bool {
-    true
+    false
 }
 
 pub(crate) fn default_listen_for_join_requests() -> bool {

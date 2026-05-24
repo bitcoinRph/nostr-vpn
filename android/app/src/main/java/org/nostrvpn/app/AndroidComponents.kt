@@ -350,13 +350,54 @@ internal fun DeviceSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit)
         OutlinedTextField(nodeName, { nodeName = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Name") })
         OutlinedTextField(tunnelIp, { tunnelIp = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Tunnel IP") })
         OutlinedTextField(endpoint, { endpoint = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Endpoint") })
-        OutlinedTextField(port, { port = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Port") })
+        OutlinedTextField(port, { port = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Listen Port") })
+        Text(
+            "General",
+            modifier = Modifier.padding(top = 4.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = Muted,
+            fontWeight = FontWeight.SemiBold,
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
                 checked = state.autoconnect,
                 onCheckedChange = { enabled -> dispatch(NativeActions.updateSettings("autoconnect" to enabled)) },
             )
-            Text("Autoconnect")
+            Text("Start VPN automatically")
+        }
+        Text(
+            "FIPS",
+            modifier = Modifier.padding(top = 8.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = Muted,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = state.connectToNonRosterFipsPeers,
+                onCheckedChange = { enabled ->
+                    dispatch(NativeActions.updateSettings("connectToNonRosterFipsPeers" to enabled))
+                },
+            )
+            Text("Connect to non-roster FIPS peers")
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = state.fipsNostrDiscoveryEnabled,
+                onCheckedChange = { enabled ->
+                    dispatch(NativeActions.updateSettings("fipsNostrDiscoveryEnabled" to enabled))
+                },
+            )
+            Text("Find peers over relays")
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = state.fipsBootstrapEnabled,
+                onCheckedChange = { enabled ->
+                    dispatch(NativeActions.updateSettings("fipsBootstrapEnabled" to enabled))
+                },
+            )
+            Text("Use bootstrap servers")
         }
         Button(onClick = {
             dispatch(
@@ -573,6 +614,9 @@ internal fun DiagnosticsCard(state: AppState) {
     AppCard {
         Text("Diagnostics", style = MaterialTheme.typography.titleMedium)
         Metric("Runtime", state.runtimeStatusDetail.ifBlank { state.platform })
+        Metric("Peers", "${state.connectedPeerCount}/${state.expectedPeerCount}")
+        Metric("Roster FIPS", "${state.fipsConnectedPeerCount}/${state.fipsRosterPeerCount} direct")
+        Metric("Other FIPS", "${state.nonFipsRosterPeerCount}")
         Metric("MagicDNS", state.magicDnsStatus)
         Metric("Version", state.appVersion)
         state.health.forEach { issue ->

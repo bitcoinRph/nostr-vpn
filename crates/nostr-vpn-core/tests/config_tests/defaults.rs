@@ -24,9 +24,15 @@ fn generated_config_auto_populates_keys() {
     assert!(!config.nat.stun_servers.is_empty());
     assert!(config.exit_node.is_empty());
     assert!(config.exit_node_leak_protection);
+    assert!(!config.fips_host_tunnel_enabled);
+    assert!(config.connect_to_non_roster_fips_peers);
+    assert!(config.fips_host_inbound_tcp_ports.is_empty());
     assert!(!config.node.advertise_exit_node);
     assert!(config.node.advertised_routes.is_empty());
     assert!(config.effective_advertised_routes().is_empty());
+    assert_eq!(config.enabled_network_count(), 0);
+    assert!(!config.networks[0].enabled);
+    assert!(config.effective_network_id().is_empty());
     assert_eq!(config.networks[0].network_id.len(), 8);
     assert!(
         config.networks[0]
@@ -35,6 +41,125 @@ fn generated_config_auto_populates_keys() {
             .all(|ch| ch.is_ascii_hexdigit())
     );
     assert!(!config.networks[0].invite_secret.is_empty());
+}
+
+#[test]
+fn fips_discovery_and_bootstrap_default_on() {
+    let config = AppConfig::generated();
+
+    assert!(config.fips_nostr_discovery_enabled);
+    assert!(config.fips_bootstrap_enabled);
+
+    let bootstrap = config.fips_bootstrap_peer_endpoints();
+    assert_eq!(bootstrap.len(), DEFAULT_FIPS_BOOTSTRAP_PEERS.len());
+    assert!(
+        bootstrap
+            .iter()
+            .all(|(npub, addrs)| npub.starts_with("npub1") && addrs.iter().all(|a| a.contains(':')))
+    );
+}
+
+#[test]
+fn fips_bootstrap_peers_are_seeded_editable_and_resettable() {
+    let mut config = AppConfig::generated();
+    // Seeded from the built-in defaults.
+    assert_eq!(
+        config.fips_bootstrap_peers.len(),
+        DEFAULT_FIPS_BOOTSTRAP_PEERS.len()
+    );
+
+    // Editable: replacing the list normalizes keys to npub, keeps non-empty
+    // addresses, and drops entries with an invalid pubkey key.
+    let mut custom = std::collections::HashMap::new();
+    custom.insert(
+        "npub1260n42s06vzc7796w0fh3ny7zcpw6tlk4gq3940gmfrzl5c9pv2s3657q8".to_string(),
+        vec!["tcp:45.79.10.10:443".to_string(), "  ".to_string()],
+    );
+    custom.insert(
+        "not-a-valid-pubkey".to_string(),
+        vec!["45.79.10.11:2121".to_string()],
+    );
+    config.set_fips_bootstrap_peers(custom);
+    assert_eq!(config.fips_bootstrap_peers.len(), 1);
+    let addrs = config.fips_bootstrap_peer_endpoints();
+    assert_eq!(addrs.len(), 1);
+    assert_eq!(addrs[0].1, vec!["tcp:45.79.10.10:443".to_string()]);
+
+    // Editing persists across a serialize/load round trip.
+    let encoded = toml::to_string(&config).expect("serialize");
+    let decoded: AppConfig = toml::from_str(&encoded).expect("parse");
+    assert_eq!(decoded.fips_bootstrap_peers.len(), 1);
+
+    // Resettable to the built-in defaults.
+    config.reset_fips_bootstrap_peers();
+    assert_eq!(
+        config.fips_bootstrap_peers.len(),
+        DEFAULT_FIPS_BOOTSTRAP_PEERS.len()
+    );
+}
+
+#[test]
+fn fips_bootstrap_disabled_yields_no_peers() {
+    let config = AppConfig {
+        fips_bootstrap_enabled: false,
+        ..AppConfig::default()
+    };
+
+    assert!(config.fips_bootstrap_peer_endpoints().is_empty());
+}
+
+#[test]
+fn fips_discovery_and_bootstrap_off_round_trip() {
+    let config = AppConfig {
+        fips_nostr_discovery_enabled: false,
+        fips_bootstrap_enabled: false,
+        ..AppConfig::default()
+    };
+
+    let encoded = toml::to_string(&config).expect("serialize config");
+    assert!(encoded.contains("fips_nostr_discovery_enabled = false"));
+    assert!(encoded.contains("fips_bootstrap_enabled = false"));
+
+    let decoded: AppConfig = toml::from_str(&encoded).expect("parse config");
+    assert!(!decoded.fips_nostr_discovery_enabled);
+    assert!(!decoded.fips_bootstrap_enabled);
+}
+
+#[test]
+fn fips_discovery_and_bootstrap_default_on_when_missing() {
+    let config: AppConfig = toml::from_str("").expect("parse empty config");
+
+    assert!(config.fips_nostr_discovery_enabled);
+    assert!(config.fips_bootstrap_enabled);
+}
+
+#[test]
+fn fips_host_tunnel_is_default_off_but_opt_in_persists() {
+    let default_config: AppConfig = toml::from_str("").expect("parse empty config");
+    assert!(!default_config.fips_host_tunnel_enabled);
+
+    let config = AppConfig {
+        fips_host_tunnel_enabled: true,
+        ..AppConfig::default()
+    };
+
+    let encoded = toml::to_string(&config).expect("serialize config");
+    assert!(encoded.contains("fips_host_tunnel_enabled = true"));
+
+    let decoded: AppConfig = toml::from_str(&encoded).expect("parse config");
+    assert!(decoded.fips_host_tunnel_enabled);
+}
+
+#[test]
+fn fips_host_inbound_ports_are_normalized() {
+    let mut config = AppConfig {
+        fips_host_inbound_tcp_ports: vec![443, 22, 22],
+        ..AppConfig::default()
+    };
+
+    config.ensure_defaults();
+
+    assert_eq!(config.fips_host_inbound_tcp_ports, vec![22, 443]);
 }
 
 #[test]
@@ -56,6 +181,18 @@ fn exit_node_leak_protection_off_is_preserved() {
 
     let decoded: AppConfig = toml::from_str(&encoded).expect("parse config");
     assert!(!decoded.exit_node_leak_protection);
+}
+
+#[test]
+fn magic_dns_suffix_is_fixed_and_not_serialized() {
+    let mut config: AppConfig =
+        toml::from_str(r#"magic_dns_suffix = "custom.test""#).expect("parse legacy suffix");
+
+    config.ensure_defaults();
+
+    assert_eq!(config.magic_dns_suffix, "nvpn");
+    let encoded = toml::to_string(&config).expect("serialize config");
+    assert!(!encoded.contains("magic_dns_suffix"));
 }
 
 #[test]
@@ -213,7 +350,8 @@ fn join_requests_enabled_is_true_when_any_network_listens() {
 
 #[test]
 fn generated_network_defaults_local_identity_to_admin() {
-    let config = AppConfig::generated();
+    let mut config = AppConfig::generated();
+    activate_first_network(&mut config);
     let own_pubkey = config.own_nostr_pubkey_hex().expect("own pubkey");
 
     assert_eq!(config.active_network_admin_pubkeys_hex(), vec![own_pubkey]);

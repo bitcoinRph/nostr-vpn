@@ -140,6 +140,13 @@ export type UiState = {
   wireguardExitConfigured: boolean;
   wireguardExitEndpoint: string;
   wireguardExitConfig: string;
+  fipsHostTunnelEnabled: boolean;
+  connectToNonRosterFipsPeers: boolean;
+  fipsNostrDiscoveryEnabled: boolean;
+  fipsBootstrapEnabled: boolean;
+  fipsBootstrapPeers: Record<string, string[]>;
+  fipsBootstrapPeerDefaults: Record<string, string[]>;
+  fipsHostInboundTcpPorts: string;
   magicDnsSuffix: string;
   magicDnsStatus: string;
   autoconnect: boolean;
@@ -151,6 +158,9 @@ export type UiState = {
   closeToTrayOnClose: boolean;
   connectedPeerCount: number;
   expectedPeerCount: number;
+  fipsConnectedPeerCount: number;
+  fipsRosterPeerCount: number;
+  nonFipsRosterPeerCount: number;
   meshReady: boolean;
   health: HealthIssue[];
   network: NetworkSummary;

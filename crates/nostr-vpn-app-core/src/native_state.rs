@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(uniffi::Record, Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -187,6 +189,15 @@ pub struct NativeAppState {
     pub wireguard_exit_mtu: u16,
     pub wireguard_exit_persistent_keepalive_secs: u16,
     pub wireguard_exit_config: String,
+    pub fips_host_tunnel_enabled: bool,
+    pub connect_to_non_roster_fips_peers: bool,
+    pub fips_nostr_discovery_enabled: bool,
+    pub fips_bootstrap_enabled: bool,
+    /// Editable bootstrap/transit peers (npub -> transport-tagged addresses).
+    pub fips_bootstrap_peers: HashMap<String, Vec<String>>,
+    /// Built-in bootstrap defaults, so the UI can offer "reset to defaults".
+    pub fips_bootstrap_peer_defaults: HashMap<String, Vec<String>>,
+    pub fips_host_inbound_tcp_ports: String,
     pub magic_dns_suffix: String,
     pub magic_dns_status: String,
     pub autoconnect: bool,
@@ -198,6 +209,9 @@ pub struct NativeAppState {
     pub close_to_tray_on_close: bool,
     pub connected_peer_count: u64,
     pub expected_peer_count: u64,
+    pub fips_connected_peer_count: u64,
+    pub fips_roster_peer_count: u64,
+    pub non_fips_roster_peer_count: u64,
     pub mesh_ready: bool,
     pub health: Vec<NativeHealthIssue>,
     pub network: NativeNetworkSummary,

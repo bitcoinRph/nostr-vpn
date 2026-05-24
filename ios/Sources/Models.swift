@@ -22,6 +22,9 @@ struct AppState: Decodable {
     var activeNetworkInvite = ""
     var connectedPeerCount: UInt64 = 0
     var expectedPeerCount: UInt64 = 0
+    var fipsConnectedPeerCount: UInt64 = 0
+    var fipsRosterPeerCount: UInt64 = 0
+    var nonFipsRosterPeerCount: UInt64 = 0
     var meshReady = false
     var exitNode = ""
     var exitNodeLeakProtection = false
@@ -43,6 +46,9 @@ struct AppState: Decodable {
     var wireguardExitMtu: Int = 0
     var wireguardExitPersistentKeepaliveSecs: Int = 0
     var wireguardExitConfig = ""
+    var connectToNonRosterFipsPeers = true
+    var fipsNostrDiscoveryEnabled = true
+    var fipsBootstrapEnabled = true
     var magicDnsSuffix = ""
     var magicDnsStatus = ""
     var autoconnect = false
@@ -56,20 +62,24 @@ struct AppState: Decodable {
     var health: [HealthIssue] = []
 
     var activeNetwork: NetworkState? {
-        networks.first(where: { $0.enabled }) ?? networks.first
+        networks.first(where: { $0.enabled })
     }
 
     enum CodingKeys: String, CodingKey {
         case rev, error, appVersion, platform, mobile, vpnControlSupported
         case runtimeStatusDetail, vpnEnabled, vpnActive, vpnStatus, daemonRunning
         case ownNpub, nodeName, selfMagicDnsName, tunnelIp, endpoint, listenPort, relays, activeNetworkInvite
-        case connectedPeerCount, expectedPeerCount, meshReady, exitNode, exitNodeLeakProtection
+        case connectedPeerCount, expectedPeerCount
+        case fipsConnectedPeerCount, fipsRosterPeerCount, nonFipsRosterPeerCount
+        case meshReady, exitNode, exitNodeLeakProtection
         case exitNodeActive, exitNodeBlocked, exitNodeStatusText, advertiseExitNode
         case advertisedRoutes
         case wireguardExitEnabled, wireguardExitConfigured, wireguardExitInterface, wireguardExitAddress
         case wireguardExitPrivateKey, wireguardExitPeerPublicKey, wireguardExitPeerPresharedKey
         case wireguardExitEndpoint, wireguardExitAllowedIps, wireguardExitDns
         case wireguardExitMtu, wireguardExitPersistentKeepaliveSecs, wireguardExitConfig
+        case connectToNonRosterFipsPeers
+        case fipsNostrDiscoveryEnabled, fipsBootstrapEnabled
         case magicDnsSuffix, magicDnsStatus, autoconnect
         case inviteBroadcastActive, inviteBroadcastRemainingSecs
         case nearbyDiscoveryActive, nearbyDiscoveryRemainingSecs, configPath
@@ -101,6 +111,9 @@ struct AppState: Decodable {
         activeNetworkInvite = container.string(.activeNetworkInvite)
         connectedPeerCount = container.uint64(.connectedPeerCount)
         expectedPeerCount = container.uint64(.expectedPeerCount)
+        fipsConnectedPeerCount = container.uint64(.fipsConnectedPeerCount)
+        fipsRosterPeerCount = container.uint64(.fipsRosterPeerCount)
+        nonFipsRosterPeerCount = container.uint64(.nonFipsRosterPeerCount)
         meshReady = container.bool(.meshReady)
         exitNode = container.string(.exitNode)
         exitNodeLeakProtection = container.bool(.exitNodeLeakProtection)
@@ -122,6 +135,9 @@ struct AppState: Decodable {
         wireguardExitMtu = container.int(.wireguardExitMtu)
         wireguardExitPersistentKeepaliveSecs = container.int(.wireguardExitPersistentKeepaliveSecs)
         wireguardExitConfig = container.string(.wireguardExitConfig)
+        connectToNonRosterFipsPeers = container.bool(.connectToNonRosterFipsPeers, default: true)
+        fipsNostrDiscoveryEnabled = container.bool(.fipsNostrDiscoveryEnabled, default: true)
+        fipsBootstrapEnabled = container.bool(.fipsBootstrapEnabled, default: true)
         magicDnsSuffix = container.string(.magicDnsSuffix)
         magicDnsStatus = container.string(.magicDnsStatus)
         autoconnect = container.bool(.autoconnect)

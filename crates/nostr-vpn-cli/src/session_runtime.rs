@@ -78,9 +78,10 @@ fn fips_peer_count(
     own_pubkey: Option<&str>,
     peer_statuses: &[MeshPeerStatus],
 ) -> usize {
-    let participant_pubkeys = app
-        .participant_pubkeys_hex()
-        .into_iter()
+    let participant_pubkeys_list = app.participant_pubkeys_hex();
+    let participant_pubkeys = participant_pubkeys_list
+        .iter()
+        .cloned()
         .collect::<HashSet<_>>();
     peer_statuses
         .iter()
@@ -109,12 +110,13 @@ fn maybe_log_fips_mesh_count(
 async fn flush_pending_fips_roster_recipients(
     runtime: &crate::fips_private_mesh::FipsPrivateTunnelRuntime,
     app: &AppConfig,
+    config_path: &Path,
     pending_recipients: &mut HashSet<String>,
 ) {
     if pending_recipients.is_empty() {
         return;
     }
-    match publish_fips_active_network_roster(runtime, app, pending_recipients).await {
+    match publish_fips_active_network_roster(runtime, app, config_path, pending_recipients).await {
         Ok(_) => {}
         Err(error) => eprintln!("fips: queued roster publish failed: {error}"),
     }
@@ -338,6 +340,8 @@ pub(crate) async fn connect_vpn(args: ConnectArgs) -> Result<()> {
     #[cfg(feature = "embedded-fips")]
     let mut pending_fips_roster_recipients: HashSet<String> = HashSet::new();
     #[cfg(feature = "embedded-fips")]
+    let mut fips_roster_sync_state = FipsRosterSyncState::default();
+    #[cfg(feature = "embedded-fips")]
     let mut connect_status = String::new();
 
     let mut last_mesh_count = 0_usize;
@@ -356,9 +360,20 @@ pub(crate) async fn connect_vpn(args: ConnectArgs) -> Result<()> {
                     if let Err(error) = runtime.refresh_link_statuses().await {
                         eprintln!("fips: peer link snapshot failed: {error}");
                     }
+                    if let Err(error) = sync_fips_roster_with_connected_peers(
+                        runtime,
+                        &app,
+                        &config_path,
+                        &mut fips_roster_sync_state,
+                    )
+                    .await
+                    {
+                        eprintln!("fips: roster peer sync failed: {error}");
+                    }
                     flush_pending_fips_roster_recipients(
                         runtime,
                         &app,
+                        &config_path,
                         &mut pending_fips_roster_recipients,
                     )
                     .await;
@@ -406,6 +421,7 @@ pub(crate) async fn connect_vpn(args: ConnectArgs) -> Result<()> {
                     if let Err(error) = publish_fips_active_network_roster(
                         runtime,
                         &app,
+                        &config_path,
                         &mut pending_fips_roster_recipients,
                     ).await {
                         eprintln!("fips: roster publish failed: {error}");
@@ -508,6 +524,8 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
     let mut fips_join_request_sends: HashMap<String, u64> = HashMap::new();
     #[cfg(feature = "embedded-fips")]
     let mut pending_fips_roster_recipients: HashSet<String> = HashSet::new();
+    #[cfg(feature = "embedded-fips")]
+    let mut fips_roster_sync_state = FipsRosterSyncState::default();
     let iface = args.iface.clone();
     let mut tunnel_runtime = CliTunnelRuntime::new(iface.clone());
     let mut network_snapshot = capture_network_snapshot();
@@ -636,6 +654,7 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                     if let Err(error) = publish_fips_active_network_roster(
                         runtime,
                         &app,
+                        &config_path,
                         &mut pending_fips_roster_recipients,
                     ).await {
                         eprintln!("fips: roster publish failed: {error}");
@@ -676,9 +695,20 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                         if let Err(error) = runtime.refresh_link_statuses().await {
                             eprintln!("fips: peer link snapshot failed: {error}");
                         }
+                        if let Err(error) = sync_fips_roster_with_connected_peers(
+                            runtime,
+                            &app,
+                            &config_path,
+                            &mut fips_roster_sync_state,
+                        )
+                        .await
+                        {
+                            eprintln!("fips: roster peer sync failed: {error}");
+                        }
                         flush_pending_fips_roster_recipients(
                             runtime,
                             &app,
+                            &config_path,
                             &mut pending_fips_roster_recipients,
                         )
                         .await;
@@ -705,9 +735,20 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                     if let Err(error) = runtime.refresh_link_statuses().await {
                         eprintln!("fips: peer link snapshot failed: {error}");
                     }
+                    if let Err(error) = sync_fips_roster_with_connected_peers(
+                        runtime,
+                        &app,
+                        &config_path,
+                        &mut fips_roster_sync_state,
+                    )
+                    .await
+                    {
+                        eprintln!("fips: roster peer sync failed: {error}");
+                    }
                     flush_pending_fips_roster_recipients(
                         runtime,
                         &app,
+                        &config_path,
                         &mut pending_fips_roster_recipients,
                     )
                     .await;
@@ -1036,6 +1077,7 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                         && let Err(error) = publish_fips_active_network_roster_to(
                             runtime,
                             &app,
+                            &config_path,
                             &pre_sync_fips_roster_recipients,
                             &mut pending_fips_roster_recipients,
                         )
@@ -1066,6 +1108,7 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
                         if let Err(error) = publish_fips_active_network_roster(
                             runtime,
                             &app,
+                            &config_path,
                             &mut pending_fips_roster_recipients,
                         )
                         .await
@@ -1179,6 +1222,8 @@ pub(crate) async fn daemon_vpn(args: DaemonArgs) -> Result<()> {
         vpn_status: "Disconnected".to_string(),
         expected_peer_count: expected_peers,
         connected_peer_count: 0,
+        fips_direct_roster_peer_count: 0,
+        fips_other_peer_count: 0,
         mesh_ready: false,
         health: Vec::new(),
         network: network_snapshot.summary(network_changed_at, captive_portal),
@@ -1325,12 +1370,17 @@ pub(crate) fn build_daemon_runtime_state(
     let advertised_endpoint = local_endpoint.clone();
     let mut peers = Vec::new();
 
+    let participant_pubkeys_list = app.participant_pubkeys_hex();
+    let participant_pubkeys = participant_pubkeys_list
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
     let fips_status_by_pubkey = fips_peer_statuses
         .iter()
         .map(|status| (status.pubkey.as_str(), status))
         .collect::<HashMap<_, _>>();
     let network_id = app.effective_network_id();
-    for participant in &app.participant_pubkeys_hex() {
+    for participant in &participant_pubkeys_list {
         if Some(participant.as_str()) == own_pubkey.as_deref() {
             continue;
         }
@@ -1387,14 +1437,36 @@ pub(crate) fn build_daemon_runtime_state(
     let connected_peer_count = if !vpn_active {
         0
     } else {
-        let participant_pubkeys = app
-            .participant_pubkeys_hex()
-            .into_iter()
-            .collect::<HashSet<_>>();
         fips_peer_statuses
             .iter()
             .filter(|status| Some(status.pubkey.as_str()) != own_pubkey.as_deref())
             .filter(|status| participant_pubkeys.contains(&status.pubkey))
+            .filter(|status| status.connected)
+            .count()
+    };
+    let fips_direct_roster_peer_count = if !vpn_active {
+        0
+    } else {
+        fips_peer_statuses
+            .iter()
+            .filter(|status| Some(status.pubkey.as_str()) != own_pubkey.as_deref())
+            .filter(|status| participant_pubkeys.contains(&status.pubkey))
+            .filter(|status| status.connected)
+            .filter(|status| {
+                status
+                    .transport_addr
+                    .as_deref()
+                    .is_some_and(|addr| !addr.trim().is_empty())
+            })
+            .count()
+    };
+    let fips_other_peer_count = if !vpn_active {
+        0
+    } else {
+        fips_peer_statuses
+            .iter()
+            .filter(|status| Some(status.pubkey.as_str()) != own_pubkey.as_deref())
+            .filter(|status| !participant_pubkeys.contains(&status.pubkey))
             .filter(|status| status.connected)
             .count()
     };
@@ -1411,6 +1483,8 @@ pub(crate) fn build_daemon_runtime_state(
         vpn_status: vpn_status.to_string(),
         expected_peer_count: expected_peers,
         connected_peer_count,
+        fips_direct_roster_peer_count,
+        fips_other_peer_count,
         mesh_ready,
         health,
         network: network.clone(),

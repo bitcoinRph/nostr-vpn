@@ -57,7 +57,7 @@ final class AppManager: ObservableObject {
             .flatMap(URL.init(string:)) {
             return [overrideUrl]
         }
-        return [githubUpdateManifestUrl, defaultUpdateManifestUrl]
+        return [defaultUpdateManifestUrl, githubUpdateManifestUrl]
     }()
     let launchedHidden: Bool
 
@@ -96,7 +96,7 @@ final class AppManager: ObservableObject {
     }
 
     var activeNetwork: NativeNetworkState? {
-        state.networks.first(where: { $0.enabled }) ?? state.networks.first
+        state.networks.first(where: { $0.enabled })
     }
 
     var inactiveNetworks: [NativeNetworkState] {
@@ -144,6 +144,7 @@ final class AppManager: ObservableObject {
         guard !fixtureMode else {
             return
         }
+        syncLaunchAgentWithSettings()
         startAutomaticUpdateChecks()
         guard refreshTask == nil else {
             return
@@ -361,7 +362,7 @@ final class AppManager: ObservableObject {
         endpoint: String,
         tunnelIp: String,
         listenPort: String,
-        magicDnsSuffix: String
+        fipsHostInboundTcpPorts: String
     ) {
         let parsedPort = UInt16(listenPort.trimmingCharacters(in: .whitespacesAndNewlines))
         dispatch(.updateSettings(patch: settingsPatch(
@@ -369,7 +370,7 @@ final class AppManager: ObservableObject {
             endpoint: endpoint,
             tunnelIp: tunnelIp,
             listenPort: parsedPort,
-            magicDnsSuffix: magicDnsSuffix
+            fipsHostInboundTcpPorts: fipsHostInboundTcpPorts
         )), status: "Saving device settings")
     }
 
@@ -492,9 +493,25 @@ final class AppManager: ObservableObject {
         dispatch(.updateSettings(patch: settingsPatch(autoconnect: enabled)), status: "Saving VPN option")
     }
 
+    func setFipsHostTunnel(_ enabled: Bool) {
+        dispatch(.updateSettings(patch: settingsPatch(fipsHostTunnelEnabled: enabled)), status: "Saving FIPS option")
+    }
+
+    func setConnectToNonRosterFipsPeers(_ enabled: Bool) {
+        dispatch(.updateSettings(patch: settingsPatch(connectToNonRosterFipsPeers: enabled)), status: "Saving FIPS option")
+    }
+
+    func setFipsNostrDiscoveryEnabled(_ enabled: Bool) {
+        dispatch(.updateSettings(patch: settingsPatch(fipsNostrDiscoveryEnabled: enabled)), status: "Saving FIPS option")
+    }
+
+    func setFipsBootstrapEnabled(_ enabled: Bool) {
+        dispatch(.updateSettings(patch: settingsPatch(fipsBootstrapEnabled: enabled)), status: "Saving FIPS option")
+    }
+
     func setLaunchOnStartup(_ enabled: Bool) {
         do {
-            try configureLaunchAgent(enabled: enabled)
+            try configureLaunchAgent(enabled: enabled, loadCurrentSession: true)
             dispatch(.updateSettings(patch: settingsPatch(launchOnStartup: enabled)), status: "Saving startup option")
         } catch {
             actionStatus = error.localizedDescription
@@ -842,7 +859,18 @@ final class AppManager: ObservableObject {
         }
     }
 
-    private func configureLaunchAgent(enabled: Bool) throws {
+    private func syncLaunchAgentWithSettings() {
+        do {
+            try configureLaunchAgent(
+                enabled: state.startupSettingsSupported && state.launchOnStartup,
+                loadCurrentSession: false
+            )
+        } catch {
+            actionStatus = error.localizedDescription
+        }
+    }
+
+    private func configureLaunchAgent(enabled: Bool, loadCurrentSession: Bool) throws {
         let manager = FileManager.default
         let agentsDir = manager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
@@ -853,9 +881,13 @@ final class AppManager: ObservableObject {
             }
             try manager.createDirectory(at: agentsDir, withIntermediateDirectories: true)
             try launchAgentPlist(executable: executable).write(to: plistUrl, atomically: true, encoding: .utf8)
-            _ = runLaunchctl(["bootstrap", "gui/\(getuid())", plistUrl.path])
+            if loadCurrentSession {
+                _ = runLaunchctl(["bootstrap", "gui/\(getuid())", plistUrl.path])
+            }
         } else {
-            _ = runLaunchctl(["bootout", "gui/\(getuid())", plistUrl.path])
+            if loadCurrentSession {
+                _ = runLaunchctl(["bootout", "gui/\(getuid())", plistUrl.path])
+            }
             if manager.fileExists(atPath: plistUrl.path) {
                 try manager.removeItem(at: plistUrl)
             }
@@ -1190,6 +1222,13 @@ final class AppManager: ObservableObject {
             wireguardExitMtu: 1280,
             wireguardExitPersistentKeepaliveSecs: 25,
             wireguardExitConfig: "",
+            fipsHostTunnelEnabled: false,
+            connectToNonRosterFipsPeers: true,
+            fipsNostrDiscoveryEnabled: true,
+            fipsBootstrapEnabled: true,
+            fipsBootstrapPeers: [:],
+            fipsBootstrapPeerDefaults: [:],
+            fipsHostInboundTcpPorts: "",
             magicDnsSuffix: "nvpn",
             magicDnsStatus: "Serving .nvpn names",
             autoconnect: true,
@@ -1201,6 +1240,9 @@ final class AppManager: ObservableObject {
             closeToTrayOnClose: true,
             connectedPeerCount: 4,
             expectedPeerCount: 4,
+            fipsConnectedPeerCount: 4,
+            fipsRosterPeerCount: 4,
+            nonFipsRosterPeerCount: 0,
             meshReady: true,
             health: [],
             network: NativeNetworkSummary(
@@ -1430,7 +1472,7 @@ private func configuredUpdateManifestUrls() -> [URL] {
         .flatMap(URL.init(string:)) {
         return [overrideUrl]
     }
-    return [githubUpdateManifestUrl, defaultUpdateManifestUrl]
+    return [defaultUpdateManifestUrl, githubUpdateManifestUrl]
 }
 
 private func loadConfiguredUpdateManifestBlocking() throws -> (URL, Data) {
@@ -1532,6 +1574,7 @@ private func launchAgentPlist(executable: String) -> String {
         <key>ProgramArguments</key>
         <array>
             <string>\(xmlEscaped(executable))</string>
+            <string>--hidden</string>
         </array>
         <key>RunAtLoad</key>
         <true/>
@@ -1691,7 +1734,12 @@ func settingsPatch(
     wireguardExitMtu: UInt16? = nil,
     wireguardExitPersistentKeepaliveSecs: UInt16? = nil,
     wireguardExitConfig: String? = nil,
-    magicDnsSuffix: String? = nil,
+    fipsHostTunnelEnabled: Bool? = nil,
+    connectToNonRosterFipsPeers: Bool? = nil,
+    fipsNostrDiscoveryEnabled: Bool? = nil,
+    fipsBootstrapEnabled: Bool? = nil,
+    fipsBootstrapPeers: [String: [String]]? = nil,
+    fipsHostInboundTcpPorts: String? = nil,
     autoconnect: Bool? = nil,
     launchOnStartup: Bool? = nil,
     closeToTrayOnClose: Bool? = nil
@@ -1719,7 +1767,12 @@ func settingsPatch(
         wireguardExitMtu: wireguardExitMtu,
         wireguardExitPersistentKeepaliveSecs: wireguardExitPersistentKeepaliveSecs,
         wireguardExitConfig: wireguardExitConfig,
-        magicDnsSuffix: magicDnsSuffix,
+        fipsHostTunnelEnabled: fipsHostTunnelEnabled,
+        connectToNonRosterFipsPeers: connectToNonRosterFipsPeers,
+        fipsNostrDiscoveryEnabled: fipsNostrDiscoveryEnabled,
+        fipsBootstrapEnabled: fipsBootstrapEnabled,
+        fipsBootstrapPeers: fipsBootstrapPeers,
+        fipsHostInboundTcpPorts: fipsHostInboundTcpPorts,
         autoconnect: autoconnect,
         launchOnStartup: launchOnStartup,
         closeToTrayOnClose: closeToTrayOnClose

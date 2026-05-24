@@ -1,6 +1,11 @@
 mod config_bootstrap;
 mod daemon_runtime;
 mod diagnostics;
+#[cfg(all(
+    feature = "embedded-fips",
+    any(target_os = "linux", target_os = "macos")
+))]
+mod fips_host_tunnel;
 #[cfg(feature = "embedded-fips")]
 mod fips_private_mesh;
 #[cfg(any(target_os = "macos", test))]
@@ -50,16 +55,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use nostr_vpn_core::config::{
-    AppConfig, derive_mesh_tunnel_ip, exit_node_default_routes, maybe_autoconfigure_node,
-    normalize_advertised_route, normalize_fips_peer_endpoint_hint, normalize_nostr_pubkey,
-    normalize_runtime_network_id, parse_wireguard_exit_config,
+    AppConfig, SharedNetworkRoster, derive_mesh_tunnel_ip, exit_node_default_routes,
+    maybe_autoconfigure_node, normalize_advertised_route, normalize_fips_peer_endpoint_hint,
+    normalize_nostr_pubkey, normalize_runtime_network_id, parse_wireguard_exit_config,
 };
 use nostr_vpn_core::control::PeerAnnouncement;
 use nostr_vpn_core::data_plane::MeshPeerStatus;
 use nostr_vpn_core::diagnostics::{
     HealthIssue, HealthSeverity, NetworkSummary, PortMappingStatus, ProbeState,
 };
-use nostr_vpn_core::fips_control::{NetworkRoster, PeerCapabilities, PeerEndpointHint};
+use nostr_vpn_core::fips_control::{
+    NetworkRoster, PeerCapabilities, PeerEndpointHint, SignedRoster,
+};
 #[cfg(feature = "embedded-fips")]
 use nostr_vpn_core::join_requests::{FIPS_JOIN_REQUEST_RETRY_SECS, MeshJoinRequest};
 use nostr_vpn_core::magic_dns::{
@@ -71,6 +78,9 @@ use nostr_vpn_core::platform_paths::{
     legacy_config_path_from_dirs_config_dir, windows_default_config_path_for_state,
     windows_machine_config_path_from_program_data_dir,
     windows_service_config_path_from_sc_qc_output,
+};
+use nostr_vpn_core::signed_rosters::{
+    load_signed_rosters, signed_rosters_file_path, upsert_signed_roster,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -535,8 +545,6 @@ struct SetArgs {
     #[arg(long)]
     network_id: Option<String>,
     #[arg(long)]
-    magic_dns_suffix: Option<String>,
-    #[arg(long)]
     node_name: Option<String>,
     #[arg(long)]
     node_id: Option<String>,
@@ -588,6 +596,16 @@ struct SetArgs {
     join_requests_enabled: Option<bool>,
     #[arg(long, num_args = 0..=1, default_missing_value = "true")]
     fips_advertise_endpoint: Option<bool>,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    fips_host_tunnel_enabled: Option<bool>,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    connect_to_non_roster_fips_peers: Option<bool>,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    fips_nostr_discovery_enabled: Option<bool>,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    fips_bootstrap_enabled: Option<bool>,
+    #[arg(long)]
+    fips_host_inbound_tcp_ports: Option<String>,
     #[arg(long = "fips-peer-endpoint")]
     fips_peer_endpoints: Vec<String>,
     #[arg(long)]
@@ -903,6 +921,11 @@ async fn run_command(command: Command) -> Result<()> {
                         "advertise_exit_node": app.node.advertise_exit_node,
                         "advertised_routes": app.node.advertised_routes,
                         "effective_advertised_routes": runtime_effective_advertised_routes(&app),
+                        "fips_host_tunnel_enabled": app.fips_host_tunnel_enabled,
+                        "connect_to_non_roster_fips_peers": app.connect_to_non_roster_fips_peers,
+                        "fips_nostr_discovery_enabled": app.fips_nostr_discovery_enabled,
+                        "fips_bootstrap_enabled": app.fips_bootstrap_enabled,
+                        "fips_host_inbound_tcp_ports": app.fips_host_inbound_tcp_ports,
                         "wireguard_exit": wireguard_exit_status_json(&app),
                         "daemon": daemon_status_json_value(&daemon),
                         "expected_peer_count": expected_peers,
@@ -937,6 +960,26 @@ async fn run_command(command: Command) -> Result<()> {
                     app.exit_node_leak_protection
                 );
                 println!("advertise_exit_node: {}", app.node.advertise_exit_node);
+                println!("fips_host_tunnel_enabled: {}", app.fips_host_tunnel_enabled);
+                println!(
+                    "connect_to_non_roster_fips_peers: {}",
+                    app.connect_to_non_roster_fips_peers
+                );
+                println!(
+                    "fips_nostr_discovery_enabled: {}",
+                    app.fips_nostr_discovery_enabled
+                );
+                println!("fips_bootstrap_enabled: {}", app.fips_bootstrap_enabled);
+                if !app.fips_host_inbound_tcp_ports.is_empty() {
+                    println!(
+                        "fips_host_inbound_tcp_ports: {}",
+                        app.fips_host_inbound_tcp_ports
+                            .iter()
+                            .map(u16::to_string)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    );
+                }
                 println!(
                     "wireguard_exit: {}",
                     if app.wireguard_exit.enabled {
@@ -1007,9 +1050,6 @@ async fn run_command(command: Command) -> Result<()> {
 
             if let Some(value) = args.network_id {
                 app.set_active_network_id(&value)?;
-            }
-            if let Some(value) = args.magic_dns_suffix {
-                app.magic_dns_suffix = value;
             }
             if let Some(value) = args.node_name {
                 app.node_name = value;
@@ -1095,11 +1135,30 @@ async fn run_command(command: Command) -> Result<()> {
                 app.autoconnect = value;
             }
             if let Some(value) = args.join_requests_enabled {
-                let network_id = app.active_network().id.clone();
+                let network_id = app
+                    .active_network_opt()
+                    .ok_or_else(|| anyhow!("activate a network before changing join requests"))?
+                    .id
+                    .clone();
                 app.set_network_join_requests_enabled(&network_id, value)?;
             }
             if let Some(value) = args.fips_advertise_endpoint {
                 app.fips_advertise_endpoint = value;
+            }
+            if let Some(value) = args.fips_host_tunnel_enabled {
+                app.fips_host_tunnel_enabled = value;
+            }
+            if let Some(value) = args.connect_to_non_roster_fips_peers {
+                app.connect_to_non_roster_fips_peers = value;
+            }
+            if let Some(value) = args.fips_nostr_discovery_enabled {
+                app.fips_nostr_discovery_enabled = value;
+            }
+            if let Some(value) = args.fips_bootstrap_enabled {
+                app.fips_bootstrap_enabled = value;
+            }
+            if let Some(value) = args.fips_host_inbound_tcp_ports {
+                app.fips_host_inbound_tcp_ports = parse_tcp_ports_arg(&value)?;
             }
             if !args.fips_peer_endpoints.is_empty() {
                 app.fips_peer_endpoints = parse_fips_peer_endpoint_args(&args.fips_peer_endpoints)?;
@@ -1892,6 +1951,170 @@ pub(crate) fn shared_roster_publish_allowed(
     signed_by.is_empty() || signed_by == own_pubkey
 }
 
+fn network_roster_from_shared(shared: &SharedNetworkRoster) -> NetworkRoster {
+    NetworkRoster {
+        network_name: shared.name.clone(),
+        participants: shared.participants.clone(),
+        admins: shared.admins.clone(),
+        aliases: shared.aliases.clone(),
+        signed_at: if shared.updated_at > 0 {
+            shared.updated_at
+        } else {
+            unix_timestamp()
+        },
+    }
+}
+
+fn signed_roster_matches_shared(
+    signed_roster: &SignedRoster,
+    shared: &SharedNetworkRoster,
+) -> bool {
+    let Ok(signed_network_id) = signed_roster.network_id() else {
+        return false;
+    };
+    if normalize_runtime_network_id(&signed_network_id)
+        != normalize_runtime_network_id(&shared.network_id)
+    {
+        return false;
+    }
+
+    let Ok(signed_by) = signed_roster.signer_pubkey_hex() else {
+        return false;
+    };
+    let shared_signed_by = normalize_nostr_pubkey(&shared.signed_by).unwrap_or_default();
+    if shared_signed_by.is_empty() || shared_signed_by != signed_by {
+        return false;
+    }
+
+    let Ok(roster) = signed_roster.roster() else {
+        return false;
+    };
+    roster == network_roster_from_shared(shared)
+}
+
+fn active_signed_roster_for_sync(
+    app: &AppConfig,
+    config_path: &Path,
+    allow_forwarded: bool,
+) -> Result<Option<SignedRoster>> {
+    let Some(network) = app.active_network_opt() else {
+        return Ok(None);
+    };
+    let shared = app.shared_network_roster(&network.id)?;
+    let store_path = signed_rosters_file_path(config_path);
+    let own_pubkey = app.own_nostr_pubkey_hex().ok();
+    if let Some(stored) = load_signed_rosters(&store_path)?
+        .latest_for(&shared.network_id)
+        .filter(|stored| signed_roster_matches_shared(stored, &shared))
+        .filter(|stored| {
+            allow_forwarded
+                || own_pubkey.as_deref().is_some_and(|own_pubkey| {
+                    stored.signer_pubkey_hex().ok().as_deref() == Some(own_pubkey)
+                })
+        })
+        .cloned()
+    {
+        return Ok(Some(stored));
+    }
+
+    let Some(own_pubkey) = own_pubkey else {
+        return Ok(None);
+    };
+    if !shared_roster_publish_allowed(app, &network.id, &own_pubkey, &shared.signed_by) {
+        return Ok(None);
+    }
+
+    let signed_roster = SignedRoster::sign(
+        &shared.network_id,
+        network_roster_from_shared(&shared),
+        &app.nostr_keys()?,
+    )?;
+    upsert_signed_roster(&store_path, signed_roster.clone())?;
+    Ok(Some(signed_roster))
+}
+
+fn signed_roster_is_current_for_app(
+    app: &AppConfig,
+    network_id: &str,
+    signed_roster: &SignedRoster,
+) -> bool {
+    let Ok(signed_by) = signed_roster.signer_pubkey_hex() else {
+        return false;
+    };
+    app.networks.iter().any(|network| {
+        normalize_runtime_network_id(&network.network_id)
+            == normalize_runtime_network_id(network_id)
+            && network.shared_roster_updated_at == signed_roster.signed_at()
+            && normalize_nostr_pubkey(&network.shared_roster_signed_by)
+                .is_ok_and(|value| value == signed_by)
+    })
+}
+
+#[cfg(feature = "embedded-fips")]
+const FIPS_ROSTER_RESEND_SECS: u64 = 10;
+
+#[cfg(feature = "embedded-fips")]
+#[derive(Default)]
+struct FipsRosterSyncState {
+    sent_by_peer: HashMap<String, FipsRosterSentState>,
+}
+
+#[cfg(feature = "embedded-fips")]
+struct FipsRosterSentState {
+    hash: String,
+    sent_at: u64,
+}
+
+#[cfg(feature = "embedded-fips")]
+async fn sync_fips_roster_with_connected_peers(
+    runtime: &crate::fips_private_mesh::FipsPrivateTunnelRuntime,
+    app: &AppConfig,
+    config_path: &Path,
+    state: &mut FipsRosterSyncState,
+) -> Result<usize> {
+    let Some(signed_roster) = active_signed_roster_for_sync(app, config_path, true)? else {
+        return Ok(0);
+    };
+    let now = unix_timestamp();
+    let roster_hash = signed_roster.content_hash();
+    let own_pubkey = app.own_nostr_pubkey_hex().ok();
+    let roster_peers = app
+        .active_network_signal_pubkeys_hex()
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let connected = runtime
+        .peer_statuses()
+        .into_iter()
+        .filter(|status| status.connected)
+        .filter(|status| own_pubkey.as_deref() != Some(status.pubkey.as_str()))
+        .filter(|status| roster_peers.contains(&status.pubkey))
+        .map(|status| status.pubkey)
+        .collect::<HashSet<_>>();
+
+    state
+        .sent_by_peer
+        .retain(|peer, _| connected.contains(peer));
+
+    let mut sent = 0usize;
+    for peer in connected {
+        if state.sent_by_peer.get(&peer).is_some_and(|sent| {
+            sent.hash == roster_hash && now.saturating_sub(sent.sent_at) < FIPS_ROSTER_RESEND_SECS
+        }) {
+            continue;
+        }
+        runtime.send_roster(&peer, signed_roster.clone()).await?;
+        state.sent_by_peer.insert(
+            peer,
+            FipsRosterSentState {
+                hash: roster_hash.clone(),
+                sent_at: now,
+            },
+        );
+        sent += 1;
+    }
+    Ok(sent)
+}
+
 #[cfg(all(
     not(target_os = "linux"),
     not(target_os = "macos"),
@@ -1955,6 +2178,10 @@ struct DaemonRuntimeState {
     vpn_status: String,
     expected_peer_count: usize,
     connected_peer_count: usize,
+    #[serde(default)]
+    fips_direct_roster_peer_count: usize,
+    #[serde(default)]
+    fips_other_peer_count: usize,
     mesh_ready: bool,
     #[serde(default)]
     health: Vec<HealthIssue>,
@@ -2431,13 +2658,25 @@ fn daemon_vpn_active(vpn_enabled: bool, expected_peers: usize) -> bool {
     vpn_enabled && expected_peers > 0
 }
 
+fn fips_host_runtime_active(app: &AppConfig, vpn_enabled: bool) -> bool {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        vpn_enabled && app.fips_host_tunnel_enabled
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (app, vpn_enabled);
+        false
+    }
+}
+
 fn fips_private_runtime_active(app: &AppConfig, vpn_enabled: bool, expected_peers: usize) -> bool {
     daemon_vpn_active(vpn_enabled, expected_peers)
+        || fips_host_runtime_active(app, vpn_enabled)
         || app.join_requests_enabled()
         || app
-            .active_network()
-            .outbound_join_request
-            .as_ref()
+            .active_network_opt()
+            .and_then(|network| network.outbound_join_request.as_ref())
             .is_some()
         || app.has_fips_static_peer_endpoints()
 }
@@ -2511,6 +2750,7 @@ fn observe_wall_time_jump(
     jumped
 }
 
+#[allow(clippy::too_many_arguments)]
 fn persist_inbound_join_request(
     app: &mut AppConfig,
     config_path: &Path,
@@ -2548,17 +2788,40 @@ fn persist_shared_network_roster(
     sender_pubkey: &str,
     network_id: &str,
     roster: &NetworkRoster,
+    signed_roster: Option<&SignedRoster>,
     vpn_status: &mut String,
 ) -> Result<Option<String>> {
+    let (apply_network_id, apply_roster, signed_by) = if let Some(signed_roster) = signed_roster {
+        signed_roster.verify()?;
+        (
+            signed_roster.network_id()?,
+            signed_roster.roster()?,
+            signed_roster.signer_pubkey_hex()?,
+        )
+    } else {
+        (
+            network_id.to_string(),
+            roster.clone(),
+            sender_pubkey.to_string(),
+        )
+    };
     let changed = app.apply_admin_signed_shared_roster(
-        network_id,
-        &roster.network_name,
-        roster.participants.clone(),
-        roster.admins.clone(),
-        roster.aliases.clone(),
-        roster.signed_at,
-        sender_pubkey,
+        &apply_network_id,
+        &apply_roster.network_name,
+        apply_roster.participants.clone(),
+        apply_roster.admins.clone(),
+        apply_roster.aliases.clone(),
+        apply_roster.signed_at,
+        &signed_by,
     )?;
+    if let Some(signed_roster) = signed_roster
+        && signed_roster_is_current_for_app(app, &apply_network_id, signed_roster)
+    {
+        upsert_signed_roster(
+            &signed_rosters_file_path(config_path),
+            signed_roster.clone(),
+        )?;
+    }
     if !changed {
         return Ok(None);
     }
@@ -2570,10 +2833,10 @@ fn persist_shared_network_roster(
         .iter()
         .find(|network| {
             normalize_runtime_network_id(&network.network_id)
-                == normalize_runtime_network_id(network_id)
+                == normalize_runtime_network_id(&apply_network_id)
         })
         .map(|network| network.name.clone())
-        .unwrap_or_else(|| network_id.to_string());
+        .unwrap_or_else(|| apply_network_id.to_string());
     *vpn_status = format!("Roster updated for {network_name}.");
     Ok(Some(network_name))
 }
@@ -2617,12 +2880,14 @@ fn drain_fips_mesh_events(
                 sender_pubkey,
                 network_id,
                 roster,
+                signed_roster,
             } => match persist_shared_network_roster(
                 app,
                 config_path,
                 &sender_pubkey,
                 &network_id,
                 &roster,
+                signed_roster.as_deref(),
                 vpn_status,
             ) {
                 Ok(Some(_)) => roster_changed = true,
@@ -2711,6 +2976,10 @@ async fn sync_fips_private_runtime(
         if let Some(runtime) = runtime.take() {
             runtime.stop().await?;
         }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if !app.fips_host_tunnel_enabled {
+            crate::fips_host_tunnel::FipsHostTunnelRuntime::cleanup_disabled_artifacts();
+        }
         return Ok(());
     }
 
@@ -2758,7 +3027,9 @@ async fn send_pending_fips_join_requests(
     sent_cache: &mut HashMap<String, u64>,
     now: u64,
 ) -> Result<usize> {
-    let network = app.active_network();
+    let Some(network) = app.active_network_opt() else {
+        return Ok(0);
+    };
     let Some(pending) = network.outbound_join_request.as_ref() else {
         return Ok(0);
     };
@@ -2794,7 +3065,9 @@ async fn send_pending_fips_join_requests(
 }
 
 fn pending_fips_join_request_recipients(app: &AppConfig) -> Vec<String> {
-    let network = app.active_network();
+    let Some(network) = app.active_network_opt() else {
+        return Vec::new();
+    };
     let Some(pending) = network.outbound_join_request.as_ref() else {
         return Vec::new();
     };
@@ -2818,9 +3091,10 @@ fn pending_fips_join_request_recipients(app: &AppConfig) -> Vec<String> {
 async fn publish_fips_active_network_roster(
     runtime: &crate::fips_private_mesh::FipsPrivateTunnelRuntime,
     app: &AppConfig,
+    config_path: &Path,
     pending_recipients: &mut HashSet<String>,
 ) -> Result<usize> {
-    publish_fips_active_network_roster_to(runtime, app, &[], pending_recipients).await
+    publish_fips_active_network_roster_to(runtime, app, config_path, &[], pending_recipients).await
 }
 
 #[cfg(feature = "embedded-fips")]
@@ -2828,7 +3102,9 @@ async fn broadcast_local_fips_capabilities(
     runtime: &crate::fips_private_mesh::FipsPrivateTunnelRuntime,
     app: &AppConfig,
 ) -> Result<usize> {
-    let network = app.active_network();
+    let Some(network) = app.active_network_opt() else {
+        return Ok(0);
+    };
     let advertised_routes = runtime_effective_advertised_routes(app);
     let local_ipv4_candidates =
         runtime_signal_ipv4_candidates(detect_runtime_primary_ipv4(), &app.node.tunnel_ip);
@@ -3014,29 +3290,20 @@ fn desired_fips_endpoint_hint_recipients(app: &AppConfig) -> HashSet<String> {
 async fn publish_fips_active_network_roster_to(
     runtime: &crate::fips_private_mesh::FipsPrivateTunnelRuntime,
     app: &AppConfig,
+    config_path: &Path,
     extra_recipients: &[String],
     pending_recipients: &mut HashSet<String>,
 ) -> Result<usize> {
-    let network = app.active_network();
+    if app.active_network_opt().is_none() {
+        return Ok(0);
+    }
     let own_pubkey = match app.own_nostr_pubkey_hex() {
         Ok(pubkey) => pubkey,
         Err(_) => return Ok(0),
     };
 
-    let shared = app.shared_network_roster(&network.id)?;
-    if !shared_roster_publish_allowed(app, &network.id, &own_pubkey, &shared.signed_by) {
+    let Some(signed_roster) = active_signed_roster_for_sync(app, config_path, false)? else {
         return Ok(0);
-    }
-    let roster = NetworkRoster {
-        network_name: shared.name,
-        participants: shared.participants,
-        admins: shared.admins,
-        aliases: shared.aliases,
-        signed_at: if shared.updated_at > 0 {
-            shared.updated_at
-        } else {
-            unix_timestamp()
-        },
     };
     let mut recipients = app.active_network_signal_pubkeys_hex();
     recipients.extend(extra_recipients.iter().cloned());
@@ -3048,10 +3315,7 @@ async fn publish_fips_active_network_roster_to(
     let (ready_recipients, mut retry) = split_ready_fips_roster_recipients(recipients);
     let mut sent = 0usize;
     for recipient in ready_recipients {
-        match runtime
-            .send_roster(&recipient, &shared.network_id, roster.clone())
-            .await
-        {
+        match runtime.send_roster(&recipient, signed_roster.clone()).await {
             Ok(()) => sent += 1,
             Err(error) => {
                 eprintln!("fips: roster send to {recipient} failed: {error}");
@@ -3877,6 +4141,32 @@ fn parse_csv_arg(value: &str) -> Vec<String> {
     values.sort();
     values.dedup();
     values
+}
+
+fn parse_tcp_ports_arg(value: &str) -> Result<Vec<u16>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut ports = Vec::new();
+    for raw in value.split(',') {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let port = raw
+            .parse::<u16>()
+            .with_context(|| format!("invalid TCP port '{raw}'"))?;
+        if port == 0 {
+            return Err(anyhow!("invalid TCP port '{raw}'"));
+        }
+        if !ports.contains(&port) {
+            ports.push(port);
+        }
+    }
+    ports.sort_unstable();
+    Ok(ports)
 }
 
 fn parse_fips_peer_endpoint_args(values: &[String]) -> Result<HashMap<String, Vec<String>>> {

@@ -3,8 +3,17 @@ use std::net::Ipv4Addr;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use nostr_sdk::prelude::Keys;
+
 use super::control_daemon_request_for_test;
 use crate::*;
+
+fn activate_first_network(config: &mut AppConfig) {
+    let network_id = config.networks[0].id.clone();
+    config
+        .set_network_enabled(&network_id, true)
+        .expect("activate first network");
+}
 
 #[test]
 fn daemon_runtime_state_requires_advertised_routes() {
@@ -299,6 +308,7 @@ fn persist_daemon_runtime_state_marks_vpn_on_as_active() {
 #[test]
 fn fips_runtime_state_is_ready_without_waiting_for_every_peer() {
     let mut config = AppConfig::generated();
+    activate_first_network(&mut config);
     config.networks[0].participants = vec!["11".repeat(32), "22".repeat(32)];
     let tunnel_runtime = crate::CliTunnelRuntime::new("utun100");
 
@@ -323,9 +333,88 @@ fn fips_runtime_state_is_ready_without_waiting_for_every_peer() {
 }
 
 #[test]
+fn fips_runtime_state_counts_direct_roster_and_other_peers() {
+    let mut config = AppConfig::generated();
+    activate_first_network(&mut config);
+    let roster_peer = Keys::generate().public_key().to_hex();
+    let routed_roster_peer = Keys::generate().public_key().to_hex();
+    let other_peer = Keys::generate().public_key().to_hex();
+    config.networks[0].participants = vec![roster_peer.clone(), routed_roster_peer.clone()];
+    let tunnel_runtime = crate::CliTunnelRuntime::new("utun100");
+
+    let state = crate::build_daemon_runtime_state(
+        &config,
+        true,
+        true,
+        2,
+        &tunnel_runtime,
+        &[
+            MeshPeerStatus {
+                pubkey: roster_peer,
+                connected: true,
+                endpoint_npub: "npub1roster".to_string(),
+                transport_addr: Some("203.0.113.8:9000".to_string()),
+                transport_type: Some("udp".to_string()),
+                srtt_ms: Some(5),
+                link_packets_sent: 0,
+                link_packets_recv: 0,
+                link_bytes_sent: 0,
+                link_bytes_recv: 0,
+                last_seen_at: Some(100),
+                tx_bytes: 0,
+                rx_bytes: 0,
+                error: None,
+            },
+            MeshPeerStatus {
+                pubkey: routed_roster_peer,
+                connected: true,
+                endpoint_npub: "npub1routed".to_string(),
+                transport_addr: None,
+                transport_type: None,
+                srtt_ms: Some(8),
+                link_packets_sent: 0,
+                link_packets_recv: 0,
+                link_bytes_sent: 0,
+                link_bytes_recv: 0,
+                last_seen_at: Some(100),
+                tx_bytes: 0,
+                rx_bytes: 0,
+                error: None,
+            },
+            MeshPeerStatus {
+                pubkey: other_peer,
+                connected: true,
+                endpoint_npub: "npub1other".to_string(),
+                transport_addr: Some("203.0.113.9:9000".to_string()),
+                transport_type: Some("udp".to_string()),
+                srtt_ms: Some(13),
+                link_packets_sent: 0,
+                link_packets_recv: 0,
+                link_bytes_sent: 0,
+                link_bytes_recv: 0,
+                last_seen_at: Some(100),
+                tx_bytes: 0,
+                rx_bytes: 0,
+                error: None,
+            },
+        ],
+        &[],
+        &std::collections::HashMap::new(),
+        "VPN on",
+        &nostr_vpn_core::diagnostics::NetworkSummary::default(),
+        &nostr_vpn_core::diagnostics::PortMappingStatus::default(),
+    );
+
+    assert_eq!(state.connected_peer_count, 2);
+    assert_eq!(state.fips_direct_roster_peer_count, 1);
+    assert_eq!(state.fips_other_peer_count, 1);
+}
+
+#[test]
 fn daemon_runtime_state_marks_peers_unreachable_when_vpn_is_off() {
     let mut config = AppConfig::generated();
-    let peer_pubkey = "11".repeat(32);
+    activate_first_network(&mut config);
+    let peer_pubkey = Keys::generate().public_key().to_hex();
     config.networks[0].participants = vec![peer_pubkey.clone()];
     let tunnel_runtime = crate::CliTunnelRuntime::new("utun100");
     let peer_status = MeshPeerStatus {
@@ -729,6 +818,7 @@ fn visible_daemon_state_for_status_hides_state_when_stopped() {
 #[test]
 fn daemon_reload_config_uses_reloaded_network_id() {
     let mut app = AppConfig::generated();
+    activate_first_network(&mut app);
     app.set_active_network_id("mesh-home")
         .expect("set initial network id");
     app.networks[0].participants = vec!["11".repeat(32)];
@@ -840,6 +930,7 @@ fn apply_config_file_writes_target_config() {
     let source = dir.join("source.toml");
     let target = dir.join("target.toml");
     let mut config = AppConfig::generated();
+    activate_first_network(&mut config);
     config.node_name = "windows-box".to_string();
     config.networks[0].participants = vec!["ab".repeat(32)];
     config.save(&source).expect("save source config");
@@ -849,6 +940,47 @@ fn apply_config_file_writes_target_config() {
     let loaded = AppConfig::load(&target).expect("load target config");
     assert_eq!(loaded.node_name, "windows-box");
     assert_eq!(loaded.participant_pubkeys_hex(), vec!["ab".repeat(32)]);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn load_or_default_config_migrates_plaintext_config_secrets() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock is after epoch")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("nvpn-load-config-secrets-{nonce}"));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let path = dir.join("config.toml");
+    let mut config = AppConfig::generated();
+    config.wireguard_exit.private_key = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".to_string();
+    config.wireguard_exit.peer_public_key =
+        "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=".to_string();
+    config.wireguard_exit.peer_preshared_key =
+        "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=".to_string();
+    let nostr_secret = config.nostr.secret_key.clone();
+    let wireguard_private_key = config.wireguard_exit.private_key.clone();
+    let wireguard_peer_preshared_key = config.wireguard_exit.peer_preshared_key.clone();
+    fs::write(
+        &path,
+        config.plaintext_toml().expect("encode plaintext config"),
+    )
+    .expect("write plaintext config");
+
+    let loaded = load_or_default_config(&path).expect("load config");
+    let raw = fs::read_to_string(&path).expect("read migrated config");
+    AppConfig::delete_persisted_secrets_for_path(&path).expect("delete migrated secrets");
+
+    assert_eq!(loaded.nostr.secret_key, nostr_secret);
+    assert_eq!(loaded.wireguard_exit.private_key, wireguard_private_key);
+    assert_eq!(
+        loaded.wireguard_exit.peer_preshared_key,
+        wireguard_peer_preshared_key
+    );
+    assert!(!raw.contains(&nostr_secret));
+    assert!(!raw.contains(&wireguard_private_key));
+    assert!(!raw.contains(&wireguard_peer_preshared_key));
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -874,6 +1006,8 @@ fn stage_daemon_config_apply_writes_staged_file() {
     let loaded = AppConfig::load(&staged).expect("load staged config");
     assert_eq!(loaded.node_name, "staged-node");
 
+    AppConfig::delete_persisted_secrets_for_path(&source).expect("delete source secrets");
+    AppConfig::delete_persisted_secrets_for_path(&staged).expect("delete staged secrets");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -906,6 +1040,8 @@ fn update_daemon_config_from_staged_request_replaces_target_and_cleans_up() {
         "staged config should be cleaned up"
     );
 
+    AppConfig::delete_persisted_secrets_for_path(&source).expect("delete source secrets");
+    AppConfig::delete_persisted_secrets_for_path(&target).expect("delete target secrets");
     let _ = fs::remove_dir_all(&dir);
 }
 

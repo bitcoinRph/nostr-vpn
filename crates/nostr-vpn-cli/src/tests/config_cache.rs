@@ -4,6 +4,13 @@ use crate::*;
 use nostr_sdk::prelude::{Keys, ToBech32};
 use nostr_vpn_core::config::{NetworkConfig, PendingOutboundJoinRequest};
 
+fn activate_first_network(config: &mut AppConfig) {
+    let network_id = config.networks[0].id.clone();
+    config
+        .set_network_enabled(&network_id, true)
+        .expect("activate first network");
+}
+
 #[test]
 fn participants_override_targets_the_active_network() {
     let alice = Keys::generate().public_key().to_hex();
@@ -144,6 +151,7 @@ fn shared_roster_publish_allowed_only_for_current_signer() {
 
     let mut config = AppConfig::generated();
     let own_pubkey = config.own_nostr_pubkey_hex().expect("own nostr pubkey");
+    activate_first_network(&mut config);
     let network_id = config.active_network().id.clone();
     config.networks[0].admins = vec![own_pubkey.clone(), other_admin.clone()];
 
@@ -174,12 +182,70 @@ fn shared_roster_publish_allowed_only_for_current_signer() {
 }
 
 #[test]
+fn forwarded_signed_roster_can_be_selected_for_peer_sync() {
+    let nonce = unix_timestamp();
+    let dir = std::env::temp_dir().join(format!("nvpn-forwarded-signed-roster-{nonce}"));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let config_path = dir.join("config.toml");
+
+    let mut alice = AppConfig::generated();
+    activate_first_network(&mut alice);
+    let alice_pubkey = alice.own_nostr_pubkey_hex().expect("alice pubkey");
+
+    let mut bob = AppConfig::generated();
+    activate_first_network(&mut bob);
+    let bob_pubkey = bob.own_nostr_pubkey_hex().expect("bob pubkey");
+    let carol_pubkey = Keys::generate().public_key().to_hex();
+
+    alice.networks[0].name = "Home".to_string();
+    alice.networks[0].network_id = "mesh".to_string();
+    alice.networks[0].participants = vec![bob_pubkey.clone(), carol_pubkey.clone()];
+    alice.networks[0].admins = vec![alice_pubkey.clone(), bob_pubkey.clone()];
+    alice.networks[0].shared_roster_updated_at = 1_726_000_000;
+    alice.networks[0].shared_roster_signed_by = alice_pubkey.clone();
+
+    let alice_shared = alice
+        .shared_network_roster(&alice.networks[0].id)
+        .expect("alice shared roster");
+    let signed = SignedRoster::sign(
+        &alice_shared.network_id,
+        network_roster_from_shared(&alice_shared),
+        &alice.nostr_keys().expect("alice keys"),
+    )
+    .expect("sign roster");
+
+    bob.networks[0].name = "Home".to_string();
+    bob.networks[0].network_id = "mesh".to_string();
+    bob.networks[0].participants = vec![alice_pubkey.clone(), carol_pubkey];
+    bob.networks[0].admins = vec![alice_pubkey, bob_pubkey];
+    bob.networks[0].shared_roster_updated_at = signed.signed_at();
+    bob.networks[0].shared_roster_signed_by = signed.signer_pubkey_hex().expect("signer");
+
+    upsert_signed_roster(&signed_rosters_file_path(&config_path), signed.clone())
+        .expect("persist signed roster");
+
+    let forwarded = active_signed_roster_for_sync(&bob, &config_path, true)
+        .expect("load forwarded roster")
+        .expect("forwarded roster should be selected");
+    assert_eq!(forwarded.artifact_hash(), signed.artifact_hash());
+    assert!(
+        active_signed_roster_for_sync(&bob, &config_path, false)
+            .expect("load own-signed roster")
+            .is_none(),
+        "explicit admin publish should not re-sign or forward another admin's stored artifact"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn active_network_invite_code_roundtrips_current_roster() {
     let inviter_hex = Keys::generate().public_key().to_hex();
     let participant_hex = Keys::generate().public_key().to_hex();
     let admin_hex = Keys::generate().public_key().to_hex();
 
     let mut config = AppConfig::generated();
+    activate_first_network(&mut config);
     config.networks[0].name = "Work".to_string();
     config.networks[0].network_id = "8d4f34f5425bc50e".to_string();
     config.networks[0].participants = vec![participant_hex];
@@ -194,6 +260,7 @@ fn active_network_invite_code_roundtrips_current_roster() {
     assert!(invite.starts_with(NETWORK_INVITE_PREFIX));
     assert!(parsed.network_name.is_empty());
     assert_eq!(parsed.network_id, "8d4f34f5425bc50e");
+    assert_eq!(parsed.invite_secret, config.networks[0].invite_secret);
     assert_eq!(parsed.admins.len(), 2);
     assert_eq!(parsed.inviter_endpoints, vec!["192.168.50.10:51820"]);
     assert!(parsed.participants.is_empty());
@@ -205,6 +272,7 @@ fn active_network_invite_omits_non_transport_inviter_endpoint() {
     let inviter_hex = Keys::generate().public_key().to_hex();
 
     let mut config = AppConfig::generated();
+    activate_first_network(&mut config);
     config.networks[0].network_id = "8d4f34f5425bc50e".to_string();
     config.networks[0].admins = vec![inviter_hex.clone()];
     config.networks[0].invite_inviter = inviter_hex;
@@ -226,6 +294,7 @@ fn importing_current_invite_queues_join_request_to_admin() {
     let invite = serde_json::json!({
         "v": 3,
         "networkId": "8d4f34f5425bc50e",
+        "inviteSecret": "join-secret",
         "inviterEndpoints": [" 192.168.50.20:51820 ", "fips", "198.51.100.10:51820", admin_npub],
         "admins": [admin_npub],
         "relays": ["wss://temp.iris.to"]
@@ -247,6 +316,7 @@ fn importing_current_invite_queues_join_request_to_admin() {
             .recipient,
         admin_hex
     );
+    assert_eq!(network.invite_secret, "join-secret");
     assert_eq!(
         config.fips_peer_endpoints.get(&admin_npub),
         Some(&vec!["192.168.50.20:51820".to_string()])

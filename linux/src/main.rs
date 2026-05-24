@@ -22,6 +22,10 @@ const APP_ID: &str = "to.iris.nvpn";
 const DEFAULT_UPDATE_POLL_INTERVAL_SECS: u32 = 6 * 60 * 60;
 const SEARCH_VISIBILITY_THRESHOLD: usize = 7;
 
+thread_local! {
+    static TRAY_APP_HOLD: RefCell<Option<gio::ApplicationHoldGuard>> = const { RefCell::new(None) };
+}
+
 type AppRef = Rc<RefCell<AppModel>>;
 
 #[derive(Clone, Default)]
@@ -73,13 +77,15 @@ struct Drafts {
     participant_alias: String,
     network_name: String,
     mesh_id: String,
+    manual_join_admin_id: String,
+    manual_join_network_id: String,
     new_network_name: String,
     node_name: String,
     endpoint: String,
     tunnel_ip: String,
     listen_port: String,
     relay_input: String,
-    magic_dns_suffix: String,
+    fips_host_inbound_tcp_ports: String,
     advertised_routes: String,
     exit_search: String,
     wireguard_exit_config: String,
@@ -91,7 +97,7 @@ impl Drafts {
         self.endpoint = state.endpoint.clone();
         self.tunnel_ip = state.tunnel_ip.clone();
         self.listen_port = state.listen_port.to_string();
-        self.magic_dns_suffix = state.magic_dns_suffix.clone();
+        self.fips_host_inbound_tcp_ports = state.fips_host_inbound_tcp_ports.clone();
         self.advertised_routes = state.advertised_routes.join(", ");
         self.wireguard_exit_config = state.wireguard_exit_config.clone();
         if let Some(network) = active_network(state) {
@@ -121,12 +127,15 @@ struct AppModel {
     drafts: Drafts,
     notice: String,
     tray: tray::TrayRuntime,
+    tray_available: bool,
+    tray_error: Option<String>,
     update: updater::UpdateState,
     update_policy: UpdateAutoCheckPolicy,
     update_sender: Sender<updater::UpdateEvent>,
     update_receiver: Receiver<updater::UpdateEvent>,
     allow_close: bool,
     service_settling: bool,
+    diagnostics_expanded: bool,
 }
 
 impl AppModel {
@@ -147,6 +156,9 @@ impl AppModel {
         let mut drafts = Drafts::default();
         drafts.sync_from_state(&state);
         let tray = tray::TrayRuntime::start(&state);
+        let tray_available = tray.is_available();
+        let tray_error = tray.last_error();
+        let diagnostics_expanded = !state.health.is_empty();
         let (update_sender, update_receiver) = mpsc::channel();
         let update = updater::UpdateState {
             auto_install: load_auto_install_updates(),
@@ -171,12 +183,15 @@ impl AppModel {
             drafts,
             notice: String::new(),
             tray,
+            tray_available,
+            tray_error,
             update,
             update_policy,
             update_sender,
             update_receiver,
             allow_close: false,
             service_settling: false,
+            diagnostics_expanded,
         }
     }
 }
@@ -348,10 +363,6 @@ fn build_ui(app: &adw::Application, runtime: &AppRuntime, present: bool) {
     title.set_halign(gtk::Align::Start);
     header.set_title_widget(Some(&title));
 
-    let refresh_button = gtk::Button::from_icon_name("view-refresh-symbolic");
-    refresh_button.set_tooltip_text(Some("Refresh"));
-    header.pack_end(&refresh_button);
-
     let header_vpn_switch = gtk::Switch::new();
     header_vpn_switch.set_valign(gtk::Align::Center);
     header_vpn_switch.set_tooltip_text(Some("Toggle VPN"));
@@ -413,11 +424,11 @@ fn build_ui(app: &adw::Application, runtime: &AppRuntime, present: bool) {
         header_vpn_switch.clone(),
     )));
     *runtime.model.borrow_mut() = Some(model.clone());
-
-    {
-        let model = model.clone();
-        refresh_button.connect_clicked(move |_| refresh_now(&model));
+    if model.borrow().tray_available {
+        update_tray_application_hold(true, window.application());
     }
+    sync_launch_on_startup_setting(&model);
+
     {
         let model = model.clone();
         header_vpn_switch.connect_active_notify(move |sw| {
@@ -440,10 +451,16 @@ fn build_ui(app: &adw::Application, runtime: &AppRuntime, present: bool) {
         let model = model.clone();
         window.connect_close_request(move |window| {
             let model = model.borrow();
-            if model.state.close_to_tray_on_close && !model.allow_close {
+            if should_close_to_tray(
+                model.state.close_to_tray_on_close,
+                model.tray.is_available(),
+                model.allow_close,
+            ) {
+                update_tray_application_hold(true, window.application());
                 window.set_visible(false);
                 glib::Propagation::Stop
             } else {
+                release_tray_application_hold();
                 glib::Propagation::Proceed
             }
         });
@@ -522,8 +539,21 @@ fn dispatch(app: &AppRef, action: NativeAppAction) -> NativeAppState {
     result
 }
 
+fn sync_launch_on_startup_setting(app: &AppRef) {
+    let enabled = {
+        let model = app.borrow();
+        model.state.startup_settings_supported && model.state.launch_on_startup
+    };
+    if let Err(error) = configure_launch_on_startup(enabled) {
+        set_notice(app, error);
+    }
+}
+
 fn set_state(app: &AppRef, state: NativeAppState) {
     let mut model = app.borrow_mut();
+    if state.health.len() > model.state.health.len() {
+        model.diagnostics_expanded = true;
+    }
     model.tray.update(&state);
     model.state = state;
 }
@@ -538,6 +568,10 @@ fn state_needs_render(previous: &NativeAppState, next: &NativeAppState) -> bool 
 }
 
 fn drain_tray_commands(app: &AppRef) {
+    if sync_tray_status(app) {
+        render(app);
+    }
+
     let commands = app.borrow_mut().tray.drain();
     for command in commands {
         match command {
@@ -714,6 +748,7 @@ fn drain_update_events(app: &AppRef) {
 
 fn show_window(app: &AppRef) {
     let window = app.borrow().window.clone();
+    window.set_visible(true);
     window.present();
 }
 
@@ -723,9 +758,59 @@ fn quit_app(app: &AppRef) {
         model.allow_close = true;
         model.window.clone()
     };
+    release_tray_application_hold();
     if let Some(application) = window.application() {
         application.quit();
     }
+}
+
+fn should_close_to_tray(
+    close_to_tray_on_close: bool,
+    tray_available: bool,
+    allow_close: bool,
+) -> bool {
+    close_to_tray_on_close && tray_available && !allow_close
+}
+
+fn sync_tray_status(app: &AppRef) -> bool {
+    let (changed, available, application) = {
+        let mut model = app.borrow_mut();
+        let available = model.tray.is_available();
+        let error = model.tray.last_error();
+        let changed = available != model.tray_available || error != model.tray_error;
+        if changed {
+            model.tray_available = available;
+            model.tray_error = error;
+        }
+        (changed, available, model.window.application())
+    };
+
+    if changed {
+        update_tray_application_hold(available, application);
+    }
+
+    changed
+}
+
+fn update_tray_application_hold(available: bool, application: Option<gtk::Application>) {
+    TRAY_APP_HOLD.with(|hold| {
+        let mut hold = hold.borrow_mut();
+        if available {
+            if hold.is_none() {
+                if let Some(application) = application {
+                    *hold = Some(application.hold());
+                }
+            }
+        } else {
+            hold.take();
+        }
+    });
+}
+
+fn release_tray_application_hold() {
+    TRAY_APP_HOLD.with(|hold| {
+        hold.borrow_mut().take();
+    });
 }
 
 fn start_service_settlement_polling(app: &AppRef) {
@@ -1000,7 +1085,7 @@ fn build_sidebar(app: &AppRef, sidebar: &gtk::Box, state: &NativeAppState, page:
     for (target, title, icon) in [
         (Page::Devices, "Devices", ""),
         (Page::ExitNodes, "Exit Nodes", ""),
-        (Page::Settings, "Settings", "emblem-system-symbolic"),
+        (Page::Settings, "Settings", ""),
     ] {
         let button = nav_button(
             title,
@@ -1567,7 +1652,7 @@ fn device_detail_card(
     detail
 }
 
-fn build_network_hero(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
+fn build_network_hero(_app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     let hero = card();
     hero.add_css_class("nvpn-hero");
 
@@ -1584,6 +1669,7 @@ fn build_network_hero(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     } else {
         "nvpn-status-off"
     });
+    status.set_valign(gtk::Align::Center);
     top.append(&status);
 
     let text = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -1646,31 +1732,6 @@ fn build_network_hero(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     text.append(&badges);
     top.append(&text);
 
-    let connect = icon_text_button(
-        if state.vpn_enabled { "On" } else { "Off" },
-        if state.vpn_enabled {
-            "media-playback-stop-symbolic"
-        } else {
-            "media-playback-start-symbolic"
-        },
-    );
-    connect.add_css_class("suggested-action");
-    connect.set_sensitive(state.vpn_control_supported && active_network(state).is_some());
-    {
-        let app = app.clone();
-        let enabled = state.vpn_enabled;
-        connect.connect_clicked(move |_| {
-            dispatch(
-                &app,
-                if enabled {
-                    NativeAppAction::DisconnectVpn
-                } else {
-                    NativeAppAction::ConnectVpn
-                },
-            );
-        });
-    }
-    top.append(&connect);
     hero.append(&top);
 
     let identity = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -1782,6 +1843,8 @@ fn build_network_setup(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     import_row.append(&camera);
     import_row.append(&image);
     join_card.append(&import_row);
+    append_manual_join(app, &join_card);
+    append_notice(app, &join_card, "Join");
     page.append(&join_card);
 
     let nearby = card();
@@ -2009,11 +2072,8 @@ fn build_share_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     import_row.append(&camera);
     import_row.append(&image);
     join_card.append(&import_row);
-
-    let notice = app.borrow().notice.clone();
-    if !notice.trim().is_empty() {
-        row_label(&join_card, "Import", &notice, "dialog-warning-symbolic");
-    }
+    append_manual_join(app, &join_card);
+    append_notice(app, &join_card, "Import");
 
     page.append(&join_card);
 
@@ -2135,10 +2195,86 @@ fn scan_invite_qr(app: &AppRef, button: &gtk::Button) {
     );
 }
 
+fn append_notice(app: &AppRef, parent: &gtk::Box, title: &str) {
+    let notice = app.borrow().notice.clone();
+    if !notice.trim().is_empty() {
+        row_label(parent, title, &notice, "dialog-warning-symbolic");
+    }
+}
+
+fn append_manual_join(app: &AppRef, parent: &gtk::Box) {
+    let manual = gtk::Expander::new(Some("Add manually"));
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    body.set_margin_top(8);
+
+    let admin = entry("Admin Device ID", &app.borrow().drafts.manual_join_admin_id);
+    {
+        let app = app.clone();
+        admin.connect_changed(move |entry| {
+            app.borrow_mut().drafts.manual_join_admin_id = entry.text().to_string();
+        });
+    }
+    body.append(&admin);
+
+    let network = entry(
+        "Network ID",
+        &display_network_id(&app.borrow().drafts.manual_join_network_id),
+    );
+    {
+        let app = app.clone();
+        network.connect_changed(move |entry| {
+            app.borrow_mut().drafts.manual_join_network_id = entry.text().to_string();
+        });
+    }
+    body.append(&network);
+
+    let add = icon_text_button("Add", "list-add-symbolic");
+    add.set_halign(gtk::Align::Start);
+    {
+        let app = app.clone();
+        add.connect_clicked(move |_| manual_add_network(&app));
+    }
+    body.append(&add);
+
+    manual.set_child(Some(&body));
+    parent.append(&manual);
+}
+
+fn manual_add_network(app: &AppRef) {
+    let (admin_npub, mesh_network_id) = {
+        let model = app.borrow();
+        (
+            model.drafts.manual_join_admin_id.trim().to_string(),
+            normalize_network_id_input(&model.drafts.manual_join_network_id),
+        )
+    };
+    if admin_npub.is_empty() || mesh_network_id.is_empty() {
+        return;
+    }
+    if !is_valid_device_id(&admin_npub) {
+        set_notice(app, "Not a valid device ID");
+        return;
+    }
+    {
+        let mut model = app.borrow_mut();
+        model.drafts.manual_join_admin_id.clear();
+        model.drafts.manual_join_network_id.clear();
+        model.notice.clear();
+    }
+    dispatch(
+        app,
+        NativeAppAction::ManualAddNetwork {
+            admin_npub,
+            mesh_network_id,
+        },
+    );
+}
+
 fn build_exit_nodes_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     page_title(page, "Exit Nodes", "");
 
     let Some(network) = active_network(state).cloned() else {
+        build_wireguard_settings_card(app, page, state);
         return;
     };
 
@@ -2341,7 +2477,13 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     setting_entry(app, &device, "Tunnel IP", "tunnel_ip");
     setting_entry(app, &device, "Endpoint", "endpoint");
     setting_entry(app, &device, "Listen Port", "listen_port");
-    setting_entry(app, &device, "DNS Suffix", "magic_dns_suffix");
+    setting_entry_enabled(
+        app,
+        &device,
+        "Open inbound TCP ports",
+        "fips_host_inbound_tcp_ports",
+        state.fips_host_tunnel_enabled,
+    );
 
     let save = icon_text_button("Save", "");
     save.add_css_class("suggested-action");
@@ -2363,6 +2505,10 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         relay_input.connect_changed(move |entry| {
             app.borrow_mut().drafts.relay_input = entry.text().to_string();
         });
+    }
+    {
+        let app = app.clone();
+        relay_input.connect_activate(move |_| add_relay_setting(&app));
     }
     add_row.append(&relay_input);
     let add_relay = gtk::Button::from_icon_name("list-add-symbolic");
@@ -2426,19 +2572,16 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
             app.borrow_mut().drafts.new_network_name = entry.text().to_string();
         });
     }
+    {
+        let app = app.clone();
+        new_name.connect_activate(move |_| add_network_from_draft(&app));
+    }
     network_header.append(&new_name);
     let add = gtk::Button::from_icon_name("list-add-symbolic");
     add.set_tooltip_text(Some("Add network"));
     {
         let app = app.clone();
-        add.connect_clicked(move |_| {
-            let name = app.borrow().drafts.new_network_name.trim().to_string();
-            if name.is_empty() {
-                return;
-            }
-            app.borrow_mut().drafts.new_network_name.clear();
-            dispatch(&app, NativeAppAction::AddNetwork { name });
-        });
+        add.connect_clicked(move |_| add_network_from_draft(&app));
     }
     network_header.append(&add);
     network.append(&network_header);
@@ -2457,22 +2600,16 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
                 app.borrow_mut().drafts.network_name = entry.text().to_string();
             });
         }
+        {
+            let app = app.clone();
+            let network_id = active.id.clone();
+            input.connect_activate(move |_| save_active_network_name(&app, &network_id));
+        }
         let save = gtk::Button::with_label("Save");
         {
             let app = app.clone();
             let network_id = active.id.clone();
-            save.connect_clicked(move |_| {
-                let name = app.borrow().drafts.network_name.trim().to_string();
-                if !name.is_empty() {
-                    dispatch(
-                        &app,
-                        NativeAppAction::RenameNetwork {
-                            network_id: network_id.clone(),
-                            name,
-                        },
-                    );
-                }
-            });
+            save.connect_clicked(move |_| save_active_network_name(&app, &network_id));
         }
         rename.append(&input);
         rename.append(&save);
@@ -2491,6 +2628,11 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
                 app.borrow_mut().drafts.mesh_id = entry.text().to_string();
             });
         }
+        {
+            let app = app.clone();
+            let network_id = active.id.clone();
+            mesh_id.connect_activate(move |_| save_active_network_mesh_id(&app, &network_id));
+        }
         mesh.append(&mesh_id);
         let copy = gtk::Button::from_icon_name("edit-copy-symbolic");
         copy.set_tooltip_text(Some("Copy network ID"));
@@ -2504,18 +2646,7 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         {
             let app = app.clone();
             let network_id = active.id.clone();
-            save.connect_clicked(move |_| {
-                let mesh_id = normalize_network_id_input(&app.borrow().drafts.mesh_id);
-                if !mesh_id.is_empty() {
-                    dispatch(
-                        &app,
-                        NativeAppAction::SetNetworkMeshId {
-                            network_id: network_id.clone(),
-                            mesh_id,
-                        },
-                    );
-                }
-            });
+            save.connect_clicked(move |_| save_active_network_mesh_id(&app, &network_id));
         }
         mesh.append(&save);
         network.append(&mesh);
@@ -2534,6 +2665,19 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
                 }
             },
         );
+
+        let delete_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        delete_row.set_halign(gtk::Align::Start);
+        let delete = icon_text_button("Delete network", "edit-delete-symbolic");
+        delete.add_css_class("destructive-action");
+        connect_remove_network_confirmation(
+            &delete,
+            app,
+            active.id.clone(),
+            display_network_name(&active),
+        );
+        delete_row.append(&delete);
+        network.append(&delete_row);
     }
 
     let saved = gtk::Expander::new(Some("Saved Networks"));
@@ -2549,7 +2693,7 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         empty_row(&saved_body, "No saved networks");
     } else {
         for saved_network in inactive {
-            saved_network_row(app, &saved_body, &saved_network, state.networks.len() > 1);
+            saved_network_row(app, &saved_body, &saved_network, state);
         }
     }
     saved.set_child(Some(&saved_body));
@@ -2575,14 +2719,29 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         }
         system.append(&row);
     }
-    switch_row(app, &system, "Autoconnect", state.autoconnect, |enabled| {
-        NativeAppAction::UpdateSettings {
+    let (service_settling, tray_error, update, tray_available) = {
+        let model = app.borrow();
+        (
+            model.service_settling,
+            model.tray_error.clone(),
+            model.update.clone(),
+            model.tray_available,
+        )
+    };
+
+    settings_toggle_group_label(&system, "General");
+    switch_row(
+        app,
+        &system,
+        "Start VPN automatically",
+        state.autoconnect,
+        |enabled| NativeAppAction::UpdateSettings {
             patch: SettingsPatch {
                 autoconnect: Some(enabled),
                 ..SettingsPatch::default()
             },
-        }
-    });
+        },
+    );
     if state.startup_settings_supported {
         switch_row(
             app,
@@ -2598,11 +2757,12 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         );
     }
     if state.tray_behavior_supported {
-        switch_row(
+        switch_row_enabled(
             app,
             &system,
             "Tray on close",
             state.close_to_tray_on_close,
+            tray_available,
             |enabled| NativeAppAction::UpdateSettings {
                 patch: SettingsPatch {
                     close_to_tray_on_close: Some(enabled),
@@ -2611,15 +2771,55 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
             },
         );
     }
-
-    let (service_settling, tray_error, update) = {
-        let model = app.borrow();
-        (
-            model.service_settling,
-            model.tray.last_error(),
-            model.update.clone(),
-        )
-    };
+    settings_toggle_group_label(&system, "FIPS");
+    switch_row(
+        app,
+        &system,
+        "Route to npub.fips addresses outside VPN",
+        state.fips_host_tunnel_enabled,
+        |enabled| NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                fips_host_tunnel_enabled: Some(enabled),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+    switch_row(
+        app,
+        &system,
+        "Connect to non-roster FIPS peers",
+        state.connect_to_non_roster_fips_peers,
+        |enabled| NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                connect_to_non_roster_fips_peers: Some(enabled),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+    switch_row(
+        app,
+        &system,
+        "Find peers over relays",
+        state.fips_nostr_discovery_enabled,
+        |enabled| NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                fips_nostr_discovery_enabled: Some(enabled),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+    switch_row(
+        app,
+        &system,
+        "Use bootstrap servers",
+        state.fips_bootstrap_enabled,
+        |enabled| NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                fips_bootstrap_enabled: Some(enabled),
+                ..SettingsPatch::default()
+            },
+        },
+    );
 
     let status_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     status_row.append(&badge(
@@ -2805,6 +3005,13 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     page.append(&system);
 
     let advanced = gtk::Expander::new(Some("Advanced"));
+    advanced.set_expanded(app.borrow().diagnostics_expanded);
+    {
+        let app = app.clone();
+        advanced.connect_expanded_notify(move |advanced| {
+            app.borrow_mut().diagnostics_expanded = advanced.is_expanded();
+        });
+    }
     let advanced_body = gtk::Box::new(gtk::Orientation::Vertical, 14);
     advanced_body.set_margin_top(10);
     build_diagnostics(&advanced_body, state);
@@ -2821,6 +3028,18 @@ fn build_diagnostics(parent: &gtk::Box, state: &NativeAppState) {
     metrics.set_column_spacing(10);
     metrics.set_row_spacing(10);
     metrics.set_max_children_per_line(3);
+    let peer_count = format!(
+        "{}/{}",
+        state.connected_peer_count, state.expected_peer_count
+    );
+    let fips_peer_count = format!(
+        "{}/{} direct",
+        state.fips_connected_peer_count, state.fips_roster_peer_count
+    );
+    let other_fips = state.non_fips_roster_peer_count.to_string();
+    metrics.append(&metric("Peers", &peer_count));
+    metrics.append(&metric("Roster FIPS", &fips_peer_count));
+    metrics.append(&metric("Other FIPS", &other_fips));
     metrics.append(&metric(
         "Interface",
         &non_empty_or(&state.network.default_interface, "unknown"),
@@ -2879,6 +3098,16 @@ fn build_diagnostics(parent: &gtk::Box, state: &NativeAppState) {
 }
 
 fn setting_entry(app: &AppRef, parent: &gtk::Box, title: &str, key: &'static str) {
+    setting_entry_enabled(app, parent, title, key, true);
+}
+
+fn setting_entry_enabled(
+    app: &AppRef,
+    parent: &gtk::Box,
+    title: &str,
+    key: &'static str,
+    enabled: bool,
+) {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     row.set_valign(gtk::Align::Center);
     let label = gtk::Label::new(Some(title));
@@ -2893,11 +3122,17 @@ fn setting_entry(app: &AppRef, parent: &gtk::Box, title: &str, key: &'static str
             "endpoint" => model.drafts.endpoint.clone(),
             "tunnel_ip" => model.drafts.tunnel_ip.clone(),
             "listen_port" => model.drafts.listen_port.clone(),
-            "magic_dns_suffix" => model.drafts.magic_dns_suffix.clone(),
+            "fips_host_inbound_tcp_ports" => model.drafts.fips_host_inbound_tcp_ports.clone(),
             _ => String::new(),
         }
     };
-    let input = entry(title, &current);
+    let placeholder = if key == "fips_host_inbound_tcp_ports" {
+        "22, 443"
+    } else {
+        title
+    };
+    let input = entry(placeholder, &current);
+    input.set_sensitive(enabled);
     {
         let app = app.clone();
         input.connect_changed(move |entry| {
@@ -2908,13 +3143,54 @@ fn setting_entry(app: &AppRef, parent: &gtk::Box, title: &str, key: &'static str
                 "endpoint" => model.drafts.endpoint = value,
                 "tunnel_ip" => model.drafts.tunnel_ip = value,
                 "listen_port" => model.drafts.listen_port = value,
-                "magic_dns_suffix" => model.drafts.magic_dns_suffix = value,
+                "fips_host_inbound_tcp_ports" => model.drafts.fips_host_inbound_tcp_ports = value,
                 _ => {}
             }
         });
     }
+    {
+        let app = app.clone();
+        input.connect_activate(move |_| save_device_settings(&app));
+    }
     row.append(&input);
     parent.append(&row);
+}
+
+fn add_network_from_draft(app: &AppRef) {
+    let name = app.borrow().drafts.new_network_name.trim().to_string();
+    if name.is_empty() {
+        return;
+    }
+    app.borrow_mut().drafts.new_network_name.clear();
+    dispatch(app, NativeAppAction::AddNetwork { name });
+}
+
+fn save_active_network_name(app: &AppRef, network_id: &str) {
+    let name = app.borrow().drafts.network_name.trim().to_string();
+    if name.is_empty() {
+        return;
+    }
+    dispatch(
+        app,
+        NativeAppAction::RenameNetwork {
+            network_id: network_id.to_string(),
+            name,
+        },
+    );
+}
+
+fn save_active_network_mesh_id(app: &AppRef, network_id: &str) {
+    let mesh_id = normalize_network_id_input(&app.borrow().drafts.mesh_id);
+    if mesh_id.is_empty() {
+        return;
+    }
+    dispatch(
+        app,
+        NativeAppAction::SetNetworkMeshId {
+            network_id: network_id.to_string(),
+            mesh_id,
+        },
+    );
 }
 
 fn save_device_settings(app: &AppRef) {
@@ -2928,7 +3204,7 @@ fn save_device_settings(app: &AppRef) {
                 endpoint: Some(drafts.endpoint),
                 tunnel_ip: Some(drafts.tunnel_ip),
                 listen_port,
-                magic_dns_suffix: Some(drafts.magic_dns_suffix),
+                fips_host_inbound_tcp_ports: Some(drafts.fips_host_inbound_tcp_ports),
                 ..SettingsPatch::default()
             },
         },
@@ -3154,11 +3430,13 @@ fn saved_network_row(
     app: &AppRef,
     parent: &gtk::Box,
     network: &NativeNetworkState,
-    can_remove: bool,
+    state: &NativeAppState,
 ) {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    row.add_css_class("nvpn-route-choice");
-    row.set_valign(gtk::Align::Center);
+    let expander = gtk::Expander::new(None::<&str>);
+    expander.add_css_class("nvpn-route-choice");
+
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    header.set_valign(gtk::Align::Center);
 
     let text = gtk::Box::new(gtk::Orientation::Vertical, 3);
     text.set_hexpand(true);
@@ -3177,7 +3455,7 @@ fn saved_network_row(
     subtitle.add_css_class("dim-label");
     subtitle.set_xalign(0.0);
     text.append(&subtitle);
-    row.append(&text);
+    header.append(&text);
 
     let activate = icon_text_button("Activate", "go-next-symbolic");
     {
@@ -3193,25 +3471,255 @@ fn saved_network_row(
             );
         });
     }
-    row.append(&activate);
+    header.append(&activate);
 
     let remove = gtk::Button::from_icon_name("edit-delete-symbolic");
     remove.set_tooltip_text(Some("Remove network"));
-    remove.set_sensitive(can_remove);
     remove.add_css_class("destructive-action");
+    connect_remove_network_confirmation(
+        &remove,
+        app,
+        network.id.clone(),
+        display_network_name(network),
+    );
+    header.append(&remove);
+    expander.set_label_widget(Some(&header));
+
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    body.set_margin_top(10);
+
+    let rename = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    rename.set_valign(gtk::Align::Center);
+    let label = gtk::Label::new(Some("Name"));
+    label.set_width_chars(10);
+    label.set_xalign(0.0);
+    label.add_css_class("dim-label");
+    rename.append(&label);
+    let input = entry("Network name", &display_network_name(network));
+    input.set_sensitive(network.local_is_admin);
+    rename.append(&input);
+    let save = gtk::Button::with_label("Save");
+    save.set_sensitive(network.local_is_admin);
     {
         let app = app.clone();
         let network_id = network.id.clone();
-        remove.connect_clicked(move |_| {
-            dispatch(
-                &app,
-                NativeAppAction::RemoveNetwork {
-                    network_id: network_id.clone(),
-                },
-            );
-        });
+        let input = input.clone();
+        save.connect_clicked(move |_| save_saved_network_name(&app, &network_id, &input));
     }
-    row.append(&remove);
+    {
+        let app = app.clone();
+        let network_id = network.id.clone();
+        input.connect_activate(move |input| save_saved_network_name(&app, &network_id, input));
+    }
+    rename.append(&save);
+    body.append(&rename);
+
+    let mesh = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    mesh.set_valign(gtk::Align::Center);
+    let label = gtk::Label::new(Some("Network ID"));
+    label.set_width_chars(10);
+    label.set_xalign(0.0);
+    label.add_css_class("dim-label");
+    mesh.append(&label);
+    let mesh_id = gtk::Label::new(Some(&display_network_id(&network.network_id)));
+    mesh_id.set_xalign(0.0);
+    mesh_id.set_selectable(true);
+    mesh_id.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+    mesh_id.set_hexpand(true);
+    mesh.append(&mesh_id);
+    let copy = gtk::Button::from_icon_name("edit-copy-symbolic");
+    copy.set_tooltip_text(Some("Copy network ID"));
+    {
+        let network_id = network.network_id.clone();
+        copy.connect_clicked(move |_| copy_text(&network_id));
+    }
+    mesh.append(&copy);
+    body.append(&mesh);
+
+    switch_row_enabled(
+        app,
+        &body,
+        "Allow join requests",
+        network.join_requests_enabled,
+        network.local_is_admin,
+        {
+            let network_id = network.id.clone();
+            move |enabled| NativeAppAction::SetNetworkJoinRequestsEnabled {
+                network_id: network_id.clone(),
+                enabled,
+            }
+        },
+    );
+
+    section_header(&body, "Devices", "");
+    let participants = sorted_participants(network, state);
+    if participants.is_empty() {
+        empty_row(&body, "No devices in this network");
+    } else {
+        for participant in participants {
+            saved_network_participant_row(app, &body, network, &participant, state);
+        }
+    }
+
+    expander.set_child(Some(&body));
+    parent.append(&expander);
+}
+
+fn save_saved_network_name(app: &AppRef, network_id: &str, input: &gtk::Entry) {
+    let name = input.text().trim().to_string();
+    if name.is_empty() {
+        return;
+    }
+    dispatch(
+        app,
+        NativeAppAction::RenameNetwork {
+            network_id: network_id.to_string(),
+            name,
+        },
+    );
+}
+
+fn saved_network_participant_row(
+    app: &AppRef,
+    parent: &gtk::Box,
+    network: &NativeNetworkState,
+    participant: &NativeParticipantState,
+    state: &NativeAppState,
+) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    row.set_valign(gtk::Align::Center);
+
+    let dot = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    dot.add_css_class(if participant.reachable {
+        "nvpn-peer-online"
+    } else {
+        "nvpn-peer-offline"
+    });
+    row.append(&dot);
+
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 3);
+    text.set_hexpand(true);
+    let name = gtk::Label::new(Some(&device_name(participant)));
+    name.add_css_class("heading");
+    name.set_xalign(0.0);
+    name.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    text.append(&name);
+    let subtitle = gtk::Label::new(Some(&device_subtitle(participant)));
+    subtitle.add_css_class("caption");
+    subtitle.add_css_class("dim-label");
+    subtitle.set_xalign(0.0);
+    subtitle.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+    text.append(&subtitle);
+    row.append(&text);
+
+    row.append(&badge(
+        &device_status_text(participant),
+        if participant.reachable { "ok" } else { "muted" },
+    ));
+    if participant.is_admin {
+        row.append(&badge("Admin", "muted"));
+    }
+    if participant.offers_exit_node {
+        row.append(&badge(
+            exit_node_badge_text(participant, state),
+            exit_node_badge_style(participant, state),
+        ));
+    }
+
+    let copy = gtk::Button::from_icon_name("edit-copy-symbolic");
+    copy.set_tooltip_text(Some("Copy npub"));
+    {
+        let npub = participant.npub.clone();
+        copy.connect_clicked(move |_| copy_text(&npub));
+    }
+    row.append(&copy);
+
+    if network.local_is_admin {
+        let alias = entry("Name", &participant.magic_dns_alias);
+        alias.set_width_chars(14);
+        alias.set_hexpand(false);
+        row.append(&alias);
+
+        let save_alias = gtk::Button::from_icon_name("object-select-symbolic");
+        save_alias.set_tooltip_text(Some("Save name"));
+        {
+            let app = app.clone();
+            let npub = participant.npub.clone();
+            let alias = alias.clone();
+            save_alias.connect_clicked(move |_| {
+                dispatch(
+                    &app,
+                    NativeAppAction::SetParticipantAlias {
+                        npub: npub.clone(),
+                        alias: alias.text().trim().to_string(),
+                    },
+                );
+            });
+        }
+        {
+            let app = app.clone();
+            let npub = participant.npub.clone();
+            alias.connect_activate(move |alias| {
+                dispatch(
+                    &app,
+                    NativeAppAction::SetParticipantAlias {
+                        npub: npub.clone(),
+                        alias: alias.text().trim().to_string(),
+                    },
+                );
+            });
+        }
+        row.append(&save_alias);
+
+        if !is_self(participant, state) {
+            let admin = gtk::Button::from_icon_name(if participant.is_admin {
+                "starred-symbolic"
+            } else {
+                "non-starred-symbolic"
+            });
+            admin.set_tooltip_text(Some(if participant.is_admin {
+                "Remove admin"
+            } else {
+                "Make admin"
+            }));
+            {
+                let app = app.clone();
+                let network_id = network.id.clone();
+                let npub = participant.npub.clone();
+                let is_admin = participant.is_admin;
+                admin.connect_clicked(move |_| {
+                    dispatch(
+                        &app,
+                        if is_admin {
+                            NativeAppAction::RemoveAdmin {
+                                network_id: network_id.clone(),
+                                npub: npub.clone(),
+                            }
+                        } else {
+                            NativeAppAction::AddAdmin {
+                                network_id: network_id.clone(),
+                                npub: npub.clone(),
+                            }
+                        },
+                    );
+                });
+            }
+            row.append(&admin);
+
+            let remove = gtk::Button::from_icon_name("edit-delete-symbolic");
+            remove.set_tooltip_text(Some("Remove device"));
+            remove.add_css_class("destructive-action");
+            connect_remove_participant_confirmation(
+                &remove,
+                app,
+                network.id.clone(),
+                participant.npub.clone(),
+                device_name(participant),
+            );
+            row.append(&remove);
+        }
+    }
+
     parent.append(&row);
 }
 
@@ -3350,6 +3858,14 @@ where
     switch_row_enabled(app, parent, title, active, true, action);
 }
 
+fn settings_toggle_group_label(parent: &gtk::Box, title: &str) {
+    let label = gtk::Label::new(Some(title));
+    label.add_css_class("dim-label");
+    label.set_xalign(0.0);
+    label.set_margin_top(6);
+    parent.append(&label);
+}
+
 fn switch_row_enabled<F>(
     app: &AppRef,
     parent: &gtk::Box,
@@ -3434,6 +3950,42 @@ fn connect_remove_participant_confirmation(
     button.connect_clicked(move |_| {
         confirm_remove_participant(&app, network_id.clone(), npub.clone(), device_name.clone());
     });
+}
+
+fn connect_remove_network_confirmation(
+    button: &gtk::Button,
+    app: &AppRef,
+    network_id: String,
+    network_name: String,
+) {
+    let app = app.clone();
+    button.connect_clicked(move |_| {
+        confirm_remove_network(&app, network_id.clone(), network_name.clone());
+    });
+}
+
+fn confirm_remove_network(app: &AppRef, network_id: String, network_name: String) {
+    let dialog = adw::AlertDialog::new(
+        Some(&format!("Remove {network_name}?")),
+        Some("This deletes the network from this device."),
+    );
+    dialog.add_responses(&[("cancel", "Cancel"), ("remove", "Remove")]);
+    dialog.set_close_response("cancel");
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+    {
+        let app = app.clone();
+        dialog.connect_response(Some("remove"), move |_, _| {
+            dispatch(
+                &app,
+                NativeAppAction::RemoveNetwork {
+                    network_id: network_id.clone(),
+                },
+            );
+        });
+    }
+    let window = app.borrow().window.clone();
+    dialog.present(Some(&window));
 }
 
 fn confirm_remove_participant(app: &AppRef, network_id: String, npub: String, device_name: String) {
@@ -3532,17 +4084,20 @@ fn nav_button(title: &str, icon_name: &str, active: bool, attention: bool) -> gt
     let button = gtk::Button::new();
     button.add_css_class("flat");
     button.add_css_class("nvpn-nav-button");
+    button.set_hexpand(true);
     if active {
         button.add_css_class("active");
     }
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 7);
     row.set_valign(gtk::Align::Center);
+    row.set_hexpand(true);
     if !icon_name.is_empty() {
         let icon = gtk::Image::from_icon_name(icon_name);
         row.append(&icon);
     }
     let label = gtk::Label::new(Some(title));
     label.set_xalign(0.0);
+    label.set_hexpand(true);
     row.append(&label);
     if attention {
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -3634,6 +4189,21 @@ mod tests {
         assert_eq!(offsets.get(Page::Devices), 120.0);
         assert_eq!(offsets.get(Page::ExitNodes), 260.0);
         assert_eq!(offsets.get(Page::Share), 0.0);
+    }
+
+    #[test]
+    fn close_to_tray_requires_setting_tray_and_non_quit_close() {
+        assert!(should_close_to_tray(true, true, false));
+        assert!(!should_close_to_tray(false, true, false));
+        assert!(!should_close_to_tray(true, false, false));
+        assert!(!should_close_to_tray(true, true, true));
+    }
+
+    #[test]
+    fn autostart_desktop_entry_launches_gui_hidden() {
+        let entry = autostart_desktop_entry(std::path::Path::new("/opt/Nostr VPN/nostr-vpn"));
+
+        assert!(entry.contains("Exec=/opt/Nostr\\ VPN/nostr-vpn --hidden\n"));
     }
 
     #[test]
@@ -4078,6 +4648,16 @@ fn normalize_network_id_input(value: &str) -> String {
     }
 }
 
+fn is_valid_device_id(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.len() != 63 || !trimmed.starts_with("npub1") {
+        return false;
+    }
+    trimmed[5..]
+        .chars()
+        .all(|ch| "qpzry9x8gf2tvdw0s3jn54khce6mua7l".contains(ch))
+}
+
 fn first_non_empty(values: &[&str]) -> Option<String> {
     values
         .iter()
@@ -4139,7 +4719,7 @@ fn autostart_desktop_path() -> Option<PathBuf> {
 
 fn autostart_desktop_entry(executable: &std::path::Path) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Nostr VPN\nExec={}\nIcon=nostr-vpn\nTerminal=false\nCategories=Network;Security;\nX-GNOME-Autostart-enabled=true\n",
+        "[Desktop Entry]\nType=Application\nName=Nostr VPN\nExec={} --hidden\nIcon=nostr-vpn\nTerminal=false\nCategories=Network;Security;\nX-GNOME-Autostart-enabled=true\n",
         desktop_exec_escape(&executable.to_string_lossy())
     )
 }
@@ -4238,7 +4818,7 @@ const CSS: &str = r#"
 }
 
 .nvpn-nav-button.active {
-    background: alpha(#3584e4, 0.14);
+    background: alpha(@accent_color, 0.14);
     color: @window_fg_color;
 }
 
@@ -4246,7 +4826,7 @@ const CSS: &str = r#"
     min-width: 8px;
     min-height: 8px;
     border-radius: 999px;
-    background: #dc2626;
+    background: @error_color;
 }
 
 .nvpn-card {
@@ -4264,15 +4844,15 @@ const CSS: &str = r#"
 }
 
 .nvpn-header-dot.ok {
-    background: #16a34a;
+    background: @success_color;
 }
 
 .nvpn-header-dot.warn {
-    background: #d97706;
+    background: @warning_color;
 }
 
 .nvpn-header-dot.bad {
-    background: #dc2626;
+    background: @error_color;
 }
 
 .nvpn-header-status {
@@ -4305,31 +4885,31 @@ const CSS: &str = r#"
 }
 
 .nvpn-status-ready {
-    min-width: 48px;
-    min-height: 48px;
-    background: #16a34a;
+    min-width: 12px;
+    min-height: 12px;
+    background: @success_color;
 }
 
 .nvpn-status-active {
-    min-width: 48px;
-    min-height: 48px;
-    background: #d97706;
+    min-width: 12px;
+    min-height: 12px;
+    background: @accent_color;
 }
 
 .nvpn-status-off {
-    min-width: 48px;
-    min-height: 48px;
+    min-width: 12px;
+    min-height: 12px;
     background: alpha(@window_fg_color, 0.22);
 }
 
 .nvpn-status-blocked {
-    min-width: 48px;
-    min-height: 48px;
-    background: #dc2626;
+    min-width: 12px;
+    min-height: 12px;
+    background: @error_color;
 }
 
 .nvpn-peer-online {
-    background: #16a34a;
+    background: @success_color;
 }
 
 .nvpn-peer-offline {
@@ -4342,7 +4922,7 @@ const CSS: &str = r#"
 }
 
 .nvpn-device-row.selected {
-    background: alpha(#3584e4, 0.14);
+    background: alpha(@accent_color, 0.14);
 }
 
 .nvpn-route-choice {
@@ -4362,18 +4942,18 @@ const CSS: &str = r#"
 }
 
 .nvpn-badge.ok {
-    background: alpha(#16a34a, 0.16);
-    color: #15803d;
+    background: alpha(@success_color, 0.16);
+    color: @success_color;
 }
 
 .nvpn-badge.warn {
-    background: alpha(#d97706, 0.16);
-    color: #b45309;
+    background: alpha(@warning_color, 0.16);
+    color: @warning_color;
 }
 
 .nvpn-badge.bad {
-    background: alpha(#dc2626, 0.14);
-    color: #b91c1c;
+    background: alpha(@error_color, 0.14);
+    color: @error_color;
 }
 
 .nvpn-badge.muted {
@@ -4389,6 +4969,6 @@ const CSS: &str = r#"
 
 .success,
 .accent {
-    color: #15803d;
+    color: @success_color;
 }
 "#;

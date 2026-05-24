@@ -1,6 +1,7 @@
 pub mod config;
 mod config_defaults;
 mod config_magic_dns;
+mod config_secrets;
 pub mod control;
 pub mod data_plane;
 pub mod diagnostics;
@@ -16,6 +17,7 @@ pub mod paths;
 pub mod platform_paths;
 pub mod process_ext;
 pub mod recent_peers;
+pub mod signed_rosters;
 pub mod wg_upstream;
 
 pub use config::DEFAULT_RELAYS;

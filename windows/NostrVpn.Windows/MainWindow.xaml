@@ -674,13 +674,27 @@
                   <TextBox Grid.Column="3" Text="{Binding TunnelIp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
                   <TextBlock Grid.Row="1" Text="Endpoint" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
                   <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Endpoint, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0" />
-                  <TextBlock Grid.Row="1" Grid.Column="2" Text="Port" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
+                  <TextBlock Grid.Row="1" Grid.Column="2" Text="Listen Port" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
                   <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding ListenPort, UpdateSourceTrigger=PropertyChanged}" />
                 </Grid>
-                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                  <CheckBox Content="Autoconnect" IsChecked="{Binding State.Autoconnect, Mode=OneWay}" Click="Autoconnect_Click" />
-                  <CheckBox Content="Launch on startup" IsChecked="{Binding State.LaunchOnStartup, Mode=OneWay}" Click="LaunchOnStartup_Click" />
-                  <CheckBox Content="Tray on close" IsChecked="{Binding State.CloseToTrayOnClose, Mode=OneWay}" Click="CloseToTray_Click" />
+                <StackPanel Orientation="Vertical" HorizontalAlignment="Stretch" Margin="0,12,0,0">
+                  <TextBlock Text="General" Foreground="{StaticResource TextSecondary}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,2" />
+                  <CheckBox Style="{StaticResource SwitchCheckBox}" Content="Start VPN automatically" IsChecked="{Binding State.Autoconnect, Mode=OneWay}" Click="Autoconnect_Click" />
+                  <CheckBox Style="{StaticResource SwitchCheckBox}" Content="Launch on startup" IsChecked="{Binding State.LaunchOnStartup, Mode=OneWay}" Click="LaunchOnStartup_Click" />
+                  <CheckBox Style="{StaticResource SwitchCheckBox}" Content="Tray on close" IsChecked="{Binding State.CloseToTrayOnClose, Mode=OneWay}" Click="CloseToTray_Click" />
+                  <TextBlock Text="FIPS" Foreground="{StaticResource TextSecondary}" FontSize="12" FontWeight="SemiBold" Margin="0,10,0,2" />
+                  <CheckBox Style="{StaticResource SwitchCheckBox}" Content="Route to npub.fips addresses outside VPN" IsChecked="{Binding State.FipsHostTunnelEnabled, Mode=OneWay}" Click="FipsHostTunnel_Click" />
+                  <Grid Margin="0,4,0,0" IsEnabled="{Binding State.FipsHostTunnelEnabled}">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="150" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Open inbound TCP ports" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="1" Text="{Binding FipsHostInboundTcpPorts, UpdateSourceTrigger=PropertyChanged}" ToolTip="Comma-separated ports, e.g. 22, 443" />
+                  </Grid>
+                  <CheckBox Style="{StaticResource SwitchCheckBox}" Content="Connect to non-roster FIPS peers" IsChecked="{Binding State.ConnectToNonRosterFipsPeers, Mode=OneWay}" Click="ConnectToNonRosterFipsPeers_Click" />
+                  <CheckBox Style="{StaticResource SwitchCheckBox}" Content="Find peers over relays" IsChecked="{Binding State.FipsNostrDiscoveryEnabled, Mode=OneWay}" Click="FipsNostrDiscoveryEnabled_Click" />
+                  <CheckBox Style="{StaticResource SwitchCheckBox}" Content="Use bootstrap servers" IsChecked="{Binding State.FipsBootstrapEnabled, Mode=OneWay}" Click="FipsBootstrapEnabled_Click" />
                 </StackPanel>
                 <Button Content="Save" Command="{Binding SaveNodeCommand}" HorizontalAlignment="Left" />
               </StackPanel>
@@ -774,6 +788,8 @@
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <TextBlock Text="Interface" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,8" />
                     <TextBlock Grid.Column="1" Text="{Binding DiagnosticsInterface}" TextTrimming="CharacterEllipsis" Margin="0,0,16,8" />
@@ -783,10 +799,16 @@
                     <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DiagnosticsIpv4}" TextTrimming="CharacterEllipsis" Margin="0,0,16,8" />
                     <TextBlock Grid.Row="1" Grid.Column="2" Text="IPv6" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,8" />
                     <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding DiagnosticsIpv6}" TextTrimming="CharacterEllipsis" Margin="0,0,0,8" />
-                    <TextBlock Grid.Row="2" Text="Mapping" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,0" />
-                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DiagnosticsMapping}" TextTrimming="CharacterEllipsis" Margin="0,0,16,0" />
-                    <TextBlock Grid.Row="2" Grid.Column="2" Text="External" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,0" />
-                    <TextBlock Grid.Row="2" Grid.Column="3" Text="{Binding DiagnosticsExternal}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Row="2" Text="Mapping" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,8" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DiagnosticsMapping}" TextTrimming="CharacterEllipsis" Margin="0,0,16,8" />
+                    <TextBlock Grid.Row="2" Grid.Column="2" Text="External" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,8" />
+                    <TextBlock Grid.Row="2" Grid.Column="3" Text="{Binding DiagnosticsExternal}" TextTrimming="CharacterEllipsis" Margin="0,0,0,8" />
+                    <TextBlock Grid.Row="3" Text="Remote roster" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,8" />
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding DiagnosticsPeers}" TextTrimming="CharacterEllipsis" Margin="0,0,16,8" />
+                    <TextBlock Grid.Row="3" Grid.Column="2" Text="Roster FIPS" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,8" />
+                    <TextBlock Grid.Row="3" Grid.Column="3" Text="{Binding DiagnosticsFips}" TextTrimming="CharacterEllipsis" Margin="0,0,0,8" />
+                    <TextBlock Grid.Row="4" Text="Other FIPS" Foreground="{StaticResource TextSecondary}" Margin="0,0,8,0" />
+                    <TextBlock Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding DiagnosticsOtherFips}" TextTrimming="CharacterEllipsis" />
                   </Grid>
 
                   <ItemsControl ItemsSource="{Binding State.Health}" Margin="0,12,0,0">

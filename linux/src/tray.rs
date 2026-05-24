@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -121,6 +121,7 @@ pub struct TrayRuntime {
     owner_id: Option<gio::OwnerId>,
     menu_revision: Rc<RefCell<u32>>,
     last_error: Rc<RefCell<Option<String>>>,
+    watcher_registered: Rc<Cell<bool>>,
 }
 
 impl TrayRuntime {
@@ -129,6 +130,7 @@ impl TrayRuntime {
         let state = Rc::new(RefCell::new(state.clone()));
         let menu_revision = Rc::new(RefCell::new(1));
         let last_error = Rc::new(RefCell::new(None));
+        let watcher_registered = Rc::new(Cell::new(false));
         let mut runtime = Self {
             state: state.clone(),
             receiver,
@@ -138,6 +140,7 @@ impl TrayRuntime {
             owner_id: None,
             menu_revision: menu_revision.clone(),
             last_error: last_error.clone(),
+            watcher_registered: watcher_registered.clone(),
         };
 
         let connection = match gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) {
@@ -193,6 +196,7 @@ impl TrayRuntime {
         let owner_id = {
             let bus_name_for_register = bus_name.clone();
             let last_error = last_error.clone();
+            let watcher_registered = watcher_registered.clone();
             gio::bus_own_name_on_connection(
                 &connection,
                 &bus_name,
@@ -210,8 +214,11 @@ impl TrayRuntime {
                         1000,
                         gio::Cancellable::NONE,
                     ) {
+                        watcher_registered.set(false);
                         *last_error.borrow_mut() =
                             Some(format!("status notifier watcher unavailable: {error}"));
+                    } else {
+                        watcher_registered.set(true);
                     }
                 },
                 |_connection, _name| {},
@@ -260,6 +267,14 @@ impl TrayRuntime {
 
     pub fn last_error(&self) -> Option<String> {
         self.last_error.borrow().clone()
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.connection.is_some()
+            && self.sni_registration.is_some()
+            && self.menu_registration.is_some()
+            && self.owner_id.is_some()
+            && self.watcher_registered.get()
     }
 }
 

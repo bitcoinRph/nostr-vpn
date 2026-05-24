@@ -34,6 +34,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "android-native-keyring-store"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c6349ddff23194f8fdce2ea8849380f5a4868c1648965b70e801e104cba9b3"
+dependencies = [
+ "base64",
+ "jni 0.21.1",
+ "keyring-core",
+ "log",
+ "ndk-context",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -696,6 +714,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-foundation"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
+name = "core-foundation-sys"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1033,9 +1067,9 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "fips-core"
-version = "0.3.15"
+version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "015648058b5ba5b3cf0028a6a56deaa6f90eac279ccceccd4953bc609a106cf5"
+checksum = "fd85847bff7b2a503fc7f11580677cfce4d4c9d81b0b4f73fc053fa871cb35ee"
 dependencies = [
  "bluer",
  "crossbeam-channel",
@@ -1071,9 +1105,9 @@ dependencies = [
 
 [[package]]
 name = "fips-endpoint"
-version = "0.3.15"
+version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58318fac042093bf7612459f68d3cd3d26589bca242de47fee8437cdcc19a8b1"
+checksum = "db4c7e266fd19030bd1d43792e33bbb92947c4e08d4772028929a26d31f3a48e"
 dependencies = [
  "fips-core",
 ]
@@ -2035,6 +2069,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyring-core"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb1e621458ca9c51aa110bd0339d4751a056b9576bf1253aee1aa560dda0fc9d"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2242,6 +2285,12 @@ dependencies = [
  "num-traits",
  "pxfm",
 ]
+
+[[package]]
+name = "ndk-context"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "negentropy"
@@ -2556,7 +2605,7 @@ dependencies = [
 
 [[package]]
 name = "nostr-vpn-app-core"
-version = "4.0.38"
+version = "4.0.40"
 dependencies = [
  "anyhow",
  "base64",
@@ -2564,6 +2613,7 @@ dependencies = [
  "fips-endpoint",
  "image",
  "jni 0.21.1",
+ "ndk-context",
  "netdev",
  "nostr-sdk 0.35.0",
  "nostr-vpn-core",
@@ -2580,8 +2630,9 @@ dependencies = [
 
 [[package]]
 name = "nostr-vpn-core"
-version = "4.0.38"
+version = "4.0.40"
 dependencies = [
+ "android-native-keyring-store",
  "anyhow",
  "async-trait",
  "base64",
@@ -2589,8 +2640,10 @@ dependencies = [
  "hex",
  "hickory-proto",
  "hostname",
+ "keyring-core",
  "netdev",
  "nostr-sdk 0.35.0",
+ "security-framework",
  "serde",
  "serde_json",
  "sha2",
@@ -2600,11 +2653,12 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "nostr-vpn-linux"
-version = "4.0.38"
+version = "4.0.40"
 dependencies = [
  "gio",
  "glib",
@@ -3389,6 +3443,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4387882333d3aa8cb20530a17c69a3752e97837832f34f6dccc760e715001d9"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "security-framework"
+version = "2.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
+dependencies = [
+ "bitflags",
+ "core-foundation",
+ "core-foundation-sys",
+ "libc",
+ "security-framework-sys",
+]
+
+[[package]]
+name = "security-framework-sys"
+version = "2.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
 ]
 
 [[package]]

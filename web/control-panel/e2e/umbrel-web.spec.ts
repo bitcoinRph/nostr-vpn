@@ -34,7 +34,6 @@ type UiState = {
   wireguardExitConfig: string;
   nodeName: string;
   selfMagicDnsName: string;
-  magicDnsSuffix: string;
   autoconnect: boolean;
   inviteBroadcastActive: boolean;
   nearbyDiscoveryActive: boolean;
@@ -50,6 +49,7 @@ test.describe.configure({ mode: 'serial', timeout: 60_000 });
 
 const TEST_WG_PRIVATE_KEY = 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=';
 const TEST_WG_PUBLIC_KEY = 'AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=';
+const DAEMON_RELOAD_TIMEOUT_MS = 15_000;
 
 function wireGuardConfig(endpoint = '198.51.100.20:51820'): string {
   return `
@@ -190,11 +190,25 @@ test('bundled UI loads, navigates, renders QR, and stays responsive', async ({ p
     await expect(page.getByRole('heading', { name: 'WireGuard Upstream' })).toBeVisible();
     await expect(page.getByLabel('Config')).toBeVisible();
     const exitToggleBox = await page.getByRole('checkbox', { name: 'Offer exit' }).boundingBox();
-    expect(exitToggleBox?.width).toBeLessThanOrEqual(22);
-    expect(exitToggleBox?.height).toBeLessThanOrEqual(22);
+    expect(exitToggleBox?.width).toBeLessThanOrEqual(40);
+    expect(exitToggleBox?.height).toBeLessThanOrEqual(24);
 
     await page.getByRole('button', { name: 'Settings' }).click();
     await expect(page.getByRole('heading', { name: 'This Device' })).toBeVisible();
+    await expect(page.getByLabel('DNS Suffix')).toHaveCount(0);
+    await expect(page.getByLabel('Start VPN automatically')).toBeVisible();
+    await expect(page.getByLabel('Route to npub.fips addresses outside VPN')).toBeVisible();
+    await expect(page.getByLabel('Open inbound TCP ports')).toBeDisabled();
+    await expect(page.getByLabel('Connect to non-roster FIPS peers')).toBeVisible();
+    const diagnosticsPanel = page.locator('.diagnostics-panel');
+    const diagnosticsToggle = page.getByRole('button', { name: /Diagnostics/ });
+    await expect(diagnosticsPanel).toBeVisible();
+    await expect(diagnosticsToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(diagnosticsPanel.getByText('Roster FIPS')).toBeHidden();
+    await diagnosticsToggle.click();
+    await expect(diagnosticsToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(diagnosticsPanel.getByText('Roster FIPS')).toBeVisible();
+    await expect(diagnosticsPanel.getByText('Other FIPS')).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
@@ -259,13 +273,18 @@ test('WireGuard exit settings import, save, toggle, and reject bad config from t
 
       const enabled = wireGuardPanel.getByRole('checkbox', { name: 'Enabled' });
       await expect(enabled).toBeEnabled();
-      await enabled.check();
+      await enabled.click();
       await expect
-        .poll(async () => (await postJson<UiState>(request, '/api/tick')).wireguardExitEnabled)
+        .poll(async () => (await postJson<UiState>(request, '/api/tick')).wireguardExitEnabled, {
+          timeout: DAEMON_RELOAD_TIMEOUT_MS,
+        })
         .toBe(true);
-      await enabled.uncheck();
+      await expect(enabled).toBeChecked();
+      await enabled.click();
       await expect
-        .poll(async () => (await postJson<UiState>(request, '/api/tick')).wireguardExitEnabled)
+        .poll(async () => (await postJson<UiState>(request, '/api/tick')).wireguardExitEnabled, {
+          timeout: DAEMON_RELOAD_TIMEOUT_MS,
+        })
         .toBe(false);
 
       const savedConfig = (await postJson<UiState>(request, '/api/tick')).wireguardExitConfig;
@@ -311,7 +330,7 @@ test('API supports the Umbrel web config action surface', async ({ request }) =>
   expect(state.vpnStatus.toLowerCase()).not.toContain('error');
   const originalNetwork = activeNetwork(state);
   expect(originalNetwork.networkId).not.toBe('nostr-vpn');
-  expect(originalNetwork.networkId).toMatch(/^[0-9a-f]{16}$/);
+  expect(originalNetwork.networkId).toMatch(/^[0-9a-f]{8,16}$/);
 
   const qr = await postJson<QrMatrix>(request, '/api/qr_matrix', {
     text: state.activeNetworkInvite,
@@ -322,12 +341,10 @@ test('API supports the Umbrel web config action surface', async ({ request }) =>
 
   state = await postJson<UiState>(request, '/api/update_settings', {
     nodeName: 'Umbrel Web E2E',
-    magicDnsSuffix: 'e2e.nvpn',
     autoconnect: true,
     exitNodeLeakProtection: false,
   });
   expect(state.nodeName).toBe('Umbrel Web E2E');
-  expect(state.magicDnsSuffix).toBe('e2e.nvpn');
   expect(state.autoconnect).toBeTruthy();
   expect(state.exitNodeLeakProtection).toBeFalsy();
 

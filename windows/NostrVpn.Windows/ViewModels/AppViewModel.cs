@@ -48,7 +48,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     private string _listenPort = "";
     private string _relayInput = "";
     private string _relaysDraft = "";
-    private string _magicDnsSuffix = "";
+    private string _fipsHostInboundTcpPorts = "";
     private string _advertisedRoutes = "";
     private string _wireguardExitConfig = "";
     private string _manualJoinAdminId = "";
@@ -77,6 +77,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         _core = new AppCoreClient(dataDir, version);
         _autoInstallUpdates = LoadAutoInstallUpdates();
         ApplyState(_core.State(), syncDrafts: true);
+        SyncLaunchOnStartupRegistration();
 
         ShowDevicesCommand = new RelayCommand(_ => Page = AppPage.Devices);
         ShowAddNetworkCommand = new RelayCommand(_ => Page = AppPage.AddNetwork);
@@ -86,7 +87,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         ShowExitNodesCommand = new RelayCommand(_ => Page = AppPage.ExitNodes);
         ShowSettingsCommand = new RelayCommand(_ => Page = AppPage.Settings);
         RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => !ActionInFlight);
-        ToggleVpnCommand = new AsyncRelayCommand(_ => ToggleVpnAsync(), _ => !ActionInFlight && State.VpnControlSupported && HasActiveNetwork);
+        ToggleVpnCommand = new AsyncRelayCommand(_ => ToggleVpnAsync(), _ => !ActionInFlight && State.VpnControlSupported && RuntimeActiveNetwork is not null);
         CopyInviteCommand = new RelayCommand(_ => CopyText(State.ActiveNetworkInvite));
         ResetInviteCommand = new AsyncRelayCommand(_ => ResetInviteAsync(), _ => !ActionInFlight && ActiveNetwork?.LocalIsAdmin == true);
         CopyThisDeviceCommand = new RelayCommand(_ => CopyText(ThisDeviceCopyValue), _ => !string.IsNullOrWhiteSpace(ThisDeviceCopyValue));
@@ -329,7 +330,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         }
     }
     public string RelaysDraft { get => _relaysDraft; set => SetField(ref _relaysDraft, value); }
-    public string MagicDnsSuffix { get => _magicDnsSuffix; set => SetField(ref _magicDnsSuffix, value); }
+    public string FipsHostInboundTcpPorts { get => _fipsHostInboundTcpPorts; set => SetField(ref _fipsHostInboundTcpPorts, value); }
     public string AdvertisedRoutes { get => _advertisedRoutes; set => SetField(ref _advertisedRoutes, value); }
     public string WireguardExitConfig { get => _wireguardExitConfig; set => SetField(ref _wireguardExitConfig, value); }
 
@@ -445,10 +446,11 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _inviteQr, value);
     }
 
-    private NativeNetworkState? RuntimeActiveNetwork => State.Networks.FirstOrDefault(network => network.Enabled) ?? State.Networks.FirstOrDefault();
+    private NativeNetworkState? RuntimeActiveNetwork => State.Networks.FirstOrDefault(network => network.Enabled);
     public NativeNetworkState? ActiveNetwork =>
         State.Networks.FirstOrDefault(network => network.Id == _shownNetworkId)
-        ?? RuntimeActiveNetwork;
+        ?? RuntimeActiveNetwork
+        ?? State.Networks.FirstOrDefault();
     public bool HasActiveNetwork => ActiveNetwork is not null;
     public string OfferExitNodeLabel
     {
@@ -572,6 +574,9 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public string DiagnosticsGateway => FirstNonEmpty(State.Network.GatewayIpv4, State.Network.GatewayIpv6, "unknown");
     public string DiagnosticsMapping => string.IsNullOrWhiteSpace(State.PortMapping.ActiveProtocol) ? "none" : State.PortMapping.ActiveProtocol;
     public string DiagnosticsExternal => string.IsNullOrWhiteSpace(State.PortMapping.ExternalEndpoint) ? "stun/direct" : State.PortMapping.ExternalEndpoint;
+    public string DiagnosticsPeers => $"{State.ConnectedPeerCount}/{State.ExpectedPeerCount}";
+    public string DiagnosticsFips => $"{State.FipsConnectedPeerCount}/{State.FipsRosterPeerCount} direct";
+    public string DiagnosticsOtherFips => $"{State.NonFipsRosterPeerCount}";
     public bool CanRequestActiveNetworkJoin => ActiveNetwork is { OutboundJoinRequest: null } network && !string.IsNullOrWhiteSpace(network.InviteInviterNpub);
     public string ActiveNetworkJoinStatus
     {
@@ -730,6 +735,18 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             "Saving startup");
     }
 
+    private void SyncLaunchOnStartupRegistration()
+    {
+        try
+        {
+            StartupService.SyncLaunchOnStartup(State.StartupSettingsSupported && State.LaunchOnStartup);
+        }
+        catch (Exception error)
+        {
+            Notice = error.Message;
+        }
+    }
+
     public Task SetCloseToTrayAsync(bool enabled)
     {
         return DispatchAsync(
@@ -742,6 +759,34 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         return DispatchAsync(
             NativeActions.UpdateSettings(new SettingsPatch { Autoconnect = enabled }),
             "Saving VPN option");
+    }
+
+    public Task SetFipsHostTunnelAsync(bool enabled)
+    {
+        return DispatchAsync(
+            NativeActions.UpdateSettings(new SettingsPatch { FipsHostTunnelEnabled = enabled }),
+            "Saving FIPS option");
+    }
+
+    public Task SetConnectToNonRosterFipsPeersAsync(bool enabled)
+    {
+        return DispatchAsync(
+            NativeActions.UpdateSettings(new SettingsPatch { ConnectToNonRosterFipsPeers = enabled }),
+            "Saving FIPS option");
+    }
+
+    public Task SetFipsNostrDiscoveryEnabledAsync(bool enabled)
+    {
+        return DispatchAsync(
+            NativeActions.UpdateSettings(new SettingsPatch { FipsNostrDiscoveryEnabled = enabled }),
+            "Saving FIPS option");
+    }
+
+    public Task SetFipsBootstrapEnabledAsync(bool enabled)
+    {
+        return DispatchAsync(
+            NativeActions.UpdateSettings(new SettingsPatch { FipsBootstrapEnabled = enabled }),
+            "Saving FIPS option");
     }
 
     public Task RemoveParticipantAsync(NativeParticipantState participant)
@@ -1161,7 +1206,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             Endpoint = Endpoint,
             TunnelIp = TunnelIp,
             ListenPort = port,
-            MagicDnsSuffix = MagicDnsSuffix,
+            FipsHostInboundTcpPorts = FipsHostInboundTcpPorts,
         }), "Saving device");
     }
 
@@ -1303,7 +1348,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         TunnelIp = state.TunnelIp;
         ListenPort = state.ListenPort.ToString();
         RelaysDraft = string.Join(Environment.NewLine, state.Relays.Select(relay => relay.Url));
-        MagicDnsSuffix = state.MagicDnsSuffix;
+        FipsHostInboundTcpPorts = state.FipsHostInboundTcpPorts;
         WireguardExitConfig = state.WireguardExitConfig;
         NetworkNameDraft = active?.Name ?? "";
         NetworkMeshIdDraft = DisplayNetworkId(active?.NetworkId ?? "");
@@ -1379,6 +1424,9 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(DiagnosticsGateway));
         OnPropertyChanged(nameof(DiagnosticsMapping));
         OnPropertyChanged(nameof(DiagnosticsExternal));
+        OnPropertyChanged(nameof(DiagnosticsPeers));
+        OnPropertyChanged(nameof(DiagnosticsFips));
+        OnPropertyChanged(nameof(DiagnosticsOtherFips));
         OnPropertyChanged(nameof(CanRequestActiveNetworkJoin));
         OnPropertyChanged(nameof(ActiveNetworkJoinStatus));
         OnPropertyChanged(nameof(DirectExitMarker));

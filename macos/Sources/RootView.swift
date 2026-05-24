@@ -12,7 +12,7 @@ struct RootView: View {
     @State private var tunnelIp = ""
     @State private var listenPort = ""
     @State private var relayInput = ""
-    @State private var magicDnsSuffix = ""
+    @State private var fipsHostInboundTcpPorts = ""
     @State private var wireguardExitConfig = ""
     @State private var networkNameInput = ""
     @State private var selectedDevicePubkeyHex: String?
@@ -35,7 +35,7 @@ struct RootView: View {
     @State private var lastSyncedEndpoint = ""
     @State private var lastSyncedTunnelIp = ""
     @State private var lastSyncedListenPort: UInt32 = 0
-    @State private var lastSyncedMagicDnsSuffix = ""
+    @State private var lastSyncedFipsHostInboundTcpPorts = ""
     @State private var lastSyncedWireguardExitConfig: String? = nil
 
     private var state: NativeAppState {
@@ -51,7 +51,7 @@ struct RootView: View {
            let network = state.networks.first(where: { $0.id == shownNetworkId }) {
             return network
         }
-        return activeNetwork
+        return activeNetwork ?? state.networks.first
     }
 
     private var incomingJoinRequestCount: Int {
@@ -410,6 +410,8 @@ struct RootView: View {
                 pageTitle("Exit Nodes", "arrow.triangle.branch")
                 if let shownNetwork {
                     routingSection(shownNetwork)
+                } else {
+                    wireGuardExitSettings
                 }
             }
         case .settings:
@@ -1343,40 +1345,82 @@ struct RootView: View {
                     TextField("Tunnel IP", text: $tunnelIp)
                 }
             }
-            HStack(spacing: 14) {
-                Toggle("Autoconnect", isOn: Binding(
+            VStack(alignment: .leading, spacing: 8) {
+                settingsToggleGroupLabel("General")
+                settingsToggleRow("Start VPN automatically", isOn: Binding(
                     get: { state.autoconnect },
                     set: { manager.setAutoconnect($0) }
                 ))
-                Toggle("Launch on startup", isOn: Binding(
+                settingsToggleRow("Launch on startup", isOn: Binding(
                     get: { state.launchOnStartup },
                     set: { manager.setLaunchOnStartup($0) }
-                ))
-                .disabled(!state.startupSettingsSupported)
-                Toggle("Menu bar on close", isOn: Binding(
+                ), disabled: !state.startupSettingsSupported)
+                settingsToggleRow("Menu bar on close", isOn: Binding(
                     get: { state.closeToTrayOnClose },
                     set: { manager.setCloseToTray($0) }
+                ), disabled: !state.trayBehaviorSupported)
+                settingsToggleRow("Block internet if exit node disconnects", isOn: Binding(
+                    get: { state.exitNodeLeakProtection },
+                    set: { manager.setExitNodeLeakProtection($0) }
+                ), disabled: manager.actionInFlight)
+
+                settingsToggleGroupLabel("FIPS")
+                settingsToggleRow("Route to npub.fips addresses outside VPN", isOn: Binding(
+                    get: { state.fipsHostTunnelEnabled },
+                    set: { manager.setFipsHostTunnel($0) }
                 ))
-                .disabled(!state.trayBehaviorSupported)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Open inbound TCP ports")
+                        .foregroundStyle(.secondary)
+                    TextField("22, 443", text: $fipsHostInboundTcpPorts)
+                        .disabled(!state.fipsHostTunnelEnabled)
+                }
+                settingsToggleRow("Connect to non-roster FIPS peers", isOn: Binding(
+                    get: { state.connectToNonRosterFipsPeers },
+                    set: { manager.setConnectToNonRosterFipsPeers($0) }
+                ))
+                settingsToggleRow("Find peers over relays", isOn: Binding(
+                    get: { state.fipsNostrDiscoveryEnabled },
+                    set: { manager.setFipsNostrDiscoveryEnabled($0) }
+                ))
+                settingsToggleRow("Use bootstrap servers", isOn: Binding(
+                    get: { state.fipsBootstrapEnabled },
+                    set: { manager.setFipsBootstrapEnabled($0) }
+                ))
             }
-            Toggle("Block internet if exit node disconnects", isOn: Binding(
-                get: { state.exitNodeLeakProtection },
-                set: { manager.setExitNodeLeakProtection($0) }
-            ))
-            .disabled(manager.actionInFlight)
+            .frame(maxWidth: .infinity, alignment: .leading)
             Button {
                 manager.saveNodeSettings(
                     nodeName: nodeName,
                     endpoint: endpoint,
                     tunnelIp: tunnelIp,
                     listenPort: listenPort,
-                    magicDnsSuffix: magicDnsSuffix
+                    fipsHostInboundTcpPorts: fipsHostInboundTcpPorts
                 )
             } label: {
                 Label("Save", systemImage: "checkmark")
             }
             .disabled(manager.actionInFlight)
         }
+    }
+
+    private func settingsToggleGroupLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.top, 4)
+    }
+
+    private func settingsToggleRow(_ title: String, isOn: Binding<Bool>, disabled: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+            Spacer(minLength: 16)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .disabled(disabled)
     }
 
     private var wireGuardExitSettings: some View {
@@ -1625,6 +1669,9 @@ struct RootView: View {
             ) {
                 VStack(alignment: .leading, spacing: 12) {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), alignment: .leading)], alignment: .leading, spacing: 10) {
+                        metric("Peers", "\(state.connectedPeerCount)/\(state.expectedPeerCount)")
+                        metric("Roster FIPS", "\(state.fipsConnectedPeerCount)/\(state.fipsRosterPeerCount) direct")
+                        metric("Other FIPS", "\(state.nonFipsRosterPeerCount)")
                         metric("Interface", state.network.defaultInterface.isEmpty ? "unknown" : state.network.defaultInterface)
                         metric("IPv4", state.network.primaryIpv4.isEmpty ? "-" : state.network.primaryIpv4)
                         metric("IPv6", state.network.primaryIpv6.isEmpty ? "-" : state.network.primaryIpv6)
@@ -1805,9 +1852,9 @@ struct RootView: View {
             listenPort = String(state.listenPort)
             lastSyncedListenPort = state.listenPort
         }
-        if state.magicDnsSuffix != lastSyncedMagicDnsSuffix {
-            magicDnsSuffix = state.magicDnsSuffix
-            lastSyncedMagicDnsSuffix = state.magicDnsSuffix
+        if state.fipsHostInboundTcpPorts != lastSyncedFipsHostInboundTcpPorts {
+            fipsHostInboundTcpPorts = state.fipsHostInboundTcpPorts
+            lastSyncedFipsHostInboundTcpPorts = state.fipsHostInboundTcpPorts
         }
         if lastSyncedWireguardExitConfig != state.wireguardExitConfig {
             wireguardExitConfig = state.wireguardExitConfig

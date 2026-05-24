@@ -22,6 +22,24 @@ fn note_success_records_public_endpoint() {
 }
 
 #[test]
+fn note_success_preserves_tcp_and_normalizes_udp_transport_tags() {
+    let mut state = RecentPeerEndpoints::default();
+    let participant = "a".repeat(64);
+
+    assert!(state.note_success(&participant, "tcp:203.0.113.20:443", 1_000));
+    assert!(state.note_success(&participant, "udp:203.0.113.20:51820", 1_000));
+
+    let endpoints = state.endpoints_for(&participant);
+    assert_eq!(
+        endpoints,
+        vec![
+            "203.0.113.20:51820".to_string(),
+            "tcp:203.0.113.20:443".to_string()
+        ]
+    );
+}
+
+#[test]
 fn note_success_ignores_private_endpoints() {
     let mut state = RecentPeerEndpoints::default();
     let participant = "b".repeat(64);
@@ -36,6 +54,7 @@ fn note_success_ignores_private_endpoints() {
         "[fd00::1]:51820",
         "[fe80::1]:51820",
         "[::1]:51820",
+        "tcp:192.168.1.10:443",
     ] {
         let changed = state.note_success(&participant, addr, 1_000);
         assert!(!changed, "LAN endpoint {addr} must not be persisted");
@@ -49,7 +68,13 @@ fn note_success_ignores_malformed_endpoints() {
     let mut state = RecentPeerEndpoints::default();
     let participant = "c".repeat(64);
 
-    for addr in ["", "not-an-address", "203.0.113.20", "host:notaport"] {
+    for addr in [
+        "",
+        "not-an-address",
+        "203.0.113.20",
+        "host:notaport",
+        "tor:203.0.113.20:9001",
+    ] {
         assert!(!state.note_success(&participant, addr, 1_000));
     }
     assert!(state.endpoints_for(&participant).is_empty());

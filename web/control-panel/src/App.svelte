@@ -44,6 +44,7 @@
   let newNetworkName = '';
   let addNetworkOpen = false;
   let addDeviceOpen = false;
+  let diagnosticsOpen = false;
   let shownNetworkId = '';
   let selectedParticipantKey = '';
   let deviceSearch = '';
@@ -64,13 +65,43 @@
     listenPort: '',
     relays: '',
     advertisedRoutes: '',
-    magicDnsSuffix: '',
+    fipsHostTunnelEnabled: false,
+    connectToNonRosterFipsPeers: true,
+    fipsNostrDiscoveryEnabled: true,
+    fipsBootstrapEnabled: true,
+    fipsBootstrapPeers: '',
+    fipsHostInboundTcpPorts: '',
     autoconnect: false,
   };
 
-  $: activeNetwork = state ? state.networks.find((network) => network.enabled) ?? state.networks[0] ?? null : null;
+  // The bootstrap/transit peer list is edited as one "npub addr, addr" line per
+  // peer, round-tripped to the npub -> addresses map the backend stores.
+  function bootstrapPeersToText(peers: Record<string, string[]>): string {
+    return Object.entries(peers ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([npub, addrs]) => `${npub} ${addrs.join(', ')}`.trim())
+      .join('\n');
+  }
+
+  function textToBootstrapPeers(text: string): Record<string, string[]> {
+    const peers: Record<string, string[]> = {};
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const [npub, ...rest] = trimmed.split(/\s+/);
+      const addrs = rest
+        .join(' ')
+        .split(/[\s,]+/)
+        .map((addr) => addr.trim())
+        .filter(Boolean);
+      if (npub && addrs.length > 0) peers[npub] = addrs;
+    }
+    return peers;
+  }
+
+  $: activeNetwork = state ? state.networks.find((network) => network.enabled) ?? null : null;
   $: shownNetwork = state
-    ? state.networks.find((network) => network.id === shownNetworkId) ?? activeNetwork
+    ? state.networks.find((network) => network.id === shownNetworkId) ?? activeNetwork ?? state.networks[0] ?? null
     : null;
   $: incomingJoinRequestCount = state
     ? state.networks.reduce((count, network) => count + network.inboundJoinRequests.length, 0)
@@ -168,9 +199,21 @@
       listenPort: String(next.listenPort || ''),
       relays: relays.map((relay) => relay.url).join('\n'),
       advertisedRoutes: next.advertisedRoutes.join(', '),
-      magicDnsSuffix: next.magicDnsSuffix,
+      fipsHostTunnelEnabled: next.fipsHostTunnelEnabled,
+      connectToNonRosterFipsPeers: next.connectToNonRosterFipsPeers,
+      fipsNostrDiscoveryEnabled: next.fipsNostrDiscoveryEnabled,
+      fipsBootstrapEnabled: next.fipsBootstrapEnabled,
+      fipsBootstrapPeers: bootstrapPeersToText(next.fipsBootstrapPeers),
+      fipsHostInboundTcpPorts: next.fipsHostInboundTcpPorts,
       autoconnect: next.autoconnect,
     };
+  }
+
+  function resetBootstrapPeers() {
+    settingsDraft.fipsBootstrapPeers = bootstrapPeersToText(
+      state?.fipsBootstrapPeerDefaults ?? {},
+    );
+    settingsDirty = true;
   }
 
   function syncWireGuard(next: UiState) {
@@ -792,7 +835,12 @@
           .map((relay) => relay.trim())
           .filter(Boolean),
         advertisedRoutes: settingsDraft.advertisedRoutes,
-        magicDnsSuffix: settingsDraft.magicDnsSuffix,
+        fipsHostTunnelEnabled: settingsDraft.fipsHostTunnelEnabled,
+        connectToNonRosterFipsPeers: settingsDraft.connectToNonRosterFipsPeers,
+        fipsNostrDiscoveryEnabled: settingsDraft.fipsNostrDiscoveryEnabled,
+        fipsBootstrapEnabled: settingsDraft.fipsBootstrapEnabled,
+        fipsBootstrapPeers: textToBootstrapPeers(settingsDraft.fipsBootstrapPeers),
+        fipsHostInboundTcpPorts: settingsDraft.fipsHostInboundTcpPorts,
         autoconnect: settingsDraft.autoconnect,
       },
       'Saving settings',
@@ -1717,10 +1765,6 @@
                 <input inputmode="numeric" bind:value={settingsDraft.listenPort} on:input={() => (settingsDirty = true)} />
               </label>
               <label>
-                <span>DNS Suffix</span>
-                <input bind:value={settingsDraft.magicDnsSuffix} on:input={() => (settingsDirty = true)} />
-              </label>
-              <label>
                 <span>Advertised Routes</span>
                 <input bind:value={settingsDraft.advertisedRoutes} on:input={() => (settingsDirty = true)} />
               </label>
@@ -1740,14 +1784,80 @@
               <textarea bind:value={settingsDraft.relays} on:input={() => (settingsDirty = true)} rows="4"></textarea>
             </label>
 
-            <label class="switch-row">
-              <span>Autoconnect</span>
-              <input
-                type="checkbox"
-                bind:checked={settingsDraft.autoconnect}
-                on:change={() => (settingsDirty = true)}
-              />
-            </label>
+            <div class="settings-toggle-group">
+              <div class="settings-toggle-group-title">General</div>
+              <label class="switch-row">
+                <span>Start VPN automatically</span>
+                <input
+                  type="checkbox"
+                  bind:checked={settingsDraft.autoconnect}
+                  on:change={() => (settingsDirty = true)}
+                />
+              </label>
+            </div>
+
+            <div class="settings-toggle-group">
+              <div class="settings-toggle-group-title">FIPS</div>
+              <label class="switch-row">
+                <span>Route to npub.fips addresses outside VPN</span>
+                <input
+                  type="checkbox"
+                  bind:checked={settingsDraft.fipsHostTunnelEnabled}
+                  on:change={() => (settingsDirty = true)}
+                />
+              </label>
+
+              <label>
+                <span>Open inbound TCP ports</span>
+                <input
+                  placeholder="22, 443"
+                  bind:value={settingsDraft.fipsHostInboundTcpPorts}
+                  disabled={!settingsDraft.fipsHostTunnelEnabled}
+                  on:input={() => (settingsDirty = true)}
+                />
+              </label>
+
+              <label class="switch-row">
+                <span>Connect to non-roster FIPS peers</span>
+                <input
+                  type="checkbox"
+                  bind:checked={settingsDraft.connectToNonRosterFipsPeers}
+                  on:change={() => (settingsDirty = true)}
+                />
+              </label>
+
+              <label class="switch-row">
+                <span>Find peers over relays</span>
+                <input
+                  type="checkbox"
+                  bind:checked={settingsDraft.fipsNostrDiscoveryEnabled}
+                  on:change={() => (settingsDirty = true)}
+                />
+              </label>
+
+              <label class="switch-row">
+                <span>Use bootstrap servers</span>
+                <input
+                  type="checkbox"
+                  bind:checked={settingsDraft.fipsBootstrapEnabled}
+                  on:change={() => (settingsDirty = true)}
+                />
+              </label>
+
+              {#if settingsDraft.fipsBootstrapEnabled}
+                <label>
+                  <span>Bootstrap servers</span>
+                  <textarea
+                    rows="4"
+                    bind:value={settingsDraft.fipsBootstrapPeers}
+                    on:input={() => (settingsDirty = true)}
+                  ></textarea>
+                </label>
+                <button type="button" class="secondary-button" on:click={resetBootstrapPeers}>
+                  Reset to defaults
+                </button>
+              {/if}
+            </div>
 
             <div class="button-row">
               <button type="submit" class="secondary-button" disabled={Boolean(busyAction)}>
@@ -1804,30 +1914,6 @@
           <div class="panel">
             <div class="section-heading">
               <div>
-                <h3>Diagnostics</h3>
-                <p>{state.health.length > 0 ? `${state.health.length} issues` : 'Healthy'}</p>
-              </div>
-            </div>
-            {#if state.health.length === 0}
-              <div class="empty-state">No health issues</div>
-            {:else}
-              <div class="stack">
-                {#each state.health as issue (issue.code)}
-                  <div class="issue-row">
-                    <span class="status-dot {issueTone(issue)}"></span>
-                    <div>
-                      <strong>{issue.summary}</strong>
-                      <span>{issue.detail}</span>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          </div>
-
-          <div class="panel">
-            <div class="section-heading">
-              <div>
                 <h3>System</h3>
                 <p>{state.appVersion}</p>
               </div>
@@ -1858,6 +1944,62 @@
                 <strong>{state.portMapping.externalEndpoint ?? '-'}</strong>
               </div>
             </div>
+          </div>
+
+          <div class="panel diagnostics-panel">
+            <button
+              type="button"
+              class="section-toggle"
+              aria-expanded={diagnosticsOpen}
+              on:click={() => (diagnosticsOpen = !diagnosticsOpen)}
+            >
+              <div>
+                <h3>Diagnostics</h3>
+                <p>{state.health.length > 0 ? `${state.health.length} issues` : 'Healthy'}</p>
+              </div>
+              <svg
+                class:open={diagnosticsOpen}
+                class="chevron-icon"
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                focusable="false"
+              >
+                <path d="M4 6l4 4 4-4" />
+              </svg>
+            </button>
+            {#if diagnosticsOpen}
+              <div class="diagnostics-body">
+                <div class="detail-list">
+                  <div>
+                    <span>Remote roster</span>
+                    <strong>{state.connectedPeerCount}/{state.expectedPeerCount}</strong>
+                  </div>
+                  <div>
+                    <span>Roster FIPS</span>
+                    <strong>{state.fipsConnectedPeerCount}/{state.fipsRosterPeerCount} direct</strong>
+                  </div>
+                  <div>
+                    <span>Other FIPS</span>
+                    <strong>{state.nonFipsRosterPeerCount}</strong>
+                  </div>
+                </div>
+                {#if state.health.length === 0}
+                  <div class="empty-state">No health issues</div>
+                {:else}
+                  <div class="stack">
+                    {#each state.health as issue (issue.code)}
+                      <div class="issue-row">
+                        <span class="status-dot {issueTone(issue)}"></span>
+                        <div>
+                          <strong>{issue.summary}</strong>
+                          <span>{issue.detail}</span>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </div>
         </section>
       {/if}

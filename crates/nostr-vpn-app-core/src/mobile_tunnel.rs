@@ -25,13 +25,16 @@ use fips_endpoint::{
 use nostr_vpn_core::config::{
     AppConfig, MESH_TUNNEL_IPV4_CIDR, WireGuardExitConfig, derive_mesh_tunnel_ip,
     maybe_autoconfigure_node, normalize_nostr_pubkey, normalize_runtime_network_id,
+    split_peer_transport_addr,
 };
 use nostr_vpn_core::fips_control::{
     FipsControlFragmentBuffer, FipsControlFrame, NetworkRoster, PeerCapabilities, PeerEndpointHint,
-    decode_fips_control_frame, encode_fips_control_frame, peer_endpoint_hint_addr,
+    SignedRoster, decode_fips_control_frame, encode_fips_control_frame,
+    encode_fips_control_messages, peer_endpoint_hint_addr,
 };
 use nostr_vpn_core::fips_mesh::{FipsMeshPeerConfig, FipsMeshRuntime};
 use nostr_vpn_core::join_requests::{FIPS_JOIN_REQUEST_RETRY_SECS, MeshJoinRequest};
+use nostr_vpn_core::signed_rosters::{signed_rosters_file_path, upsert_signed_roster};
 use nostr_vpn_core::wg_upstream::{DAEMON_WG_UPSTREAM_HANDSHAKE_TIMEOUT, WgUpstreamRuntime};
 use serde::{Deserialize, Serialize};
 
@@ -66,6 +69,7 @@ const MOBILE_CAPABILITIES_BROADCAST_SECS: u64 = 30;
 const MOBILE_CAPABILITIES_STARTUP_BURST_COUNT: usize = 4;
 const MOBILE_CAPABILITIES_STARTUP_BURST_INTERVAL_MS: u64 = 750;
 const MOBILE_RUNTIME_STATE_REFRESH_SECS: u64 = 2;
+const MOBILE_ROSTER_RESEND_SECS: u64 = 10;
 const MOBILE_RUNTIME_STATE_FILE: &str = "mobile-runtime-state.json";
 const MOBILE_PEER_ONLINE_GRACE_SECS: u64 = 45;
 const MOBILE_PEER_ACTIVE_PING_INTERVAL_SECS: u64 = 10;
@@ -76,6 +80,7 @@ const MOBILE_HANDSHAKE_RESEND_BACKOFF: f64 = 1.5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct MobileTunnelConfig {
     #[serde(default)]
     pub(crate) config_path: String,
@@ -96,6 +101,11 @@ pub(crate) struct MobileTunnelConfig {
     pub(crate) peers: Vec<FipsMeshPeerConfig>,
     #[serde(default)]
     peer_hints: HashMap<String, Vec<FipsPeerAddressHint>>,
+    /// Bootstrap/transit peers (npub -> transport-tagged hints), kept separate
+    /// from learned `peer_hints` because these are dialed as fallback transit
+    /// (fanout), whereas learned hints only seed direct reconnects.
+    #[serde(default)]
+    bootstrap_peers: HashMap<String, Vec<FipsPeerAddressHint>>,
     pub(crate) route_targets: Vec<String>,
     #[serde(default)]
     pub(crate) nostr_relays: Vec<String>,
@@ -103,6 +113,13 @@ pub(crate) struct MobileTunnelConfig {
     pub(crate) stun_servers: Vec<String>,
     #[serde(default)]
     pub(crate) share_local_candidates: bool,
+    #[serde(default = "default_true")]
+    pub(crate) connect_to_non_roster_fips_peers: bool,
+    /// Find/advertise peers over Nostr relays. When false, the tunnel still
+    /// dials static + bootstrap peers and (when allowed) LAN, but does not use
+    /// relays for endpoint discovery or advertising.
+    #[serde(default = "default_true")]
+    pub(crate) nostr_discovery_enabled: bool,
     /// When the user has WG upstream enabled + configured, the OS-side
     /// (`NEPacketTunnelProvider` on iOS, `VpnService` on Android) is
     /// expected to:
@@ -139,10 +156,15 @@ pub(crate) struct MobileTunnelConfig {
     pub(crate) error: String,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl MobileTunnelConfig {
     pub(crate) fn from_data_dir(data_dir: &str) -> Result<Self> {
         let config_path = native_config_path(data_dir);
         let mut app = if config_path.exists() {
+            AppConfig::migrate_persisted_secrets(&config_path)?;
             AppConfig::load(&config_path)?
         } else {
             let generated = AppConfig::generated_without_networks();
@@ -160,6 +182,7 @@ impl MobileTunnelConfig {
         Self::from_app_with_config_path(app, Path::new(""))
     }
 
+    #[allow(clippy::too_many_lines)]
     fn from_app_with_config_path(app: &AppConfig, config_path: &Path) -> Result<Self> {
         let own_pubkey = app.own_nostr_pubkey_hex()?;
         let network_id = app.effective_network_id();
@@ -266,7 +289,7 @@ impl MobileTunnelConfig {
 
         Ok(Self {
             config_path: config_path.to_string_lossy().to_string(),
-            app_config_toml: app_config_toml(app)?,
+            app_config_toml: plaintext_app_config_toml(app)?,
             identity_nsec: app.nostr.secret_key.clone(),
             node_name: app.node_name.trim().to_string(),
             network_id,
@@ -279,10 +302,13 @@ impl MobileTunnelConfig {
             mtu: DEFAULT_MOBILE_MTU,
             peers,
             peer_hints: mobile_static_peer_hints(app),
+            bootstrap_peers: mobile_bootstrap_peer_hints(app),
             route_targets,
             nostr_relays: app.nostr.relays.clone(),
             stun_servers: app.nat.stun_servers.clone(),
             share_local_candidates: app.lan_discovery_enabled,
+            connect_to_non_roster_fips_peers: app.connect_to_non_roster_fips_peers,
+            nostr_discovery_enabled: app.fips_nostr_discovery_enabled,
             excluded_routes,
             dns_servers,
             wireguard_exit,
@@ -292,6 +318,17 @@ impl MobileTunnelConfig {
             pending_join_requested_at,
             error: String::new(),
         })
+    }
+
+    fn redact_for_launch_configuration(&mut self) {
+        self.app_config_toml.clear();
+        self.identity_nsec.clear();
+        self.invite_secret.clear();
+        self.pending_join_invite_secret.clear();
+        if let Some(wireguard_exit) = self.wireguard_exit.as_mut() {
+            wireguard_exit.private_key.clear();
+            wireguard_exit.peer_preshared_key.clear();
+        }
     }
 }
 
@@ -316,23 +353,32 @@ fn mobile_app_config(config: &MobileTunnelConfig) -> Result<AppConfig> {
 
     let config_path = non_empty_path(&config.config_path)
         .ok_or_else(|| anyhow!("mobile app config unavailable"))?;
+    AppConfig::migrate_persisted_secrets(&config_path)?;
     let mut app = AppConfig::load(&config_path)?;
     app.ensure_defaults();
     Ok(app)
 }
 
-fn app_config_toml(app: &AppConfig) -> Result<String> {
-    let mut app = app.clone();
-    app.ensure_defaults();
-    toml::to_string_pretty(&app).context("failed to encode mobile app config TOML")
+fn plaintext_app_config_toml(app: &AppConfig) -> Result<String> {
+    app.plaintext_toml()
+        .context("failed to encode mobile app config TOML")
+}
+
+fn persisted_app_config_toml(app: &AppConfig, config_path: &Path) -> Result<String> {
+    if config_path.as_os_str().is_empty() {
+        return plaintext_app_config_toml(app);
+    }
+    app.persisted_toml_for_path(config_path)
+        .context("failed to encode mobile app config TOML")
 }
 
 pub(crate) fn tunnel_config_json(data_dir: &str) -> String {
-    let config =
+    let mut config =
         MobileTunnelConfig::from_data_dir(data_dir).unwrap_or_else(|error| MobileTunnelConfig {
             error: error.to_string(),
             ..empty_config()
         });
+    config.redact_for_launch_configuration();
     serde_json::to_string(&config).unwrap_or_else(|error| {
         format!(
             r#"{{"error":"{}"}}"#,
@@ -376,6 +422,13 @@ impl MobileTunnel {
             return Err(anyhow!(config.error));
         }
         let app_config = mobile_app_config(&config)?;
+        let config = if config.app_config_toml.trim().is_empty() {
+            let config_path = non_empty_path(&config.config_path)
+                .ok_or_else(|| anyhow!("mobile tunnel config path unavailable"))?;
+            MobileTunnelConfig::from_app_with_config_path(&app_config, &config_path)?
+        } else {
+            config
+        };
         mobile_debug_log("MobileTunnel::start building tokio runtime");
         let runtime = RuntimeBuilder::new_multi_thread()
             .worker_threads(2)
@@ -691,6 +744,32 @@ impl MobileTunnel {
             }));
         }
 
+        if let Some(config_path) = config_path.clone() {
+            let endpoint = Arc::clone(&endpoint);
+            let mesh = Arc::clone(&mesh);
+            let presence = Arc::clone(&presence);
+            let app_config = Arc::clone(&app_config);
+            tasks.push(tokio::spawn(async move {
+                let mut sent_by_peer = HashMap::<String, MobileRosterSentState>::new();
+                loop {
+                    if let Err(error) = sync_mobile_signed_roster_with_connected_peers(
+                        &endpoint,
+                        &mesh,
+                        &presence,
+                        &app_config,
+                        &config_path,
+                        &mut sent_by_peer,
+                    )
+                    .await
+                    {
+                        tracing::warn!(?error, "mobile: failed to sync signed roster");
+                    }
+                    tokio::time::sleep(Duration::from_secs(MOBILE_RUNTIME_STATE_REFRESH_SECS))
+                        .await;
+                }
+            }));
+        }
+
         let recv_task = {
             let endpoint = Arc::clone(&endpoint);
             let mesh = Arc::clone(&mesh);
@@ -820,7 +899,14 @@ impl MobileTunnel {
             .app_config
             .read()
             .map_err(|_| anyhow!("mobile app config lock poisoned"))?;
-        match app_config_toml(&app) {
+        let config_path = self
+            .config
+            .read()
+            .map_err(|_| anyhow!("mobile FIPS config lock poisoned"))?
+            .config_path
+            .clone();
+        let config_path = non_empty_path(&config_path).unwrap_or_else(|| PathBuf::from(""));
+        match persisted_app_config_toml(&app, &config_path) {
             Ok(toml) => Ok(toml),
             Err(error) => {
                 self.app_config_dirty.store(true, Ordering::Relaxed);
@@ -940,7 +1026,11 @@ async fn handle_mobile_control_frame(
     note_mobile_peer_rx(presence, &source_pubkey, message.data.len());
 
     match frame {
-        FipsControlFrame::Roster { network_id, roster } => {
+        FipsControlFrame::Roster {
+            network_id,
+            roster,
+            signed_roster,
+        } => {
             apply_mobile_roster_frame(
                 endpoint,
                 mesh,
@@ -954,6 +1044,7 @@ async fn handle_mobile_control_frame(
                 &source_pubkey,
                 &network_id,
                 &roster,
+                signed_roster.as_deref(),
             )
             .await?;
         }
@@ -967,7 +1058,8 @@ async fn handle_mobile_control_frame(
                     &source_pubkey,
                     &capabilities,
                 )?;
-                refresh_mobile_endpoint_peers(endpoint, mesh_peers, peer_hints).await?;
+                refresh_mobile_endpoint_peers(endpoint, mesh_peers, peer_hints, config_state)
+                    .await?;
             }
         }
         FipsControlFrame::Ping {
@@ -1017,6 +1109,7 @@ async fn apply_mobile_roster_frame(
     source_pubkey: &str,
     network_id: &str,
     roster: &NetworkRoster,
+    signed_roster: Option<&SignedRoster>,
 ) -> Result<()> {
     let Some(updated) = apply_mobile_roster(
         app_config,
@@ -1025,6 +1118,7 @@ async fn apply_mobile_roster_frame(
         source_pubkey,
         network_id,
         roster,
+        signed_roster,
     )?
     else {
         return Ok(());
@@ -1059,7 +1153,7 @@ async fn apply_mobile_roster_frame(
     if updated.pending_join_request_recipient.trim().is_empty() {
         join_request_active.store(false, Ordering::Relaxed);
     }
-    refresh_mobile_endpoint_peers(endpoint, mesh_peers, peer_hints).await
+    refresh_mobile_endpoint_peers(endpoint, mesh_peers, peer_hints, config_state).await
 }
 
 async fn reply_mobile_ping(
@@ -1141,20 +1235,47 @@ fn apply_mobile_roster(
     sender_pubkey: &str,
     network_id: &str,
     roster: &NetworkRoster,
+    signed_roster: Option<&SignedRoster>,
 ) -> Result<Option<MobileTunnelConfig>> {
     let mut app = app_config
         .write()
         .map_err(|_| anyhow!("mobile app config lock poisoned"))?;
     app.ensure_defaults();
+    let (apply_network_id, apply_roster, signed_by) = if let Some(signed_roster) = signed_roster {
+        signed_roster.verify()?;
+        (
+            signed_roster.network_id()?,
+            signed_roster.roster()?,
+            signed_roster.signer_pubkey_hex()?,
+        )
+    } else {
+        (
+            network_id.to_string(),
+            roster.clone(),
+            sender_pubkey.to_string(),
+        )
+    };
     let changed = app.apply_admin_signed_shared_roster(
-        network_id,
-        &roster.network_name,
-        roster.participants.clone(),
-        roster.admins.clone(),
-        roster.aliases.clone(),
-        roster.signed_at,
-        sender_pubkey,
+        &apply_network_id,
+        &apply_roster.network_name,
+        apply_roster.participants.clone(),
+        apply_roster.admins.clone(),
+        apply_roster.aliases.clone(),
+        apply_roster.signed_at,
+        &signed_by,
     )?;
+    if let (Some(config_path), Some(signed_roster)) = (config_path, signed_roster)
+        && mobile_signed_roster_is_current_for_app(&app, &apply_network_id, signed_roster)
+        && let Err(error) = upsert_signed_roster(
+            &signed_rosters_file_path(config_path),
+            signed_roster.clone(),
+        )
+    {
+        mobile_debug_log(format!(
+            "mobile: signed roster saved in config but artifact save failed: {error:#}"
+        ));
+        tracing::warn!(?error, "mobile: signed roster artifact save failed");
+    }
     if !changed {
         return Ok(None);
     }
@@ -1173,6 +1294,23 @@ fn apply_mobile_roster(
     app_config_dirty.store(true, Ordering::Relaxed);
     let config_path = config_path.unwrap_or_else(|| Path::new(""));
     MobileTunnelConfig::from_app_with_config_path(&app, config_path).map(Some)
+}
+
+fn mobile_signed_roster_is_current_for_app(
+    app: &AppConfig,
+    network_id: &str,
+    signed_roster: &SignedRoster,
+) -> bool {
+    let Ok(signed_by) = signed_roster.signer_pubkey_hex() else {
+        return false;
+    };
+    app.networks.iter().any(|network| {
+        normalize_runtime_network_id(&network.network_id)
+            == normalize_runtime_network_id(network_id)
+            && network.shared_roster_updated_at == signed_roster.signed_at()
+            && normalize_nostr_pubkey(&network.shared_roster_signed_by)
+                .is_ok_and(|value| value == signed_by)
+    })
 }
 
 fn record_mobile_join_request(
@@ -1629,6 +1767,7 @@ async fn refresh_mobile_endpoint_peers(
     endpoint: &FipsEndpoint,
     mesh_peers: &Arc<RwLock<Vec<FipsMeshPeerConfig>>>,
     peer_hints: &Arc<RwLock<HashMap<String, Vec<FipsPeerAddressHint>>>>,
+    config_state: &Arc<RwLock<MobileTunnelConfig>>,
 ) -> Result<()> {
     let peers = mesh_peers
         .read()
@@ -1638,8 +1777,13 @@ async fn refresh_mobile_endpoint_peers(
         .read()
         .map_err(|_| anyhow!("mobile FIPS peer hint lock poisoned"))?
         .clone();
+    let bootstrap = config_state
+        .read()
+        .map_err(|_| anyhow!("mobile FIPS config lock poisoned"))?
+        .bootstrap_peers
+        .clone();
     endpoint
-        .update_peers(fips_peer_configs_from_mesh(&peers, &hints))
+        .update_peers(fips_peer_configs_from_mesh(&peers, &hints, &bootstrap))
         .await
         .context("mobile FIPS peer update failed")?;
     Ok(())
@@ -1679,6 +1823,123 @@ async fn broadcast_mobile_capabilities(
         }
     }
     Ok(sent)
+}
+
+struct MobileRosterSentState {
+    hash: String,
+    sent_at: u64,
+}
+
+async fn sync_mobile_signed_roster_with_connected_peers(
+    endpoint: &FipsEndpoint,
+    mesh: &Arc<RwLock<FipsMeshRuntime>>,
+    presence: &Arc<RwLock<HashMap<String, MobilePeerPresence>>>,
+    app_config: &Arc<RwLock<AppConfig>>,
+    config_path: &Path,
+    sent_by_peer: &mut HashMap<String, MobileRosterSentState>,
+) -> Result<usize> {
+    let Some(signed_roster) = mobile_current_signed_roster_from_store(app_config, config_path)?
+    else {
+        sent_by_peer.clear();
+        return Ok(0);
+    };
+    let now = unix_timestamp();
+    let roster_hash = signed_roster.content_hash();
+    let frame = FipsControlFrame::Roster {
+        network_id: signed_roster.network_id()?,
+        roster: signed_roster.roster()?,
+        signed_roster: Some(Box::new(signed_roster)),
+    };
+    let messages = encode_fips_control_messages(&frame)?;
+    let connected = mobile_connected_roster_peers(mesh, presence)?;
+    sent_by_peer.retain(|peer, _| connected.contains_key(peer));
+
+    let mut sent = 0usize;
+    for (participant, endpoint_npub) in connected {
+        if sent_by_peer.get(&participant).is_some_and(|sent| {
+            sent.hash == roster_hash && now.saturating_sub(sent.sent_at) < MOBILE_ROSTER_RESEND_SECS
+        }) {
+            continue;
+        }
+        let mut all_sent = true;
+        for message in &messages {
+            if endpoint
+                .send(endpoint_npub.clone(), message.clone())
+                .await
+                .is_err()
+            {
+                all_sent = false;
+                break;
+            }
+        }
+        if all_sent {
+            sent_by_peer.insert(
+                participant,
+                MobileRosterSentState {
+                    hash: roster_hash.clone(),
+                    sent_at: now,
+                },
+            );
+            sent += 1;
+        }
+    }
+    Ok(sent)
+}
+
+fn mobile_current_signed_roster_from_store(
+    app_config: &Arc<RwLock<AppConfig>>,
+    config_path: &Path,
+) -> Result<Option<SignedRoster>> {
+    let app = app_config
+        .read()
+        .map_err(|_| anyhow!("mobile app config lock poisoned"))?;
+    let Some(network) = app.active_network_opt() else {
+        return Ok(None);
+    };
+    let network_id = normalize_runtime_network_id(&network.network_id);
+    let signed_by = normalize_nostr_pubkey(&network.shared_roster_signed_by).unwrap_or_default();
+    if network_id.is_empty() || signed_by.is_empty() || network.shared_roster_updated_at == 0 {
+        return Ok(None);
+    }
+    let store = nostr_vpn_core::signed_rosters::load_signed_rosters(&signed_rosters_file_path(
+        config_path,
+    ))?;
+    let Some(signed_roster) = store.latest_for(&network_id).cloned() else {
+        return Ok(None);
+    };
+    if signed_roster.signed_at() != network.shared_roster_updated_at {
+        return Ok(None);
+    }
+    if signed_roster.signer_pubkey_hex()? != signed_by {
+        return Ok(None);
+    }
+    Ok(Some(signed_roster))
+}
+
+fn mobile_connected_roster_peers(
+    mesh: &Arc<RwLock<FipsMeshRuntime>>,
+    presence: &Arc<RwLock<HashMap<String, MobilePeerPresence>>>,
+) -> Result<HashMap<String, String>> {
+    let now = unix_timestamp();
+    let peers = mesh
+        .read()
+        .map_err(|_| anyhow!("mobile FIPS mesh lock poisoned"))?
+        .peer_statuses();
+    let presence = presence
+        .read()
+        .map_err(|_| anyhow!("mobile FIPS presence lock poisoned"))?;
+    Ok(peers
+        .into_iter()
+        .filter(|peer| {
+            presence
+                .get(&peer.pubkey)
+                .and_then(|entry| entry.last_seen_at)
+                .is_some_and(|last_seen_at| {
+                    now.saturating_sub(last_seen_at) <= MOBILE_PEER_ONLINE_GRACE_SECS
+                })
+        })
+        .map(|peer| (peer.pubkey, peer.endpoint_npub))
+        .collect())
 }
 
 fn pending_mobile_join_request_frame(
@@ -1747,6 +2008,7 @@ fn mobile_endpoint_hints_with_candidates(
 fn fips_peer_configs_from_mesh(
     peers: &[FipsMeshPeerConfig],
     peer_hints: &HashMap<String, Vec<FipsPeerAddressHint>>,
+    bootstrap_peers: &HashMap<String, Vec<FipsPeerAddressHint>>,
 ) -> Vec<FipsPeerConfig> {
     let mut configs = Vec::new();
     let mut included = std::collections::HashSet::new();
@@ -1765,11 +2027,30 @@ fn fips_peer_configs_from_mesh(
             continue;
         }
         if let Ok(peer) = FipsMeshPeerConfig::from_participant_pubkey(participant, Vec::new()) {
+            // Learned non-roster hints are authenticated overlay peers; without
+            // fallback transit, they are warm sessions with little use.
             configs.push(fips_peer_config_from_hint(
                 &peer.endpoint_npub,
                 Some(hints),
-                false,
+                true,
             ));
+            included.insert(participant.clone());
+        }
+    }
+
+    // Bootstrap/transit peers ferry frames as fallback transit; route targets
+    // still come exclusively from the roster.
+    for (participant, hints) in bootstrap_peers {
+        if included.contains(participant) || hints.is_empty() {
+            continue;
+        }
+        if let Ok(peer) = FipsMeshPeerConfig::from_participant_pubkey(participant, Vec::new()) {
+            configs.push(fips_peer_config_from_hint(
+                &peer.endpoint_npub,
+                Some(hints),
+                true,
+            ));
+            included.insert(participant.clone());
         }
     }
 
@@ -1787,7 +2068,8 @@ fn fips_peer_config_from_hint(
         .into_iter()
         .flatten()
         .map(|hint| {
-            let mut addr = PeerAddress::new("udp", hint.addr.clone());
+            let (transport, addr) = split_peer_transport_addr(&hint.addr);
+            let mut addr = PeerAddress::new(transport, addr);
             if let Some(seen_at_ms) = hint.seen_at_ms {
                 addr = addr.with_seen_at_ms(seen_at_ms);
             }
@@ -1805,27 +2087,50 @@ fn fips_peer_config_from_hint(
 }
 
 fn mobile_static_peer_hints(app: &AppConfig) -> HashMap<String, Vec<FipsPeerAddressHint>> {
-    app.fips_static_peer_endpoints()
+    let mut hints = fips_address_hints(app.fips_static_peer_endpoints());
+    for value in hints.values_mut() {
+        value.sort_by(|left, right| left.addr.cmp(&right.addr));
+        value.dedup_by(|left, right| left.addr == right.addr);
+    }
+    hints
+}
+
+/// The configured bootstrap/transit peers as address hints, dialed as fallback
+/// transit (separate from learned `peer_hints`).
+fn mobile_bootstrap_peer_hints(app: &AppConfig) -> HashMap<String, Vec<FipsPeerAddressHint>> {
+    let mut hints = fips_address_hints(app.fips_bootstrap_peer_endpoints());
+    for value in hints.values_mut() {
+        value.sort_by(|left, right| left.addr.cmp(&right.addr));
+        value.dedup_by(|left, right| left.addr == right.addr);
+    }
+    hints
+}
+
+fn fips_address_hints(
+    endpoints: Vec<(String, Vec<String>)>,
+) -> HashMap<String, Vec<FipsPeerAddressHint>> {
+    endpoints
         .into_iter()
         .filter_map(|(participant, endpoints)| {
             let participant = normalize_nostr_pubkey(&participant).ok()?;
-            let mut hints = endpoints
+            let hints = endpoints
                 .into_iter()
                 .filter_map(|endpoint| {
-                    let hint = PeerEndpointHint::udp(endpoint.trim().to_string());
+                    // Validate the host:port part but keep the transport tag, so
+                    // tcp: bootstrap addresses survive into the peer config.
+                    let (transport, rest) = split_peer_transport_addr(endpoint.trim());
+                    let hint = PeerEndpointHint::udp(rest);
                     peer_endpoint_hint_addr(&hint).map(|addr| FipsPeerAddressHint {
-                        addr,
+                        addr: if transport == "udp" {
+                            addr
+                        } else {
+                            format!("{transport}:{addr}")
+                        },
                         seen_at_ms: None,
                     })
                 })
                 .collect::<Vec<_>>();
-            hints.sort_by(|left, right| left.addr.cmp(&right.addr));
-            hints.dedup_by(|left, right| left.addr == right.addr);
-            if hints.is_empty() {
-                None
-            } else {
-                Some((participant, hints))
-            }
+            (!hints.is_empty()).then_some((participant, hints))
         })
         .collect()
 }
@@ -1867,20 +2172,21 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
     config.node.limits.max_links = MOBILE_MAX_FIPS_LINKS;
     let join_request_pending = !mobile.pending_join_request_recipient.trim().is_empty()
         && mobile.pending_join_requested_at != 0;
-    let nostr_enabled = mobile.join_requests_enabled
-        || join_request_pending
-        || !mobile.peers.is_empty()
-        || !mobile.peer_hints.is_empty();
+    let nostr_enabled = mobile.nostr_discovery_enabled
+        && (mobile.join_requests_enabled
+            || join_request_pending
+            || !mobile.peers.is_empty()
+            || !mobile.peer_hints.is_empty());
     config.node.discovery.nostr.enabled = nostr_enabled;
     // Publish only the generic `udp:nat` overlay advert so roster peers can
     // bootstrap encrypted traversal offers to mobile nodes. LAN addresses are
     // not placed in that public advert; when enabled, they are carried inside
     // encrypted traversal signaling/control frames.
     config.node.discovery.nostr.advertise = nostr_enabled;
-    // Join-request mode needs Open discovery so unknown devices can reach the
-    // mobile admin/requester. Otherwise keep roster discovery scoped to
-    // configured peers.
-    config.node.discovery.nostr.policy = if mobile.join_requests_enabled || join_request_pending {
+    config.node.discovery.nostr.policy = if mobile.connect_to_non_roster_fips_peers
+        || mobile.join_requests_enabled
+        || join_request_pending
+    {
         NostrDiscoveryPolicy::Open
     } else {
         NostrDiscoveryPolicy::ConfiguredOnly
@@ -1927,7 +2233,24 @@ fn fips_endpoint_config(scope: &str, mobile: &MobileTunnelConfig) -> FipsConfig 
         public: Some(false),
         ..UdpConfig::default()
     });
-    config.peers = fips_peer_configs_from_mesh(&mobile.peers, &mobile.peer_hints);
+    config.peers =
+        fips_peer_configs_from_mesh(&mobile.peers, &mobile.peer_hints, &mobile.bootstrap_peers);
+    // Outbound TCP transport so peers reachable only over tcp:443 (UDP-blocked
+    // networks) can still be dialed. bind_addr=None keeps it outbound-only.
+    let needs_tcp = config.peers.iter().any(|peer| {
+        peer.addresses
+            .iter()
+            .any(|addr| addr.transport.eq_ignore_ascii_case("tcp"))
+    });
+    if needs_tcp {
+        // Default = outbound-only; inferred type avoids naming a possibly-second
+        // fips-core's TcpConfig (see fips_private_mesh for the same rationale), so
+        // we deliberately keep `Default::default()` over `TcpConfig::default()`.
+        #[allow(clippy::default_trait_access)]
+        {
+            config.transports.tcp = TransportInstances::Single(Default::default());
+        }
+    }
     config
 }
 
@@ -2155,10 +2478,13 @@ fn empty_config() -> MobileTunnelConfig {
         mtu: DEFAULT_MOBILE_MTU,
         peers: Vec::new(),
         peer_hints: HashMap::new(),
+        bootstrap_peers: HashMap::new(),
         route_targets: Vec::new(),
         nostr_relays: Vec::new(),
         stun_servers: Vec::new(),
         share_local_candidates: false,
+        connect_to_non_roster_fips_peers: true,
+        nostr_discovery_enabled: true,
         excluded_routes: Vec::new(),
         dns_servers: Vec::new(),
         wireguard_exit: None,
@@ -2314,7 +2640,8 @@ mod tests {
                 seen_at_ms: None,
             }]
         );
-        let endpoint_config = fips_peer_configs_from_mesh(&config.peers, &config.peer_hints);
+        let endpoint_config =
+            fips_peer_configs_from_mesh(&config.peers, &config.peer_hints, &config.bootstrap_peers);
         let endpoint_peer = endpoint_config
             .iter()
             .find(|peer| peer.npub == admin_npub)
@@ -2343,6 +2670,9 @@ mod tests {
             shared_roster_updated_at: 0,
             shared_roster_signed_by: String::new(),
         }];
+        // Isolate the admin-listener behavior from the built-in bootstrap nodes,
+        // which would otherwise populate config.peers as fallback transit.
+        app.fips_bootstrap_enabled = false;
         app.ensure_defaults();
 
         let mobile = MobileTunnelConfig::from_app(&app).expect("mobile config");
@@ -2357,6 +2687,37 @@ mod tests {
             NostrDiscoveryPolicy::Open
         );
         assert!(config.peers.is_empty());
+    }
+
+    #[test]
+    fn mobile_config_seeds_bootstrap_transit_peers() {
+        let app = AppConfig::generated();
+        let mobile = MobileTunnelConfig::from_app(&app).expect("mobile config");
+        let config = fips_endpoint_config("nostr-vpn:test", &mobile);
+
+        let bootstrap_count = nostr_vpn_core::config::DEFAULT_FIPS_BOOTSTRAP_PEERS.len();
+        assert_eq!(config.peers.len(), bootstrap_count);
+        assert!(
+            config
+                .peers
+                .iter()
+                .all(|peer| peer.discovery_fallback_transit)
+        );
+        assert!(mobile.nostr_discovery_enabled);
+    }
+
+    #[test]
+    fn mobile_config_omits_bootstrap_and_relays_when_disabled() {
+        let mut app = AppConfig::generated();
+        app.fips_bootstrap_enabled = false;
+        app.fips_nostr_discovery_enabled = false;
+        app.ensure_defaults();
+        let mobile = MobileTunnelConfig::from_app(&app).expect("mobile config");
+        let config = fips_endpoint_config("nostr-vpn:test", &mobile);
+
+        assert!(config.peers.is_empty());
+        assert!(!config.node.discovery.nostr.enabled);
+        assert!(!config.node.discovery.nostr.advertise);
     }
 
     #[test]
@@ -2958,6 +3319,85 @@ mod tests {
     }
 
     #[test]
+    fn mobile_tunnel_launch_config_redacts_persisted_secrets() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-mobile-launch-redaction-{nonce}"));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("config.toml");
+
+        let mut app = AppConfig::generated();
+        app.ensure_defaults();
+        let own = app.own_nostr_pubkey_hex().expect("own pubkey");
+        let secret_key = app.nostr.secret_key.clone();
+        let peer = "26525c442dd039de4e728b41ee8d7f717b267ab25b7c219d53a3249e1c9174cc";
+        app.networks = vec![NetworkConfig {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            enabled: true,
+            network_id: "test".to_string(),
+            invite_secret: "join-secret".to_string(),
+            participants: vec![peer.to_string()],
+            admins: vec![own],
+            listen_for_join_requests: true,
+            invite_inviter: String::new(),
+            outbound_join_request: None,
+            inbound_join_requests: Vec::new(),
+            shared_roster_updated_at: 0,
+            shared_roster_signed_by: String::new(),
+        }];
+        app.wireguard_exit = WireGuardExitConfig {
+            enabled: true,
+            address: "10.99.99.2/32".to_string(),
+            private_key: "client-private-key".to_string(),
+            peer_public_key: "server-public-key".to_string(),
+            peer_preshared_key: "client-peer-psk".to_string(),
+            endpoint: "198.51.100.20:51820".to_string(),
+            allowed_ips: vec!["0.0.0.0/0".to_string()],
+            ..WireGuardExitConfig::default()
+        };
+        app.save(&path).expect("save config");
+
+        let json = tunnel_config_json(dir.to_str().expect("utf8 temp dir"));
+        assert!(!json.contains(&secret_key));
+        assert!(!json.contains("join-secret"));
+        assert!(!json.contains("client-private-key"));
+        assert!(!json.contains("client-peer-psk"));
+        assert!(json.contains("198.51.100.20:51820"));
+
+        let launch_config: MobileTunnelConfig = serde_json::from_str(&json).expect("launch config");
+        assert!(launch_config.app_config_toml.is_empty());
+        assert!(launch_config.identity_nsec.is_empty());
+        assert!(launch_config.invite_secret.is_empty());
+        assert!(launch_config.pending_join_invite_secret.is_empty());
+        assert_eq!(
+            launch_config
+                .wireguard_exit
+                .as_ref()
+                .expect("wireguard exit")
+                .private_key,
+            ""
+        );
+
+        let loaded = mobile_app_config(&launch_config).expect("load app config from path");
+        let runtime_config =
+            MobileTunnelConfig::from_app_with_config_path(&loaded, &path).expect("runtime config");
+        assert_eq!(runtime_config.identity_nsec, secret_key);
+        assert_eq!(
+            runtime_config
+                .wireguard_exit
+                .as_ref()
+                .expect("runtime wireguard")
+                .private_key,
+            "client-private-key"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn mobile_config_json_reports_errors_as_json() {
         let json = tunnel_config_json("\0/not-a-path");
         let value: serde_json::Value = serde_json::from_str(&json).expect("json");
@@ -3012,7 +3452,7 @@ mod tests {
         assert!(config.node.discovery.lan.enabled);
         assert_eq!(
             config.node.discovery.nostr.policy,
-            NostrDiscoveryPolicy::ConfiguredOnly
+            NostrDiscoveryPolicy::Open
         );
         assert_eq!(
             config.node.discovery.nostr.open_discovery_max_pending,
@@ -3062,6 +3502,26 @@ mod tests {
         );
         assert_eq!(config.node.limits.max_links, MOBILE_MAX_FIPS_LINKS);
         assert!(config.peers[0].discovery_fallback_transit);
+    }
+
+    #[test]
+    fn mobile_fips_config_can_scope_discovery_to_roster_peers() {
+        let peer = FipsMeshPeerConfig::from_participant_pubkey(
+            "26525c442dd039de4e728b41ee8d7f717b267ab25b7c219d53a3249e1c9174cc",
+            vec!["10.44.22.44/32".to_string()],
+        )
+        .expect("peer");
+        let mobile = MobileTunnelConfig {
+            peers: vec![peer],
+            connect_to_non_roster_fips_peers: false,
+            ..empty_config()
+        };
+        let config = fips_endpoint_config("nostr-vpn:test", &mobile);
+
+        assert_eq!(
+            config.node.discovery.nostr.policy,
+            NostrDiscoveryPolicy::ConfiguredOnly
+        );
     }
 
     #[test]
@@ -3158,8 +3618,8 @@ mod tests {
         assert_eq!(transit_config.addresses[0].addr, "192.168.50.33:51820");
         assert_eq!(transit_config.addresses[0].seen_at_ms, Some(1234));
         assert!(
-            !transit_config.discovery_fallback_transit,
-            "hinted non-roster peers seed direct reconnects but not fallback fanout"
+            transit_config.discovery_fallback_transit,
+            "hinted non-roster peers should be usable as fallback transit"
         );
     }
 

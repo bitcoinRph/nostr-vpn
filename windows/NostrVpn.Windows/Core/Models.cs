@@ -58,6 +58,11 @@ public sealed class NativeAppState
     public ushort WireguardExitMtu { get; set; }
     public ushort WireguardExitPersistentKeepaliveSecs { get; set; }
     public string WireguardExitConfig { get; set; } = "";
+    public bool FipsHostTunnelEnabled { get; set; }
+    public bool ConnectToNonRosterFipsPeers { get; set; }
+    public bool FipsNostrDiscoveryEnabled { get; set; }
+    public bool FipsBootstrapEnabled { get; set; }
+    public string FipsHostInboundTcpPorts { get; set; } = "";
     public string MagicDnsSuffix { get; set; } = "";
     public string MagicDnsStatus { get; set; } = "";
     public bool Autoconnect { get; set; }
@@ -69,6 +74,9 @@ public sealed class NativeAppState
     public bool CloseToTrayOnClose { get; set; }
     public ulong ConnectedPeerCount { get; set; }
     public ulong ExpectedPeerCount { get; set; }
+    public ulong FipsConnectedPeerCount { get; set; }
+    public ulong FipsRosterPeerCount { get; set; }
+    public ulong NonFipsRosterPeerCount { get; set; }
     public bool MeshReady { get; set; }
     public List<NativeHealthIssue> Health { get; set; } = [];
     public NativeNetworkSummary Network { get; set; } = new();

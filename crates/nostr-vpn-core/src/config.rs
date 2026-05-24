@@ -23,8 +23,10 @@ pub use crate::network_routes::{
 };
 
 use crate::config_defaults::{
-    current_unix_timestamp, default_autoconnect, default_close_to_tray_on_close, default_endpoint,
-    default_fips_advertise_endpoint, default_invite_secret, default_lan_discovery_enabled,
+    current_unix_timestamp, default_autoconnect, default_close_to_tray_on_close,
+    default_connect_to_non_roster_fips_peers, default_endpoint, default_fips_advertise_endpoint,
+    default_fips_bootstrap_enabled, default_fips_host_tunnel_enabled,
+    default_fips_nostr_discovery_enabled, default_invite_secret, default_lan_discovery_enabled,
     default_launch_on_startup, default_listen_for_join_requests, default_listen_port,
     default_nat_discovery_timeout_secs, default_nat_enabled, default_nat_stun_servers,
     default_network_enabled, default_network_id, default_node_id, default_relays,
@@ -40,6 +42,10 @@ use crate::config_magic_dns::{
     default_peer_aliases, detected_hostname, normalize_network_entry_id, uniquify_magic_dns_label,
     uniquify_network_entry_id, uses_default_node_name,
 };
+use crate::config_secrets::{
+    SecretPersistence, config_file_needs_secret_migration, delete_config_secrets,
+    hydrate_config_secrets, prepare_config_secrets_for_save,
+};
 use crate::fips_control::{PeerEndpointHint, peer_endpoint_hint_addr};
 use crate::network_roster::{
     canonical_npub_key, canonicalize_inbound_join_requests, canonicalize_outbound_join_request,
@@ -50,6 +56,77 @@ use crate::network_routes::is_exit_node_route;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_RELAYS: &[&str] = &[];
+
+/// Built-in public FIPS bootstrap nodes, used to seed the editable peer list
+/// (`fips_bootstrap_peers`). Dialed as fallback transit so peers can reach each
+/// other when direct NAT traversal and relays fail. Addresses are transport
+/// tagged (`udp:` / `tcp:`); the `tcp:443` entries let clients on networks that
+/// block UDP outright still reach the overlay. (`tor:` endpoints are omitted —
+/// no Tor transport.) Keyed by npub.
+pub const DEFAULT_FIPS_BOOTSTRAP_PEERS: &[(&str, &[&str])] = &[
+    // test-de01
+    (
+        "npub1260n42s06vzc7796w0fh3ny7zcpw6tlk4gq3940gmfrzl5c9pv2s3657q8",
+        &["udp:217.160.76.169:2121"],
+    ),
+    // test-es01
+    (
+        "npub17lpmzulpc98d8ff727k6e98atxn3phzupzsqqwe54ytduym747ws4tw5zm",
+        &["udp:82.223.139.182:2121"],
+    ),
+    // test-uk01
+    (
+        "npub1u0z26dc4qeneu5rvwvmpfhtwh3522ed6rlgxr9jarrfnjrc6ew4qxjysrs",
+        &["udp:88.208.241.33:2121"],
+    ),
+    // test-us01
+    (
+        "npub1qmc3cvfz0yu2hx96nq3gp55zdan2qclealn7xshgr448d3nh6lks7zel98",
+        &["udp:217.77.8.91:2121", "tcp:217.77.8.91:443"],
+    ),
+    // test-us02
+    (
+        "npub10yffd020a4ag8zcy75f9pruq3rnghvvhd5hphl9s62zgp35s560qrksp9u",
+        &["udp:23.182.128.74:2121", "tcp:23.182.128.74:443"],
+    ),
+    // test-us03
+    (
+        "npub136yqae6na688fs75g95ppps3lxe07fvxefj77938zf47uhm6074sxw8ctm",
+        &["udp:54.183.70.180:2121", "tcp:54.183.70.180:443"],
+    ),
+    // test-us04
+    (
+        "npub1gd7ye2qp2lphhzx75fynnjzaxx4dqanddecet0wtt5ss5ek8h9ps62wdkf",
+        &["udp:74.208.245.160:2121"],
+    ),
+];
+
+/// The default bootstrap peer list as an owned map, used to seed configs and to
+/// power "reset to defaults".
+pub fn default_fips_bootstrap_peers() -> HashMap<String, Vec<String>> {
+    DEFAULT_FIPS_BOOTSTRAP_PEERS
+        .iter()
+        .map(|(npub, addrs)| {
+            (
+                (*npub).to_string(),
+                addrs.iter().map(|addr| (*addr).to_string()).collect(),
+            )
+        })
+        .collect()
+}
+
+/// Split a transport-tagged peer address ("udp:host:port" / "tcp:host:port")
+/// into `(transport, host:port)`. A bare "host:port" defaults to udp. Used to
+/// lower bootstrap/transit address strings into fips `PeerAddress` values.
+pub fn split_peer_transport_addr(value: &str) -> (String, String) {
+    let value = value.trim();
+    for transport in ["udp", "tcp", "tor"] {
+        if let Some(rest) = value.strip_prefix(&format!("{transport}:")) {
+            return (transport.to_string(), rest.trim().to_string());
+        }
+    }
+    ("udp".to_string(), value.to_string())
+}
 
 pub fn normalize_fips_peer_endpoint_hint(endpoint: &str) -> Option<String> {
     let endpoint = endpoint.trim();
@@ -140,6 +217,40 @@ pub struct AppConfig {
         skip_serializing_if = "is_true"
     )]
     pub fips_advertise_endpoint: bool,
+    #[serde(
+        default = "default_fips_host_tunnel_enabled",
+        skip_serializing_if = "is_false"
+    )]
+    pub fips_host_tunnel_enabled: bool,
+    #[serde(
+        default = "default_connect_to_non_roster_fips_peers",
+        skip_serializing_if = "is_true"
+    )]
+    pub connect_to_non_roster_fips_peers: bool,
+    /// Find/advertise FIPS peers over Nostr relays. When false, the node still
+    /// connects to LAN, static, and bootstrap peers but does not use relays for
+    /// endpoint discovery or advertising.
+    #[serde(
+        default = "default_fips_nostr_discovery_enabled",
+        skip_serializing_if = "is_true"
+    )]
+    pub fips_nostr_discovery_enabled: bool,
+    /// Master switch for dialing the bootstrap/transit peer list below. When off,
+    /// the list is kept but not dialed.
+    #[serde(
+        default = "default_fips_bootstrap_enabled",
+        skip_serializing_if = "is_true"
+    )]
+    pub fips_bootstrap_enabled: bool,
+    /// Editable transit/bootstrap peers (npub -> transport-tagged addresses),
+    /// seeded from `DEFAULT_FIPS_BOOTSTRAP_PEERS`. This is the single list that
+    /// holds both the built-in nodes and any custom peers the user adds. Always
+    /// serialized so edits (including clearing it) persist across loads; "reset
+    /// to defaults" restores the built-in set.
+    #[serde(default = "default_fips_bootstrap_peers")]
+    pub fips_bootstrap_peers: HashMap<String, Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fips_host_inbound_tcp_ports: Vec<u16>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub mesh_mtu_profile: String,
     #[serde(default, skip_serializing_if = "is_zero_u16")]
@@ -155,7 +266,7 @@ pub struct AppConfig {
     pub exit_node_leak_protection: bool,
     #[serde(default = "default_close_to_tray_on_close")]
     pub close_to_tray_on_close: bool,
-    #[serde(default = "default_magic_dns_suffix")]
+    #[serde(default = "default_magic_dns_suffix", skip)]
     pub magic_dns_suffix: String,
     #[serde(default, skip_serializing_if = "WireGuardExitConfig::is_default")]
     pub wireguard_exit: WireGuardExitConfig,
@@ -704,6 +815,12 @@ impl Default for AppConfig {
             autoconnect: default_autoconnect(),
             fips_peer_endpoints: HashMap::new(),
             fips_advertise_endpoint: default_fips_advertise_endpoint(),
+            fips_host_tunnel_enabled: default_fips_host_tunnel_enabled(),
+            connect_to_non_roster_fips_peers: default_connect_to_non_roster_fips_peers(),
+            fips_nostr_discovery_enabled: default_fips_nostr_discovery_enabled(),
+            fips_bootstrap_enabled: default_fips_bootstrap_enabled(),
+            fips_bootstrap_peers: default_fips_bootstrap_peers(),
+            fips_host_inbound_tcp_ports: Vec::new(),
             mesh_mtu_profile: String::new(),
             mesh_underlay_udp_mtu: 0,
             mesh_tunnel_mtu: 0,
@@ -779,24 +896,72 @@ impl AppConfig {
         let mut config: AppConfig =
             toml::from_str(&raw).with_context(|| "failed to parse config TOML")?;
         config.apply_load_migrations();
+        hydrate_config_secrets(path, &mut config)?;
         config.ensure_defaults();
         Ok(config)
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
+        self.save_with_secret_persistence(path, SecretPersistence::Platform)
+    }
+
+    pub fn save_plaintext(&self, path: &Path) -> Result<()> {
+        self.save(path)
+    }
+
+    pub fn delete_persisted_secrets_for_path(path: &Path) -> Result<()> {
+        delete_config_secrets(path)
+    }
+
+    pub fn config_file_needs_secret_migration(path: &Path) -> Result<bool> {
+        config_file_needs_secret_migration(path)
+    }
+
+    pub fn migrate_persisted_secrets(path: &Path) -> Result<bool> {
+        if !Self::config_file_needs_secret_migration(path)? {
+            return Ok(false);
+        }
+
+        let config = Self::load(path)?;
+        config.save(path)?;
+        Ok(true)
+    }
+
+    pub fn persisted_toml_for_path(&self, path: &Path) -> Result<String> {
+        self.toml_with_secret_persistence(path, SecretPersistence::Platform)
+    }
+
+    pub fn plaintext_toml(&self) -> Result<String> {
+        self.toml_with_secret_persistence(Path::new(""), SecretPersistence::Plaintext)
+    }
+
+    fn save_with_secret_persistence(
+        &self,
+        path: &Path,
+        persistence: SecretPersistence,
+    ) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
 
-        let mut to_write = self.clone();
-        to_write.ensure_defaults();
-        to_write.canonicalize_user_facing_pubkeys();
-
-        let raw = toml::to_string_pretty(&to_write).with_context(|| "failed to encode TOML")?;
+        let raw = self.toml_with_secret_persistence(path, persistence)?;
         write_config_file(path, raw.as_bytes())
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(())
+    }
+
+    fn toml_with_secret_persistence(
+        &self,
+        path: &Path,
+        persistence: SecretPersistence,
+    ) -> Result<String> {
+        let mut to_write = self.clone();
+        to_write.ensure_defaults();
+        to_write.canonicalize_user_facing_pubkeys();
+        prepare_config_secrets_for_save(path, &mut to_write, persistence)?;
+
+        toml::to_string_pretty(&to_write).with_context(|| "failed to encode TOML")
     }
 
     pub fn ensure_defaults(&mut self) {
@@ -819,6 +984,8 @@ impl AppConfig {
 
         self.mesh_mtu_profile = self.mesh_mtu_profile.trim().to_ascii_lowercase();
         self.magic_dns_suffix = normalize_magic_dns_suffix(&self.magic_dns_suffix);
+        self.fips_host_inbound_tcp_ports.sort_unstable();
+        self.fips_host_inbound_tcp_ports.dedup();
         normalize_wireguard_exit_config(&mut self.wireguard_exit);
         self.nostr.relays = normalize_relay_urls(std::mem::take(&mut self.nostr.relays));
         self.nostr.disabled_relays =
@@ -993,7 +1160,11 @@ impl AppConfig {
         let Some(network) = self.active_network_opt() else {
             return Vec::new();
         };
-        let mut participants = network.participants.clone();
+        let mut participants = network
+            .participants
+            .iter()
+            .filter_map(|participant| normalize_nostr_pubkey(participant).ok())
+            .collect::<Vec<_>>();
         participants.sort();
         participants.dedup();
         participants
@@ -1003,7 +1174,12 @@ impl AppConfig {
         let mut participants = self
             .networks
             .iter()
-            .flat_map(|network| network.participants.iter().cloned())
+            .flat_map(|network| {
+                network
+                    .participants
+                    .iter()
+                    .filter_map(|participant| normalize_nostr_pubkey(participant).ok())
+            })
             .collect::<Vec<_>>();
         participants.sort();
         participants.dedup();
@@ -1040,12 +1216,7 @@ impl AppConfig {
     }
 
     pub fn active_network_opt(&self) -> Option<&NetworkConfig> {
-        let index = self
-            .networks
-            .iter()
-            .position(|network| network.enabled)
-            .unwrap_or(0);
-        self.networks.get(index)
+        self.networks.iter().find(|network| network.enabled)
     }
 
     pub fn active_network_mut(&mut self) -> &mut NetworkConfig {
@@ -1054,12 +1225,7 @@ impl AppConfig {
     }
 
     pub fn active_network_mut_opt(&mut self) -> Option<&mut NetworkConfig> {
-        let index = self
-            .networks
-            .iter()
-            .position(|network| network.enabled)
-            .unwrap_or(0);
-        self.networks.get_mut(index)
+        self.networks.iter_mut().find(|network| network.enabled)
     }
 
     pub fn network_by_id(&self, network_id: &str) -> Option<&NetworkConfig> {
@@ -1143,12 +1309,6 @@ impl AppConfig {
             return Err(anyhow::anyhow!("network not found"));
         }
 
-        if !self.networks.iter().any(|network| network.enabled)
-            && let Some(first_network) = self.networks.first_mut()
-        {
-            first_network.enabled = true;
-        }
-
         self.normalize_selected_exit_node();
         self.normalize_peer_aliases();
         Ok(())
@@ -1166,12 +1326,6 @@ impl AppConfig {
                 network.enabled = candidate_index == index;
             }
             return Ok(());
-        }
-
-        if self.networks[index].enabled {
-            return Err(anyhow::anyhow!(
-                "activate another network before disabling this one"
-            ));
         }
 
         self.networks[index].enabled = false;
@@ -1431,8 +1585,12 @@ impl AppConfig {
         let network = self
             .network_by_id(network_id)
             .ok_or_else(|| anyhow::anyhow!("network not found"))?;
-        let mut members = network.participants.clone();
-        members.extend(network.admins.iter().cloned());
+        let mut members = network
+            .participants
+            .iter()
+            .chain(network.admins.iter())
+            .filter_map(|member| normalize_nostr_pubkey(member).ok())
+            .collect::<Vec<_>>();
         members.sort();
         members.dedup();
         Ok(members)
@@ -1452,8 +1610,12 @@ impl AppConfig {
         let Some(network) = self.active_network_opt() else {
             return Vec::new();
         };
-        let mut members = network.participants.clone();
-        members.extend(network.admins.iter().cloned());
+        let mut members = network
+            .participants
+            .iter()
+            .chain(network.admins.iter())
+            .filter_map(|member| normalize_nostr_pubkey(member).ok())
+            .collect::<Vec<_>>();
         members.sort();
         members.dedup();
         members
@@ -1575,14 +1737,7 @@ impl AppConfig {
         });
 
         if own_pubkey.is_some() && own_in_previous_roster && !own_in_shared_roster {
-            let was_enabled = self.networks[network_index].enabled;
             self.networks.remove(network_index);
-            if was_enabled
-                && !self.networks.iter().any(|network| network.enabled)
-                && let Some(first) = self.networks.first_mut()
-            {
-                first.enabled = true;
-            }
             self.normalize_selected_exit_node();
             self.normalize_peer_aliases();
             return Ok(true);
@@ -1684,6 +1839,67 @@ impl AppConfig {
             .any(|endpoints| endpoints.iter().any(|endpoint| !endpoint.trim().is_empty()))
     }
 
+    /// The configured transit/bootstrap peers as `(npub, [addr])`, sorted. Empty
+    /// when the bootstrap master switch is off. Our own identity is filtered out
+    /// so a node that happens to be a bootstrap server does not dial itself.
+    pub fn fips_bootstrap_peer_endpoints(&self) -> Vec<(String, Vec<String>)> {
+        if !self.fips_bootstrap_enabled {
+            return Vec::new();
+        }
+        let own_pubkey = self.own_nostr_pubkey_hex().ok();
+        let mut peers = self
+            .fips_bootstrap_peers
+            .iter()
+            .filter(|(npub, addrs)| {
+                if addrs.iter().all(|addr| addr.trim().is_empty()) {
+                    return false;
+                }
+                match (own_pubkey.as_deref(), normalize_nostr_pubkey(npub)) {
+                    (Some(own), Ok(hex)) => own != hex,
+                    _ => true,
+                }
+            })
+            .map(|(npub, addrs)| (npub.clone(), addrs.clone()))
+            .collect::<Vec<_>>();
+        peers.sort_by(|left, right| left.0.cmp(&right.0));
+        peers
+    }
+
+    /// Restore the bootstrap/transit peer list to the built-in defaults.
+    pub fn reset_fips_bootstrap_peers(&mut self) {
+        self.fips_bootstrap_peers = default_fips_bootstrap_peers();
+    }
+
+    /// Replace the bootstrap/transit peer list, normalizing keys to npub and
+    /// validating each transport-tagged address. Invalid entries are dropped.
+    pub fn set_fips_bootstrap_peers(&mut self, peers: HashMap<String, Vec<String>>) {
+        let mut normalized = HashMap::new();
+        for (key, addrs) in peers {
+            let Ok(pubkey) = normalize_nostr_pubkey(&key) else {
+                continue;
+            };
+            let npub = npub_for_pubkey_hex(&pubkey);
+            let mut valid = Vec::new();
+            for addr in addrs {
+                let (transport, rest) = split_peer_transport_addr(&addr);
+                if let Some(host_port) = normalize_fips_peer_endpoint_hint(&rest) {
+                    let tagged = if transport == "udp" {
+                        host_port
+                    } else {
+                        format!("{transport}:{host_port}")
+                    };
+                    if !valid.contains(&tagged) {
+                        valid.push(tagged);
+                    }
+                }
+            }
+            if !valid.is_empty() {
+                normalized.insert(npub, valid);
+            }
+        }
+        self.fips_bootstrap_peers = normalized;
+    }
+
     pub fn add_fips_peer_endpoint_hints(&mut self, peer: &str, endpoints: &[String]) -> Result<()> {
         let peer_pubkey = normalize_nostr_pubkey(peer)?;
         let peer_npub = npub_for_pubkey_hex(&peer_pubkey);
@@ -1750,12 +1966,6 @@ impl AppConfig {
             } else {
                 network.enabled = false;
             }
-        }
-
-        if first_active_index.is_none()
-            && let Some(first_network) = self.networks.first_mut()
-        {
-            first_network.enabled = true;
         }
     }
 
@@ -2215,6 +2425,137 @@ mod tests {
     const TEST_WG_PRIVATE_KEY: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
     const TEST_WG_PUBLIC_KEY: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
     const TEST_WG_PRESHARED_KEY: &str = "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=";
+
+    #[test]
+    fn plaintext_toml_preserves_config_secrets() {
+        let mut config = AppConfig::generated();
+        config.wireguard_exit.private_key = TEST_WG_PRIVATE_KEY.to_string();
+        config.wireguard_exit.peer_public_key = TEST_WG_PUBLIC_KEY.to_string();
+        config.wireguard_exit.peer_preshared_key = TEST_WG_PRESHARED_KEY.to_string();
+
+        let raw = config.plaintext_toml().expect("encode plaintext config");
+
+        assert!(raw.contains(&config.nostr.secret_key));
+        assert!(raw.contains(TEST_WG_PRIVATE_KEY));
+        assert!(raw.contains(TEST_WG_PRESHARED_KEY));
+    }
+
+    #[test]
+    fn save_plaintext_does_not_write_config_secrets_inline() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let path = std::env::temp_dir().join(format!(
+            "nvpn-save-plaintext-{}-{nonce}.toml",
+            std::process::id()
+        ));
+        let mut config = AppConfig::generated();
+        config.wireguard_exit.private_key = TEST_WG_PRIVATE_KEY.to_string();
+        config.wireguard_exit.peer_public_key = TEST_WG_PUBLIC_KEY.to_string();
+        config.wireguard_exit.peer_preshared_key = TEST_WG_PRESHARED_KEY.to_string();
+
+        config.save_plaintext(&path).expect("save plaintext config");
+        let raw = std::fs::read_to_string(&path).expect("read plaintext config");
+        let loaded = AppConfig::load(&path).expect("load protected config");
+
+        assert!(!raw.contains(&config.nostr.secret_key));
+        assert!(!raw.contains(TEST_WG_PRIVATE_KEY));
+        assert!(!raw.contains(TEST_WG_PRESHARED_KEY));
+        #[cfg(target_os = "macos")]
+        {
+            assert!(raw.contains("stored-in-private-secret-file"));
+            let file_name = path.file_name().and_then(|value| value.to_str()).unwrap();
+            let parent = path.parent().unwrap();
+            assert!(
+                parent
+                    .join(format!(".{file_name}.nostr-secret-key.secret"))
+                    .exists()
+            );
+            assert!(
+                parent
+                    .join(format!(".{file_name}.wireguard-exit-private-key.secret"))
+                    .exists()
+            );
+            assert!(
+                parent
+                    .join(format!(
+                        ".{file_name}.wireguard-exit-peer-preshared-key.secret"
+                    ))
+                    .exists()
+            );
+        }
+        assert_eq!(loaded.nostr.secret_key, config.nostr.secret_key);
+        assert_eq!(loaded.wireguard_exit.private_key, TEST_WG_PRIVATE_KEY);
+        assert_eq!(
+            loaded.wireguard_exit.peer_preshared_key,
+            TEST_WG_PRESHARED_KEY
+        );
+        AppConfig::delete_persisted_secrets_for_path(&path).expect("delete persisted secrets");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn migrate_persisted_secrets_rewrites_plaintext_config_secrets() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let path = std::env::temp_dir().join(format!(
+            "nvpn-migrate-secrets-{}-{nonce}.toml",
+            std::process::id()
+        ));
+        let mut config = AppConfig::generated();
+        config.wireguard_exit.private_key = TEST_WG_PRIVATE_KEY.to_string();
+        config.wireguard_exit.peer_public_key = TEST_WG_PUBLIC_KEY.to_string();
+        config.wireguard_exit.peer_preshared_key = TEST_WG_PRESHARED_KEY.to_string();
+        let nostr_secret = config.nostr.secret_key.clone();
+        let raw = config.plaintext_toml().expect("encode plaintext config");
+        std::fs::write(&path, raw).expect("write plaintext config");
+
+        assert!(
+            AppConfig::config_file_needs_secret_migration(&path).expect("inspect plaintext config")
+        );
+        assert!(AppConfig::migrate_persisted_secrets(&path).expect("migrate secrets"));
+        assert!(
+            !AppConfig::config_file_needs_secret_migration(&path).expect("inspect migrated config")
+        );
+        let migrated = std::fs::read_to_string(&path).expect("read migrated config");
+        let loaded = AppConfig::load(&path).expect("load migrated config");
+        AppConfig::delete_persisted_secrets_for_path(&path).expect("delete migrated secrets");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(!migrated.contains(&nostr_secret));
+        assert!(!migrated.contains(TEST_WG_PRIVATE_KEY));
+        assert!(!migrated.contains(TEST_WG_PRESHARED_KEY));
+        assert!(migrated.contains("stored-in-"));
+        assert_eq!(loaded.nostr.secret_key, nostr_secret);
+        assert_eq!(loaded.wireguard_exit.private_key, TEST_WG_PRIVATE_KEY);
+        assert_eq!(
+            loaded.wireguard_exit.peer_preshared_key,
+            TEST_WG_PRESHARED_KEY
+        );
+    }
+
+    #[test]
+    fn save_rejects_unsupported_secret_markers() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let path = std::env::temp_dir().join(format!(
+            "nvpn-unsupported-secret-marker-{}-{nonce}.toml",
+            std::process::id()
+        ));
+        let mut config = AppConfig::generated();
+        config.nostr.secret_key = "stored-in-macos-keychain".to_string();
+
+        let error = config.save(&path).expect_err("unsupported marker fails");
+
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported secret storage marker")
+        );
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn ensure_defaults_keeps_existing_public_identity_without_parsing_secret_key() {

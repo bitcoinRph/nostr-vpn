@@ -372,6 +372,9 @@ if [[ -z "$ALICE_NPUB" || -z "$BOB_NPUB" ]]; then
   exit 1
 fi
 
+"${COMPOSE[@]}" exec -T node-a nvpn set --participant "$ALICE_NPUB" >/dev/null
+"${COMPOSE[@]}" exec -T node-b nvpn set --participant "$BOB_NPUB" >/dev/null
+
 "${COMPOSE[@]}" exec -T node-a nvpn set \
   --network-id "$NETWORK_ID" \
   --node-name alice \
@@ -380,6 +383,8 @@ fi
   --endpoint "$NODE_A_PUBLIC_IP:51820" \
   --listen-port 51820 \
   --fips-advertise-endpoint false \
+  --fips-nostr-discovery-enabled false \
+  --fips-bootstrap-enabled false \
   --fips-peer-endpoint "$BOB_NPUB=$NAT_B_PUBLIC_IP:51820" >/dev/null
 
 "${COMPOSE[@]}" exec -T node-b nvpn set \
@@ -390,6 +395,8 @@ fi
   --endpoint "$NAT_B_PUBLIC_IP:51820" \
   --listen-port 51820 \
   --fips-advertise-endpoint false \
+  --fips-nostr-discovery-enabled false \
+  --fips-bootstrap-enabled false \
   --fips-peer-endpoint "$ALICE_NPUB=$NODE_A_PUBLIC_IP:51820" >/dev/null
 
 for node in node-a node-b; do

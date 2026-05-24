@@ -351,6 +351,10 @@ if [[ -z "$ALICE_NPUB" || -z "$BOB_NPUB" || -z "$CHARLIE_NPUB" ]]; then
   exit 1
 fi
 
+"${COMPOSE[@]}" exec -T node-a nvpn set --participant "$ALICE_NPUB" >/dev/null
+"${COMPOSE[@]}" exec -T node-b nvpn set --participant "$BOB_NPUB" >/dev/null
+"${COMPOSE[@]}" exec -T node-c nvpn set --participant "$CHARLIE_NPUB" >/dev/null
+
 "${COMPOSE[@]}" exec -T node-a nvpn set \
   --network-id "$NETWORK_ID" \
   --node-name alice \
@@ -360,7 +364,9 @@ fi
   --fips-peer-endpoint "$CHARLIE_NPUB=10.203.0.12:51820" \
   --endpoint "10.203.0.10:51820" \
   --listen-port 51820 \
-  --fips-advertise-endpoint true >/dev/null
+  --fips-advertise-endpoint true \
+  --fips-nostr-discovery-enabled false \
+  --fips-bootstrap-enabled false >/dev/null
 
 "${COMPOSE[@]}" exec -T node-b nvpn set \
   --network-id "$NETWORK_ID" \
@@ -371,7 +377,9 @@ fi
   --fips-peer-endpoint "$CHARLIE_NPUB=10.203.0.12:51820" \
   --endpoint "10.203.0.11:51820" \
   --listen-port 51820 \
-  --fips-advertise-endpoint true >/dev/null
+  --fips-advertise-endpoint true \
+  --fips-nostr-discovery-enabled false \
+  --fips-bootstrap-enabled false >/dev/null
 
 "${COMPOSE[@]}" exec -T node-c nvpn set \
   --network-id "$NETWORK_ID" \
@@ -380,7 +388,9 @@ fi
   --fips-peer-endpoint "$BOB_NPUB=10.203.0.11:51820" \
   --endpoint "10.203.0.12:51820" \
   --listen-port 51820 \
-  --fips-advertise-endpoint true >/dev/null
+  --fips-advertise-endpoint true \
+  --fips-nostr-discovery-enabled false \
+  --fips-bootstrap-enabled false >/dev/null
 
 for node in node-a node-b node-c; do
   replace_peer_aliases "$node"

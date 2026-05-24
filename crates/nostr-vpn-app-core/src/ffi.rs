@@ -323,10 +323,10 @@ impl NativeAppRuntime {
         let config_exists = config_path
             .try_exists()
             .with_context(|| format!("failed to inspect config {}", config_path.display()))?;
-        let persist_identity_defaults = config_exists
-            && config_file_missing_persisted_identity(&config_path).with_context(|| {
+        let migrated_config_secrets = config_exists
+            && AppConfig::migrate_persisted_secrets(&config_path).with_context(|| {
                 format!(
-                    "failed to inspect persisted identity in {}",
+                    "failed to migrate persisted config secrets in {}",
                     config_path.display()
                 )
             })?;
@@ -337,7 +337,7 @@ impl NativeAppRuntime {
         };
         config.ensure_defaults();
         maybe_autoconfigure_node(&mut config);
-        if !config_exists || persist_identity_defaults {
+        if !config_exists || migrated_config_secrets {
             config.save(&config_path)?;
         }
 
@@ -479,6 +479,14 @@ impl NativeAppRuntime {
                 })
                 .unwrap_or_default()
         };
+        let networks = if config_unavailable {
+            Vec::new()
+        } else {
+            self.network_states(&own_pubkey_hex, vpn_active)
+        };
+        let fips_peer_stats = active_network_fips_peer_stats(&networks, &own_pubkey_hex);
+        let other_fips_peer_count =
+            daemon_state.map_or(0, |state| state.fips_other_peer_count as u64);
 
         NativeAppState {
             rev: self.rev,
@@ -653,6 +661,28 @@ impl NativeAppRuntime {
             } else {
                 wireguard_exit_config_text(&self.config.wireguard_exit)
             },
+            fips_host_tunnel_enabled: !config_unavailable && self.config.fips_host_tunnel_enabled,
+            connect_to_non_roster_fips_peers: !config_unavailable
+                && self.config.connect_to_non_roster_fips_peers,
+            fips_nostr_discovery_enabled: !config_unavailable
+                && self.config.fips_nostr_discovery_enabled,
+            fips_bootstrap_enabled: !config_unavailable && self.config.fips_bootstrap_enabled,
+            fips_bootstrap_peers: if config_unavailable {
+                std::collections::HashMap::new()
+            } else {
+                self.config.fips_bootstrap_peers.clone()
+            },
+            fips_bootstrap_peer_defaults: nostr_vpn_core::config::default_fips_bootstrap_peers(),
+            fips_host_inbound_tcp_ports: if config_unavailable {
+                String::new()
+            } else {
+                self.config
+                    .fips_host_inbound_tcp_ports
+                    .iter()
+                    .map(u16::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            },
             magic_dns_suffix: if config_unavailable {
                 String::new()
             } else {
@@ -672,17 +702,17 @@ impl NativeAppRuntime {
             close_to_tray_on_close: !config_unavailable && self.config.close_to_tray_on_close,
             connected_peer_count: connected_peer_count as u64,
             expected_peer_count: expected_peer_count as u64,
+            fips_connected_peer_count: fips_peer_stats.direct_roster_peer_count,
+            fips_roster_peer_count: fips_peer_stats.roster_peer_count,
+            // Legacy wire field name: UIs now use this as connected non-roster FIPS peers.
+            non_fips_roster_peer_count: other_fips_peer_count,
             mesh_ready: !network_setup_required
                 && vpn_active
                 && daemon_state.is_some_and(|state| state.mesh_ready),
             health,
             network,
             port_mapping,
-            networks: if config_unavailable {
-                Vec::new()
-            } else {
-                self.network_states(&own_pubkey_hex, vpn_active)
-            },
+            networks,
             lan_peers: self.lan_peer_states(),
         }
     }
@@ -1269,6 +1299,7 @@ impl NativeAppRuntime {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn apply_settings_patch(&mut self, patch: SettingsPatch) -> Result<()> {
         let parsed_wireguard_exit_config = patch
             .wireguard_exit_config
@@ -1370,8 +1401,23 @@ impl NativeAppRuntime {
             parsed.enabled = enabled;
             self.config.wireguard_exit = parsed;
         }
-        if let Some(value) = patch.magic_dns_suffix {
-            self.config.magic_dns_suffix = value.trim().trim_matches('.').to_ascii_lowercase();
+        if let Some(value) = patch.fips_host_tunnel_enabled {
+            self.config.fips_host_tunnel_enabled = value;
+        }
+        if let Some(value) = patch.connect_to_non_roster_fips_peers {
+            self.config.connect_to_non_roster_fips_peers = value;
+        }
+        if let Some(value) = patch.fips_nostr_discovery_enabled {
+            self.config.fips_nostr_discovery_enabled = value;
+        }
+        if let Some(value) = patch.fips_bootstrap_enabled {
+            self.config.fips_bootstrap_enabled = value;
+        }
+        if let Some(value) = patch.fips_bootstrap_peers {
+            self.config.set_fips_bootstrap_peers(value);
+        }
+        if let Some(value) = patch.fips_host_inbound_tcp_ports {
+            self.config.fips_host_inbound_tcp_ports = parse_tcp_ports(&value);
         }
         if let Some(value) = patch.autoconnect {
             self.config.autoconnect = value;
@@ -1673,10 +1719,118 @@ impl NativeAppRuntime {
         Ok(())
     }
 
+    #[cfg(not(target_os = "macos"))]
     fn save_config(&mut self) -> Result<()> {
         self.config.ensure_defaults();
         maybe_autoconfigure_node(&mut self.config);
         self.config.save(&self.config_path)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn save_config(&mut self) -> Result<()> {
+        self.config.ensure_defaults();
+        maybe_autoconfigure_node(&mut self.config);
+
+        if self.service_installed || self.service_running || self.daemon_running {
+            return self.save_config_via_macos_service();
+        }
+
+        self.config.save(&self.config_path)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn save_config_via_macos_service(&mut self) -> Result<()> {
+        let source_path = self.write_config_apply_source()?;
+        let result = self.apply_macos_config_source(&source_path);
+        let remove_result = fs::remove_file(&source_path)
+            .with_context(|| format!("failed to remove {}", source_path.display()));
+        let secret_remove_result = AppConfig::delete_persisted_secrets_for_path(&source_path)
+            .with_context(|| format!("failed to remove secrets for {}", source_path.display()));
+
+        match (result, remove_result, secret_remove_result) {
+            (Ok(()), Ok(()), Ok(())) => Ok(()),
+            (Ok(()), Ok(()), Err(error)) | (Ok(()), Err(error), _) | (Err(error), _, _) => {
+                Err(error)
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn apply_macos_config_source(&mut self, source_path: &Path) -> Result<()> {
+        let source_arg = source_path
+            .to_str()
+            .ok_or_else(|| anyhow!("config apply source path is not valid UTF-8"))?;
+        let config_arg = self.config_path_str()?;
+        let daemon_result = self
+            .run_nvpn([
+                "apply-config-daemon",
+                "--source",
+                source_arg,
+                "--config",
+                config_arg,
+            ])
+            .and_then(|output| ensure_success("nvpn apply-config-daemon", &output));
+
+        if daemon_result.is_ok() {
+            return Ok(());
+        }
+
+        if self.service_installed || self.service_running {
+            let daemon_error = daemon_result.err().map_or_else(
+                || "daemon apply failed".to_string(),
+                |error| format!("{error:#}"),
+            );
+            let output = self.run_nvpn_service_action_with_macos_admin([
+                "apply-config",
+                "--source",
+                source_arg,
+                "--config",
+                config_arg,
+            ])?;
+            ensure_success("nvpn apply-config", &output)
+                .with_context(|| format!("daemon config apply failed first: {daemon_error}"))?;
+            return Ok(());
+        }
+
+        self.config.save(&self.config_path)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn write_config_apply_source(&self) -> Result<PathBuf> {
+        let parent = self
+            .config_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+
+        let file_name = self
+            .config_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("config.toml");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+
+        for attempt in 0..128u32 {
+            let candidate = parent.join(format!(
+                ".{file_name}.apply-{}-{nonce}-{attempt}.toml",
+                std::process::id()
+            ));
+            if candidate.exists() {
+                continue;
+            }
+            self.config
+                .save_plaintext(&candidate)
+                .with_context(|| format!("failed to write {}", candidate.display()))?;
+            return Ok(candidate);
+        }
+
+        Err(anyhow!(
+            "failed to allocate a unique config apply source file"
+        ))
     }
 
     fn reload_config_from_disk(&mut self) -> Result<()> {
@@ -2315,6 +2469,50 @@ fn remote_network_participant_count(network: &NetworkConfig, own_pubkey_hex: &st
         .count()
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct FipsPeerStats {
+    direct_roster_peer_count: u64,
+    roster_peer_count: u64,
+}
+
+fn active_network_fips_peer_stats(
+    networks: &[NativeNetworkState],
+    own_pubkey_hex: &str,
+) -> FipsPeerStats {
+    let Some(network) = networks.iter().find(|network| network.enabled) else {
+        return FipsPeerStats::default();
+    };
+
+    let mut stats = FipsPeerStats::default();
+    for participant in &network.participants {
+        if !own_pubkey_hex.is_empty() && participant.pubkey_hex == own_pubkey_hex {
+            continue;
+        }
+        if participant_has_fips_signal(participant) {
+            stats.roster_peer_count += 1;
+            if participant_has_direct_fips_link(participant) {
+                stats.direct_roster_peer_count += 1;
+            }
+        }
+    }
+    stats
+}
+
+fn participant_has_direct_fips_link(participant: &NativeParticipantState) -> bool {
+    participant.reachable && !participant.fips_transport_addr.trim().is_empty()
+}
+
+fn participant_has_fips_signal(participant: &NativeParticipantState) -> bool {
+    !participant.fips_endpoint_hints.is_empty()
+        || !participant.fips_endpoint_npub.trim().is_empty()
+        || !participant.fips_transport_addr.trim().is_empty()
+        || !participant.fips_transport_type.trim().is_empty()
+        || participant.fips_packets_sent > 0
+        || participant.fips_packets_recv > 0
+        || participant.fips_bytes_sent > 0
+        || participant.fips_bytes_recv > 0
+}
+
 fn network_setup_required_for_config(config: &AppConfig) -> bool {
     config.active_network_opt().is_none()
 }
@@ -2523,28 +2721,6 @@ fn native_config_path(data_dir: &str) -> PathBuf {
     }
 }
 
-fn config_file_missing_persisted_identity(path: &Path) -> Result<bool> {
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let value: toml::Value = toml::from_str(&raw).context("failed to parse config TOML")?;
-    let Some(nostr) = value.get("nostr").and_then(toml::Value::as_table) else {
-        return Ok(true);
-    };
-
-    let secret_key = nostr
-        .get("secret_key")
-        .and_then(toml::Value::as_str)
-        .unwrap_or_default()
-        .trim();
-    let public_key = nostr
-        .get("public_key")
-        .and_then(toml::Value::as_str)
-        .unwrap_or_default()
-        .trim();
-
-    Ok(secret_key.is_empty() || public_key.is_empty())
-}
-
 fn default_config_path() -> PathBuf {
     dirs::config_dir().map_or_else(
         || PathBuf::from("nvpn.toml"),
@@ -2653,6 +2829,19 @@ fn parse_csv_values(input: &str) -> Vec<String> {
     values
 }
 
+fn parse_tcp_ports(input: &str) -> Vec<u16> {
+    let mut ports = input
+        .split([',', '\n', ' ', '\t'])
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter_map(|value| value.parse::<u16>().ok())
+        .filter(|port| *port > 0)
+        .collect::<Vec<_>>();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
+}
+
 fn effective_config_relays(config: &AppConfig) -> Vec<String> {
     let disabled_relays = normalize_relay_urls(config.nostr.disabled_relays.clone())
         .into_iter()
@@ -2752,6 +2941,7 @@ mod tests {
 
     const TEST_WG_PRIVATE_KEY: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
     const TEST_WG_PUBLIC_KEY: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
+    const TEST_WG_PRESHARED_KEY: &str = "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=";
 
     fn create_test_network(runtime: &mut NativeAppRuntime, name: &str) -> String {
         runtime.config.add_network(name)
@@ -2832,6 +3022,45 @@ mod tests {
         assert!(!saved.nostr.secret_key.trim().is_empty());
         assert!(!saved.nostr.public_key.trim().is_empty());
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn startup_migrates_plaintext_config_secrets() {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-secret-migration-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+        let path = dir.join("config.toml");
+        let mut config = AppConfig::generated_without_networks();
+        config.wireguard_exit.private_key = TEST_WG_PRIVATE_KEY.to_string();
+        config.wireguard_exit.peer_public_key = TEST_WG_PUBLIC_KEY.to_string();
+        config.wireguard_exit.peer_preshared_key = TEST_WG_PRESHARED_KEY.to_string();
+        let nostr_secret = config.nostr.secret_key.clone();
+        fs::write(
+            &path,
+            config.plaintext_toml().expect("encode plaintext config"),
+        )
+        .expect("write plaintext config");
+
+        let runtime = NativeAppRuntime::new_with_config_path(path.clone(), String::new(), None)
+            .expect("runtime starts");
+        let raw = fs::read_to_string(&path).expect("read migrated config");
+        let loaded = AppConfig::load(&path).expect("load migrated config");
+        AppConfig::delete_persisted_secrets_for_path(&path).expect("delete migrated secrets");
+
+        assert_eq!(runtime.config.nostr.secret_key, nostr_secret);
+        assert!(!raw.contains(&nostr_secret));
+        assert!(!raw.contains(TEST_WG_PRIVATE_KEY));
+        assert!(!raw.contains(TEST_WG_PRESHARED_KEY));
+        assert_eq!(loaded.nostr.secret_key, nostr_secret);
+        assert_eq!(loaded.wireguard_exit.private_key, TEST_WG_PRIVATE_KEY);
+        assert_eq!(
+            loaded.wireguard_exit.peer_preshared_key,
+            TEST_WG_PRESHARED_KEY
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2979,6 +3208,164 @@ mod tests {
 
         let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
         assert!(saved.networks.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn inactive_saved_network_actions_are_real_config_mutations() {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-saved-network-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+
+        let peer = Keys::generate();
+        let peer_hex = peer.public_key().to_hex();
+        let peer_npub = peer.public_key().to_bech32().expect("peer npub");
+        let admin_one = Keys::generate();
+        let admin_one_hex = admin_one.public_key().to_hex();
+        let admin_one_npub = admin_one.public_key().to_bech32().expect("admin one npub");
+        let admin_two = Keys::generate();
+        let admin_two_hex = admin_two.public_key().to_hex();
+        let admin_two_npub = admin_two.public_key().to_bech32().expect("admin two npub");
+
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        runtime.last_error.clear();
+        runtime.mobile_runtime = true;
+        runtime.config_path = dir.join("config.toml");
+
+        let active_id = create_test_network(&mut runtime, "Home");
+        let saved_id = create_test_network(&mut runtime, "Work");
+        assert!(
+            runtime
+                .config
+                .network_by_id(&active_id)
+                .expect("active network")
+                .enabled
+        );
+        assert!(
+            !runtime
+                .config
+                .network_by_id(&saved_id)
+                .expect("saved network")
+                .enabled
+        );
+        let old_invite_secret = runtime
+            .config
+            .network_by_id(&saved_id)
+            .expect("saved network")
+            .invite_secret
+            .clone();
+
+        runtime.dispatch(NativeAppAction::RenameNetwork {
+            network_id: saved_id.clone(),
+            name: "Office".to_string(),
+        });
+        runtime.dispatch(NativeAppAction::SetNetworkMeshId {
+            network_id: saved_id.clone(),
+            mesh_id: "ABCD-1234-EF56".to_string(),
+        });
+        runtime.dispatch(NativeAppAction::SetNetworkJoinRequestsEnabled {
+            network_id: saved_id.clone(),
+            enabled: true,
+        });
+        runtime.dispatch(NativeAppAction::ResetNetworkInvite {
+            network_id: saved_id.clone(),
+        });
+        runtime.dispatch(NativeAppAction::AddParticipant {
+            network_id: saved_id.clone(),
+            npub: peer_npub.clone(),
+            alias: Some("Desk Peer".to_string()),
+        });
+        runtime.dispatch(NativeAppAction::AddAdmin {
+            network_id: saved_id.clone(),
+            npub: admin_one_npub.clone(),
+        });
+        runtime.dispatch(NativeAppAction::AddAdmin {
+            network_id: saved_id.clone(),
+            npub: admin_two_npub.clone(),
+        });
+        runtime.dispatch(NativeAppAction::SetParticipantAlias {
+            npub: peer_npub.clone(),
+            alias: "Renamed Peer".to_string(),
+        });
+
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        let state = runtime.state();
+        let saved_state = state
+            .networks
+            .iter()
+            .find(|network| network.id == saved_id)
+            .expect("saved network state");
+        assert!(!saved_state.enabled);
+        assert_eq!(saved_state.name, "Office");
+        assert_eq!(saved_state.network_id, "abcd1234ef56");
+        assert!(saved_state.join_requests_enabled);
+        let peer_state = saved_state
+            .participants
+            .iter()
+            .find(|participant| participant.pubkey_hex == peer_hex)
+            .expect("peer participant state");
+        assert_eq!(peer_state.magic_dns_alias, "renamed-peer");
+
+        let saved_config = runtime
+            .config
+            .network_by_id(&saved_id)
+            .expect("saved network config");
+        assert_eq!(saved_config.name, "Office");
+        assert_eq!(saved_config.network_id, "abcd1234ef56");
+        assert!(saved_config.listen_for_join_requests);
+        assert_ne!(saved_config.invite_secret, old_invite_secret);
+        assert!(saved_config.participants.contains(&peer_hex));
+        assert!(saved_config.admins.contains(&admin_one_hex));
+        assert!(saved_config.admins.contains(&admin_two_hex));
+        assert_eq!(
+            runtime.config.peer_alias(&peer_hex).as_deref(),
+            Some("renamed-peer")
+        );
+
+        runtime.dispatch(NativeAppAction::RemoveAdmin {
+            network_id: saved_id.clone(),
+            npub: admin_one_npub,
+        });
+        runtime.dispatch(NativeAppAction::RemoveParticipant {
+            network_id: saved_id.clone(),
+            npub: peer_npub,
+        });
+        runtime.dispatch(NativeAppAction::SetNetworkEnabled {
+            network_id: saved_id.clone(),
+            enabled: true,
+        });
+
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        let saved_config = runtime
+            .config
+            .network_by_id(&saved_id)
+            .expect("saved network config");
+        assert!(saved_config.enabled);
+        assert!(!saved_config.participants.contains(&peer_hex));
+        assert!(!saved_config.admins.contains(&admin_one_hex));
+        assert!(saved_config.admins.contains(&admin_two_hex));
+        assert!(
+            !runtime
+                .config
+                .network_by_id(&active_id)
+                .expect("previously active network")
+                .enabled
+        );
+
+        let persisted = AppConfig::load(&runtime.config_path).expect("load persisted config");
+        let persisted_saved = persisted
+            .network_by_id(&saved_id)
+            .expect("persisted saved network");
+        assert!(persisted_saved.enabled);
+        assert_eq!(persisted_saved.name, "Office");
+        assert_eq!(persisted_saved.network_id, "abcd1234ef56");
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -3153,6 +3540,9 @@ mod tests {
                 "peer.example.com:51820".to_string()
             ]
         );
+        assert_eq!(state.fips_connected_peer_count, 0);
+        assert_eq!(state.fips_roster_peer_count, 1);
+        assert_eq!(state.non_fips_roster_peer_count, 0);
 
         let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
         assert_eq!(
@@ -3174,6 +3564,9 @@ mod tests {
                 .fips_endpoint_hints
                 .is_empty()
         );
+        let state = runtime.state();
+        assert_eq!(state.fips_roster_peer_count, 0);
+        assert_eq!(state.non_fips_roster_peer_count, 0);
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -3389,6 +3782,7 @@ mod tests {
             vpn_active: true,
             expected_peer_count: 1,
             connected_peer_count: 1,
+            fips_other_peer_count: 2,
             mesh_ready: true,
             peers: vec![DaemonPeerState {
                 participant_pubkey: peer_pubkey.to_string(),
@@ -3411,8 +3805,51 @@ mod tests {
             .find(|participant| participant.pubkey_hex == peer_pubkey)
             .expect("peer participant");
 
+        assert_eq!(state.fips_connected_peer_count, 0);
+        assert_eq!(state.fips_roster_peer_count, 1);
+        assert_eq!(state.non_fips_roster_peer_count, 2);
         assert_eq!(peer.status_text, "online via mesh (112 ms)");
         assert_eq!(peer.fips_srtt_ms, 112);
+    }
+
+    #[test]
+    fn native_state_counts_direct_fips_roster_peer() {
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        let own_pubkey = runtime
+            .config
+            .own_nostr_pubkey_hex()
+            .expect("generated config should have own pubkey");
+        let peer_pubkey = "26525c442dd039de4e728b41ee8d7f717b267ab25b7c219d53a3249e1c9174cc";
+        runtime.startup_error = None;
+        runtime.daemon_running = true;
+        runtime.vpn_enabled = true;
+        runtime.vpn_active = true;
+        create_test_network(&mut runtime, "Home");
+        runtime.config.networks[0].admins = vec![own_pubkey];
+        runtime.config.networks[0].participants = vec![peer_pubkey.to_string()];
+        runtime.daemon_state = Some(DaemonRuntimeState {
+            vpn_enabled: true,
+            vpn_active: true,
+            expected_peer_count: 1,
+            connected_peer_count: 1,
+            mesh_ready: true,
+            peers: vec![DaemonPeerState {
+                participant_pubkey: peer_pubkey.to_string(),
+                fips_endpoint_npub: "npub1peer".to_string(),
+                fips_transport_addr: "203.0.113.9:9000".to_string(),
+                fips_transport_type: "udp".to_string(),
+                reachable: true,
+                ..DaemonPeerState::default()
+            }],
+            ..DaemonRuntimeState::default()
+        });
+
+        let state = runtime.state();
+
+        assert_eq!(state.fips_connected_peer_count, 1);
+        assert_eq!(state.fips_roster_peer_count, 1);
+        assert_eq!(state.non_fips_roster_peer_count, 0);
     }
 
     #[test]
@@ -4364,6 +4801,44 @@ exit 0
         assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
         assert!(runtime.config.wireguard_exit.enabled);
         assert_eq!(runtime.config.exit_node, "");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn settings_patch_persists_fips_host_controls() {
+        let nonce = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-app-core-fips-host-{nonce}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+
+        let error = anyhow!("boom");
+        let mut runtime = NativeAppRuntime::from_startup_error(&error);
+        runtime.startup_error = None;
+        runtime.mobile_runtime = true;
+        runtime.config_path = dir.join("config.toml");
+
+        runtime.dispatch(NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                fips_host_tunnel_enabled: Some(false),
+                connect_to_non_roster_fips_peers: Some(false),
+                fips_host_inbound_tcp_ports: Some("443, 22, 22".to_string()),
+                ..SettingsPatch::default()
+            },
+        });
+
+        assert!(runtime.last_error.is_empty(), "{}", runtime.last_error);
+        let saved = AppConfig::load(&runtime.config_path).expect("load persisted config");
+        assert!(!saved.fips_host_tunnel_enabled);
+        assert!(!saved.connect_to_non_roster_fips_peers);
+        assert_eq!(saved.fips_host_inbound_tcp_ports, vec![22, 443]);
+
+        let state = runtime.state();
+        assert!(!state.fips_host_tunnel_enabled);
+        assert!(!state.connect_to_non_roster_fips_peers);
+        assert_eq!(state.fips_host_inbound_tcp_ports, "22, 443");
 
         let _ = fs::remove_dir_all(&dir);
     }

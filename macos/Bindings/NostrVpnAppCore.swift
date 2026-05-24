@@ -945,6 +945,19 @@ public struct NativeAppState {
     public var wireguardExitMtu: UInt16
     public var wireguardExitPersistentKeepaliveSecs: UInt16
     public var wireguardExitConfig: String
+    public var fipsHostTunnelEnabled: Bool
+    public var connectToNonRosterFipsPeers: Bool
+    public var fipsNostrDiscoveryEnabled: Bool
+    public var fipsBootstrapEnabled: Bool
+    /**
+     * Editable bootstrap/transit peers (npub -> transport-tagged addresses).
+     */
+    public var fipsBootstrapPeers: [String: [String]]
+    /**
+     * Built-in bootstrap defaults, so the UI can offer "reset to defaults".
+     */
+    public var fipsBootstrapPeerDefaults: [String: [String]]
+    public var fipsHostInboundTcpPorts: String
     public var magicDnsSuffix: String
     public var magicDnsStatus: String
     public var autoconnect: Bool
@@ -956,6 +969,9 @@ public struct NativeAppState {
     public var closeToTrayOnClose: Bool
     public var connectedPeerCount: UInt64
     public var expectedPeerCount: UInt64
+    public var fipsConnectedPeerCount: UInt64
+    public var fipsRosterPeerCount: UInt64
+    public var nonFipsRosterPeerCount: UInt64
     public var meshReady: Bool
     public var health: [NativeHealthIssue]
     public var network: NativeNetworkSummary
@@ -965,7 +981,13 @@ public struct NativeAppState {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(rev: UInt64, platform: String, mobile: Bool, vpnControlSupported: Bool, cliInstallSupported: Bool, startupSettingsSupported: Bool, trayBehaviorSupported: Bool, runtimeStatusDetail: String, appVersion: String, configPath: String, error: String, cliInstalled: Bool, serviceSupported: Bool, serviceEnablementSupported: Bool, serviceInstalled: Bool, serviceDisabled: Bool, serviceRunning: Bool, serviceStatusDetail: String, daemonRunning: Bool, vpnEnabled: Bool, vpnActive: Bool, vpnStatus: String, daemonBinaryVersion: String, serviceBinaryVersion: String, expectedServiceBinaryVersion: String, ownNpub: String, ownPubkeyHex: String, nodeId: String, nodeName: String, selfMagicDnsName: String, endpoint: String, tunnelIp: String, listenPort: UInt32, relays: [NativeRelayState], networkId: String, activeNetworkInvite: String, exitNode: String, exitNodeLeakProtection: Bool, exitNodeActive: Bool, exitNodeBlocked: Bool, exitNodeStatusText: String, advertiseExitNode: Bool, advertisedRoutes: [String], effectiveAdvertisedRoutes: [String], wireguardExitEnabled: Bool, wireguardExitConfigured: Bool, wireguardExitInterface: String, wireguardExitAddress: String, wireguardExitPrivateKey: String, wireguardExitPeerPublicKey: String, wireguardExitPeerPresharedKey: String, wireguardExitEndpoint: String, wireguardExitAllowedIps: String, wireguardExitDns: String, wireguardExitMtu: UInt16, wireguardExitPersistentKeepaliveSecs: UInt16, wireguardExitConfig: String, magicDnsSuffix: String, magicDnsStatus: String, autoconnect: Bool, inviteBroadcastActive: Bool, inviteBroadcastRemainingSecs: UInt64, nearbyDiscoveryActive: Bool, nearbyDiscoveryRemainingSecs: UInt64, launchOnStartup: Bool, closeToTrayOnClose: Bool, connectedPeerCount: UInt64, expectedPeerCount: UInt64, meshReady: Bool, health: [NativeHealthIssue], network: NativeNetworkSummary, portMapping: NativePortMappingStatus, networks: [NativeNetworkState], lanPeers: [NativeLanPeerState]) {
+    public init(rev: UInt64, platform: String, mobile: Bool, vpnControlSupported: Bool, cliInstallSupported: Bool, startupSettingsSupported: Bool, trayBehaviorSupported: Bool, runtimeStatusDetail: String, appVersion: String, configPath: String, error: String, cliInstalled: Bool, serviceSupported: Bool, serviceEnablementSupported: Bool, serviceInstalled: Bool, serviceDisabled: Bool, serviceRunning: Bool, serviceStatusDetail: String, daemonRunning: Bool, vpnEnabled: Bool, vpnActive: Bool, vpnStatus: String, daemonBinaryVersion: String, serviceBinaryVersion: String, expectedServiceBinaryVersion: String, ownNpub: String, ownPubkeyHex: String, nodeId: String, nodeName: String, selfMagicDnsName: String, endpoint: String, tunnelIp: String, listenPort: UInt32, relays: [NativeRelayState], networkId: String, activeNetworkInvite: String, exitNode: String, exitNodeLeakProtection: Bool, exitNodeActive: Bool, exitNodeBlocked: Bool, exitNodeStatusText: String, advertiseExitNode: Bool, advertisedRoutes: [String], effectiveAdvertisedRoutes: [String], wireguardExitEnabled: Bool, wireguardExitConfigured: Bool, wireguardExitInterface: String, wireguardExitAddress: String, wireguardExitPrivateKey: String, wireguardExitPeerPublicKey: String, wireguardExitPeerPresharedKey: String, wireguardExitEndpoint: String, wireguardExitAllowedIps: String, wireguardExitDns: String, wireguardExitMtu: UInt16, wireguardExitPersistentKeepaliveSecs: UInt16, wireguardExitConfig: String, fipsHostTunnelEnabled: Bool, connectToNonRosterFipsPeers: Bool, fipsNostrDiscoveryEnabled: Bool, fipsBootstrapEnabled: Bool,
+        /**
+         * Editable bootstrap/transit peers (npub -> transport-tagged addresses).
+         */fipsBootstrapPeers: [String: [String]],
+        /**
+         * Built-in bootstrap defaults, so the UI can offer "reset to defaults".
+         */fipsBootstrapPeerDefaults: [String: [String]], fipsHostInboundTcpPorts: String, magicDnsSuffix: String, magicDnsStatus: String, autoconnect: Bool, inviteBroadcastActive: Bool, inviteBroadcastRemainingSecs: UInt64, nearbyDiscoveryActive: Bool, nearbyDiscoveryRemainingSecs: UInt64, launchOnStartup: Bool, closeToTrayOnClose: Bool, connectedPeerCount: UInt64, expectedPeerCount: UInt64, fipsConnectedPeerCount: UInt64, fipsRosterPeerCount: UInt64, nonFipsRosterPeerCount: UInt64, meshReady: Bool, health: [NativeHealthIssue], network: NativeNetworkSummary, portMapping: NativePortMappingStatus, networks: [NativeNetworkState], lanPeers: [NativeLanPeerState]) {
         self.rev = rev
         self.platform = platform
         self.mobile = mobile
@@ -1023,6 +1045,13 @@ public struct NativeAppState {
         self.wireguardExitMtu = wireguardExitMtu
         self.wireguardExitPersistentKeepaliveSecs = wireguardExitPersistentKeepaliveSecs
         self.wireguardExitConfig = wireguardExitConfig
+        self.fipsHostTunnelEnabled = fipsHostTunnelEnabled
+        self.connectToNonRosterFipsPeers = connectToNonRosterFipsPeers
+        self.fipsNostrDiscoveryEnabled = fipsNostrDiscoveryEnabled
+        self.fipsBootstrapEnabled = fipsBootstrapEnabled
+        self.fipsBootstrapPeers = fipsBootstrapPeers
+        self.fipsBootstrapPeerDefaults = fipsBootstrapPeerDefaults
+        self.fipsHostInboundTcpPorts = fipsHostInboundTcpPorts
         self.magicDnsSuffix = magicDnsSuffix
         self.magicDnsStatus = magicDnsStatus
         self.autoconnect = autoconnect
@@ -1034,6 +1063,9 @@ public struct NativeAppState {
         self.closeToTrayOnClose = closeToTrayOnClose
         self.connectedPeerCount = connectedPeerCount
         self.expectedPeerCount = expectedPeerCount
+        self.fipsConnectedPeerCount = fipsConnectedPeerCount
+        self.fipsRosterPeerCount = fipsRosterPeerCount
+        self.nonFipsRosterPeerCount = nonFipsRosterPeerCount
         self.meshReady = meshReady
         self.health = health
         self.network = network
@@ -1221,6 +1253,27 @@ extension NativeAppState: Equatable, Hashable {
         if lhs.wireguardExitConfig != rhs.wireguardExitConfig {
             return false
         }
+        if lhs.fipsHostTunnelEnabled != rhs.fipsHostTunnelEnabled {
+            return false
+        }
+        if lhs.connectToNonRosterFipsPeers != rhs.connectToNonRosterFipsPeers {
+            return false
+        }
+        if lhs.fipsNostrDiscoveryEnabled != rhs.fipsNostrDiscoveryEnabled {
+            return false
+        }
+        if lhs.fipsBootstrapEnabled != rhs.fipsBootstrapEnabled {
+            return false
+        }
+        if lhs.fipsBootstrapPeers != rhs.fipsBootstrapPeers {
+            return false
+        }
+        if lhs.fipsBootstrapPeerDefaults != rhs.fipsBootstrapPeerDefaults {
+            return false
+        }
+        if lhs.fipsHostInboundTcpPorts != rhs.fipsHostInboundTcpPorts {
+            return false
+        }
         if lhs.magicDnsSuffix != rhs.magicDnsSuffix {
             return false
         }
@@ -1252,6 +1305,15 @@ extension NativeAppState: Equatable, Hashable {
             return false
         }
         if lhs.expectedPeerCount != rhs.expectedPeerCount {
+            return false
+        }
+        if lhs.fipsConnectedPeerCount != rhs.fipsConnectedPeerCount {
+            return false
+        }
+        if lhs.fipsRosterPeerCount != rhs.fipsRosterPeerCount {
+            return false
+        }
+        if lhs.nonFipsRosterPeerCount != rhs.nonFipsRosterPeerCount {
             return false
         }
         if lhs.meshReady != rhs.meshReady {
@@ -1333,6 +1395,13 @@ extension NativeAppState: Equatable, Hashable {
         hasher.combine(wireguardExitMtu)
         hasher.combine(wireguardExitPersistentKeepaliveSecs)
         hasher.combine(wireguardExitConfig)
+        hasher.combine(fipsHostTunnelEnabled)
+        hasher.combine(connectToNonRosterFipsPeers)
+        hasher.combine(fipsNostrDiscoveryEnabled)
+        hasher.combine(fipsBootstrapEnabled)
+        hasher.combine(fipsBootstrapPeers)
+        hasher.combine(fipsBootstrapPeerDefaults)
+        hasher.combine(fipsHostInboundTcpPorts)
         hasher.combine(magicDnsSuffix)
         hasher.combine(magicDnsStatus)
         hasher.combine(autoconnect)
@@ -1344,6 +1413,9 @@ extension NativeAppState: Equatable, Hashable {
         hasher.combine(closeToTrayOnClose)
         hasher.combine(connectedPeerCount)
         hasher.combine(expectedPeerCount)
+        hasher.combine(fipsConnectedPeerCount)
+        hasher.combine(fipsRosterPeerCount)
+        hasher.combine(nonFipsRosterPeerCount)
         hasher.combine(meshReady)
         hasher.combine(health)
         hasher.combine(network)
@@ -1419,6 +1491,13 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
                 wireguardExitMtu: FfiConverterUInt16.read(from: &buf),
                 wireguardExitPersistentKeepaliveSecs: FfiConverterUInt16.read(from: &buf),
                 wireguardExitConfig: FfiConverterString.read(from: &buf),
+                fipsHostTunnelEnabled: FfiConverterBool.read(from: &buf),
+                connectToNonRosterFipsPeers: FfiConverterBool.read(from: &buf),
+                fipsNostrDiscoveryEnabled: FfiConverterBool.read(from: &buf),
+                fipsBootstrapEnabled: FfiConverterBool.read(from: &buf),
+                fipsBootstrapPeers: FfiConverterDictionaryStringSequenceString.read(from: &buf),
+                fipsBootstrapPeerDefaults: FfiConverterDictionaryStringSequenceString.read(from: &buf),
+                fipsHostInboundTcpPorts: FfiConverterString.read(from: &buf),
                 magicDnsSuffix: FfiConverterString.read(from: &buf),
                 magicDnsStatus: FfiConverterString.read(from: &buf),
                 autoconnect: FfiConverterBool.read(from: &buf),
@@ -1430,6 +1509,9 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
                 closeToTrayOnClose: FfiConverterBool.read(from: &buf),
                 connectedPeerCount: FfiConverterUInt64.read(from: &buf),
                 expectedPeerCount: FfiConverterUInt64.read(from: &buf),
+                fipsConnectedPeerCount: FfiConverterUInt64.read(from: &buf),
+                fipsRosterPeerCount: FfiConverterUInt64.read(from: &buf),
+                nonFipsRosterPeerCount: FfiConverterUInt64.read(from: &buf),
                 meshReady: FfiConverterBool.read(from: &buf),
                 health: FfiConverterSequenceTypeNativeHealthIssue.read(from: &buf),
                 network: FfiConverterTypeNativeNetworkSummary.read(from: &buf),
@@ -1497,6 +1579,13 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
         FfiConverterUInt16.write(value.wireguardExitMtu, into: &buf)
         FfiConverterUInt16.write(value.wireguardExitPersistentKeepaliveSecs, into: &buf)
         FfiConverterString.write(value.wireguardExitConfig, into: &buf)
+        FfiConverterBool.write(value.fipsHostTunnelEnabled, into: &buf)
+        FfiConverterBool.write(value.connectToNonRosterFipsPeers, into: &buf)
+        FfiConverterBool.write(value.fipsNostrDiscoveryEnabled, into: &buf)
+        FfiConverterBool.write(value.fipsBootstrapEnabled, into: &buf)
+        FfiConverterDictionaryStringSequenceString.write(value.fipsBootstrapPeers, into: &buf)
+        FfiConverterDictionaryStringSequenceString.write(value.fipsBootstrapPeerDefaults, into: &buf)
+        FfiConverterString.write(value.fipsHostInboundTcpPorts, into: &buf)
         FfiConverterString.write(value.magicDnsSuffix, into: &buf)
         FfiConverterString.write(value.magicDnsStatus, into: &buf)
         FfiConverterBool.write(value.autoconnect, into: &buf)
@@ -1508,6 +1597,9 @@ public struct FfiConverterTypeNativeAppState: FfiConverterRustBuffer {
         FfiConverterBool.write(value.closeToTrayOnClose, into: &buf)
         FfiConverterUInt64.write(value.connectedPeerCount, into: &buf)
         FfiConverterUInt64.write(value.expectedPeerCount, into: &buf)
+        FfiConverterUInt64.write(value.fipsConnectedPeerCount, into: &buf)
+        FfiConverterUInt64.write(value.fipsRosterPeerCount, into: &buf)
+        FfiConverterUInt64.write(value.nonFipsRosterPeerCount, into: &buf)
         FfiConverterBool.write(value.meshReady, into: &buf)
         FfiConverterSequenceTypeNativeHealthIssue.write(value.health, into: &buf)
         FfiConverterTypeNativeNetworkSummary.write(value.network, into: &buf)
@@ -2907,14 +2999,19 @@ public struct SettingsPatch {
     public var wireguardExitMtu: UInt16?
     public var wireguardExitPersistentKeepaliveSecs: UInt16?
     public var wireguardExitConfig: String?
-    public var magicDnsSuffix: String?
+    public var fipsHostTunnelEnabled: Bool?
+    public var connectToNonRosterFipsPeers: Bool?
+    public var fipsNostrDiscoveryEnabled: Bool?
+    public var fipsBootstrapEnabled: Bool?
+    public var fipsBootstrapPeers: [String: [String]]?
+    public var fipsHostInboundTcpPorts: String?
     public var autoconnect: Bool?
     public var launchOnStartup: Bool?
     public var closeToTrayOnClose: Bool?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(nodeName: String?, endpoint: String?, tunnelIp: String?, listenPort: UInt16?, relays: [String]?, disabledRelays: [String]?, exitNode: String?, exitNodeLeakProtection: Bool?, advertiseExitNode: Bool?, advertisedRoutes: String?, wireguardExitEnabled: Bool?, wireguardExitInterface: String?, wireguardExitAddress: String?, wireguardExitPrivateKey: String?, wireguardExitPeerPublicKey: String?, wireguardExitPeerPresharedKey: String?, wireguardExitEndpoint: String?, wireguardExitAllowedIps: String?, wireguardExitDns: String?, wireguardExitMtu: UInt16?, wireguardExitPersistentKeepaliveSecs: UInt16?, wireguardExitConfig: String?, magicDnsSuffix: String?, autoconnect: Bool?, launchOnStartup: Bool?, closeToTrayOnClose: Bool?) {
+    public init(nodeName: String?, endpoint: String?, tunnelIp: String?, listenPort: UInt16?, relays: [String]?, disabledRelays: [String]?, exitNode: String?, exitNodeLeakProtection: Bool?, advertiseExitNode: Bool?, advertisedRoutes: String?, wireguardExitEnabled: Bool?, wireguardExitInterface: String?, wireguardExitAddress: String?, wireguardExitPrivateKey: String?, wireguardExitPeerPublicKey: String?, wireguardExitPeerPresharedKey: String?, wireguardExitEndpoint: String?, wireguardExitAllowedIps: String?, wireguardExitDns: String?, wireguardExitMtu: UInt16?, wireguardExitPersistentKeepaliveSecs: UInt16?, wireguardExitConfig: String?, fipsHostTunnelEnabled: Bool?, connectToNonRosterFipsPeers: Bool?, fipsNostrDiscoveryEnabled: Bool?, fipsBootstrapEnabled: Bool?, fipsBootstrapPeers: [String: [String]]?, fipsHostInboundTcpPorts: String?, autoconnect: Bool?, launchOnStartup: Bool?, closeToTrayOnClose: Bool?) {
         self.nodeName = nodeName
         self.endpoint = endpoint
         self.tunnelIp = tunnelIp
@@ -2937,7 +3034,12 @@ public struct SettingsPatch {
         self.wireguardExitMtu = wireguardExitMtu
         self.wireguardExitPersistentKeepaliveSecs = wireguardExitPersistentKeepaliveSecs
         self.wireguardExitConfig = wireguardExitConfig
-        self.magicDnsSuffix = magicDnsSuffix
+        self.fipsHostTunnelEnabled = fipsHostTunnelEnabled
+        self.connectToNonRosterFipsPeers = connectToNonRosterFipsPeers
+        self.fipsNostrDiscoveryEnabled = fipsNostrDiscoveryEnabled
+        self.fipsBootstrapEnabled = fipsBootstrapEnabled
+        self.fipsBootstrapPeers = fipsBootstrapPeers
+        self.fipsHostInboundTcpPorts = fipsHostInboundTcpPorts
         self.autoconnect = autoconnect
         self.launchOnStartup = launchOnStartup
         self.closeToTrayOnClose = closeToTrayOnClose
@@ -3017,7 +3119,22 @@ extension SettingsPatch: Equatable, Hashable {
         if lhs.wireguardExitConfig != rhs.wireguardExitConfig {
             return false
         }
-        if lhs.magicDnsSuffix != rhs.magicDnsSuffix {
+        if lhs.fipsHostTunnelEnabled != rhs.fipsHostTunnelEnabled {
+            return false
+        }
+        if lhs.connectToNonRosterFipsPeers != rhs.connectToNonRosterFipsPeers {
+            return false
+        }
+        if lhs.fipsNostrDiscoveryEnabled != rhs.fipsNostrDiscoveryEnabled {
+            return false
+        }
+        if lhs.fipsBootstrapEnabled != rhs.fipsBootstrapEnabled {
+            return false
+        }
+        if lhs.fipsBootstrapPeers != rhs.fipsBootstrapPeers {
+            return false
+        }
+        if lhs.fipsHostInboundTcpPorts != rhs.fipsHostInboundTcpPorts {
             return false
         }
         if lhs.autoconnect != rhs.autoconnect {
@@ -3055,7 +3172,12 @@ extension SettingsPatch: Equatable, Hashable {
         hasher.combine(wireguardExitMtu)
         hasher.combine(wireguardExitPersistentKeepaliveSecs)
         hasher.combine(wireguardExitConfig)
-        hasher.combine(magicDnsSuffix)
+        hasher.combine(fipsHostTunnelEnabled)
+        hasher.combine(connectToNonRosterFipsPeers)
+        hasher.combine(fipsNostrDiscoveryEnabled)
+        hasher.combine(fipsBootstrapEnabled)
+        hasher.combine(fipsBootstrapPeers)
+        hasher.combine(fipsHostInboundTcpPorts)
         hasher.combine(autoconnect)
         hasher.combine(launchOnStartup)
         hasher.combine(closeToTrayOnClose)
@@ -3093,7 +3215,12 @@ public struct FfiConverterTypeSettingsPatch: FfiConverterRustBuffer {
                 wireguardExitMtu: FfiConverterOptionUInt16.read(from: &buf),
                 wireguardExitPersistentKeepaliveSecs: FfiConverterOptionUInt16.read(from: &buf),
                 wireguardExitConfig: FfiConverterOptionString.read(from: &buf),
-                magicDnsSuffix: FfiConverterOptionString.read(from: &buf),
+                fipsHostTunnelEnabled: FfiConverterOptionBool.read(from: &buf),
+                connectToNonRosterFipsPeers: FfiConverterOptionBool.read(from: &buf),
+                fipsNostrDiscoveryEnabled: FfiConverterOptionBool.read(from: &buf),
+                fipsBootstrapEnabled: FfiConverterOptionBool.read(from: &buf),
+                fipsBootstrapPeers: FfiConverterOptionDictionaryStringSequenceString.read(from: &buf),
+                fipsHostInboundTcpPorts: FfiConverterOptionString.read(from: &buf),
                 autoconnect: FfiConverterOptionBool.read(from: &buf),
                 launchOnStartup: FfiConverterOptionBool.read(from: &buf),
                 closeToTrayOnClose: FfiConverterOptionBool.read(from: &buf)
@@ -3123,7 +3250,12 @@ public struct FfiConverterTypeSettingsPatch: FfiConverterRustBuffer {
         FfiConverterOptionUInt16.write(value.wireguardExitMtu, into: &buf)
         FfiConverterOptionUInt16.write(value.wireguardExitPersistentKeepaliveSecs, into: &buf)
         FfiConverterOptionString.write(value.wireguardExitConfig, into: &buf)
-        FfiConverterOptionString.write(value.magicDnsSuffix, into: &buf)
+        FfiConverterOptionBool.write(value.fipsHostTunnelEnabled, into: &buf)
+        FfiConverterOptionBool.write(value.connectToNonRosterFipsPeers, into: &buf)
+        FfiConverterOptionBool.write(value.fipsNostrDiscoveryEnabled, into: &buf)
+        FfiConverterOptionBool.write(value.fipsBootstrapEnabled, into: &buf)
+        FfiConverterOptionDictionaryStringSequenceString.write(value.fipsBootstrapPeers, into: &buf)
+        FfiConverterOptionString.write(value.fipsHostInboundTcpPorts, into: &buf)
         FfiConverterOptionBool.write(value.autoconnect, into: &buf)
         FfiConverterOptionBool.write(value.launchOnStartup, into: &buf)
         FfiConverterOptionBool.write(value.closeToTrayOnClose, into: &buf)
@@ -3716,6 +3848,30 @@ fileprivate struct FfiConverterOptionSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionDictionaryStringSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String: [String]]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterDictionaryStringSequenceString.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterDictionaryStringSequenceString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
@@ -3885,6 +4041,32 @@ fileprivate struct FfiConverterSequenceTypeNativeRelayState: FfiConverterRustBuf
             seq.append(try FfiConverterTypeNativeRelayState.read(from: &buf))
         }
         return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryStringSequenceString: FfiConverterRustBuffer {
+    public static func write(_ value: [String: [String]], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterString.write(key, into: &buf)
+            FfiConverterSequenceString.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String: [String]] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [String: [String]]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterString.read(from: &buf)
+            let value = try FfiConverterSequenceString.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
     }
 }
 

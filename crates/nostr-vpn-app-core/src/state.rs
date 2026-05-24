@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 pub use nostr_vpn_core::diagnostics::{HealthIssue, NetworkSummary, PortMappingStatus};
@@ -26,6 +28,10 @@ pub struct DaemonRuntimeState {
     pub expected_peer_count: usize,
     #[serde(alias = "connected_peer_count")]
     pub connected_peer_count: usize,
+    #[serde(default, alias = "fips_direct_roster_peer_count")]
+    pub fips_direct_roster_peer_count: usize,
+    #[serde(default, alias = "fips_other_peer_count")]
+    pub fips_other_peer_count: usize,
     #[serde(alias = "mesh_ready")]
     pub mesh_ready: bool,
     #[serde(default)]
@@ -230,6 +236,11 @@ pub struct UiState {
     pub wireguard_exit_mtu: u16,
     pub wireguard_exit_persistent_keepalive_secs: u16,
     pub wireguard_exit_config: String,
+    pub fips_host_tunnel_enabled: bool,
+    pub connect_to_non_roster_fips_peers: bool,
+    pub fips_nostr_discovery_enabled: bool,
+    pub fips_bootstrap_enabled: bool,
+    pub fips_host_inbound_tcp_ports: String,
     pub magic_dns_suffix: String,
     pub magic_dns_status: String,
     pub autoconnect: bool,
@@ -241,6 +252,9 @@ pub struct UiState {
     pub close_to_tray_on_close: bool,
     pub connected_peer_count: usize,
     pub expected_peer_count: usize,
+    pub fips_connected_peer_count: usize,
+    pub fips_roster_peer_count: usize,
+    pub non_fips_roster_peer_count: usize,
     pub mesh_ready: bool,
     pub health: Vec<HealthIssue>,
     pub network: NetworkSummary,
@@ -287,7 +301,12 @@ pub struct SettingsPatch {
     pub wireguard_exit_mtu: Option<u16>,
     pub wireguard_exit_persistent_keepalive_secs: Option<u16>,
     pub wireguard_exit_config: Option<String>,
-    pub magic_dns_suffix: Option<String>,
+    pub fips_host_tunnel_enabled: Option<bool>,
+    pub connect_to_non_roster_fips_peers: Option<bool>,
+    pub fips_nostr_discovery_enabled: Option<bool>,
+    pub fips_bootstrap_enabled: Option<bool>,
+    pub fips_bootstrap_peers: Option<HashMap<String, Vec<String>>>,
+    pub fips_host_inbound_tcp_ports: Option<String>,
     pub autoconnect: Option<bool>,
     pub launch_on_startup: Option<bool>,
     pub close_to_tray_on_close: Option<bool>,
@@ -407,6 +426,8 @@ mod tests {
             "vpn_status": "Running",
             "expected_peer_count": 1,
             "connected_peer_count": 1,
+            "fips_direct_roster_peer_count": 1,
+            "fips_other_peer_count": 2,
             "mesh_ready": true,
             "port_mapping": {
                 "upnp": { "state": "unknown" },
@@ -439,6 +460,8 @@ mod tests {
 
         assert!(state.vpn_enabled);
         assert_eq!(state.connected_peer_count, 1);
+        assert_eq!(state.fips_direct_roster_peer_count, 1);
+        assert_eq!(state.fips_other_peer_count, 2);
         assert_eq!(state.port_mapping.active_protocol, None);
         assert_eq!(state.relays[0].url, "wss://temp.iris.to");
         assert_eq!(state.relays[0].status, "connected");

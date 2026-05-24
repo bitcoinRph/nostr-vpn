@@ -41,6 +41,7 @@ It currently ships:
 | `windows` | WPF native shell and installer over the shared app core |
 | `android` / `ios` | Native mobile shells with shared Rust state/action and packet-tunnel scaffolding |
 | `umbrel` | Umbrel app package with a web control panel and daemon container |
+| `startos` | StartOS service package with a StartOS-managed web control panel |
 
 ## Getting Started
 
@@ -98,6 +99,7 @@ Private mesh traffic defaults to [FIPS]. `nvpn` uses the configured VPN particip
 | Android arm64 | Native app-core UI, signed APK/AAB release artifacts when signing is configured, VPN runtime still being hardened |
 | iOS | Native SwiftUI app builds/runs from source and simulator, NetworkExtension target exists, [TestFlight link](https://testflight.apple.com/join/jPRVxbSv) exists but public beta access is pending |
 | Umbrel | Web control panel and daemon package tested on umbrelOS; app-store submission bundle generated from a pinned multi-arch container image |
+| StartOS | Service package builds for x86_64 and aarch64; tested on a StartOS VM |
 | Intel macOS | Source-only |
 
 ## What the project does today
@@ -130,7 +132,7 @@ The config contains:
 - Nostr settings used by [FIPS] discovery, including relay URLs and identity keys
 - NAT settings including STUN servers and discovery timeout
 - node settings including endpoint, tunnel IP, listen port, and advertised routes
-- a `[[networks]]` list of named participant sets with one active network at a time
+- a `[[networks]]` list of named participant sets with at most one active network at a time
 
 Each `[[networks]]` entry carries its own `network_id`, which is the mesh identity used for roster scope and auto-derived tunnel addressing. If an older config still only has the legacy top-level default, `nostr-vpn` promotes it into per-network stable IDs and then stops recomputing them on participant changes.
 
@@ -161,18 +163,9 @@ Additional automation:
 
 ### StartOS package
 
-The StartOS package entrypoint lives in [`startos`](startos) and builds the
-same daemon + web-control-panel container used by the Umbrel package.
-
-```bash
-npm install
-npm run check
-npm run build
-make
-```
-
-`make` requires the StartOS `start-cli` tooling and emits architecture-specific
-`.s9pk` files for x86_64 and aarch64.
+The StartOS package lives in [`startos`](startos), builds for x86_64 and
+aarch64, exposes one StartOS-managed Web UI, and has no service dependencies.
+Maintainer commands are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ### Umbrel app
 

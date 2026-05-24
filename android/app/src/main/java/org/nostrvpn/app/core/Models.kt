@@ -25,6 +25,9 @@ data class AppState(
     val activeNetworkInvite: String = "",
     val connectedPeerCount: Long = 0,
     val expectedPeerCount: Long = 0,
+    val fipsConnectedPeerCount: Long = 0,
+    val fipsRosterPeerCount: Long = 0,
+    val nonFipsRosterPeerCount: Long = 0,
     val meshReady: Boolean = false,
     val exitNode: String = "",
     val exitNodeLeakProtection: Boolean = false,
@@ -46,6 +49,9 @@ data class AppState(
     val wireguardExitMtu: Int = 0,
     val wireguardExitPersistentKeepaliveSecs: Int = 0,
     val wireguardExitConfig: String = "",
+    val connectToNonRosterFipsPeers: Boolean = true,
+    val fipsNostrDiscoveryEnabled: Boolean = true,
+    val fipsBootstrapEnabled: Boolean = true,
     val magicDnsSuffix: String = "",
     val magicDnsStatus: String = "",
     val autoconnect: Boolean = false,
@@ -124,7 +130,7 @@ data class HealthIssue(
 )
 
 val AppState.activeNetwork: NetworkState?
-    get() = networks.firstOrNull { it.enabled } ?: networks.firstOrNull()
+    get() = networks.firstOrNull { it.enabled }
 
 fun parseAppState(jsonText: String): AppState {
     val json = JSONObject(jsonText.ifBlank { "{}" })
@@ -150,6 +156,9 @@ fun parseAppState(jsonText: String): AppState {
         activeNetworkInvite = json.optString("activeNetworkInvite"),
         connectedPeerCount = json.optLong("connectedPeerCount"),
         expectedPeerCount = json.optLong("expectedPeerCount"),
+        fipsConnectedPeerCount = json.optLong("fipsConnectedPeerCount"),
+        fipsRosterPeerCount = json.optLong("fipsRosterPeerCount"),
+        nonFipsRosterPeerCount = json.optLong("nonFipsRosterPeerCount"),
         meshReady = json.optBoolean("meshReady"),
         exitNode = json.optString("exitNode"),
         exitNodeLeakProtection = json.optBoolean("exitNodeLeakProtection"),
@@ -171,6 +180,9 @@ fun parseAppState(jsonText: String): AppState {
         wireguardExitMtu = json.optInt("wireguardExitMtu"),
         wireguardExitPersistentKeepaliveSecs = json.optInt("wireguardExitPersistentKeepaliveSecs"),
         wireguardExitConfig = json.optString("wireguardExitConfig"),
+        connectToNonRosterFipsPeers = json.optBoolean("connectToNonRosterFipsPeers", true),
+        fipsNostrDiscoveryEnabled = json.optBoolean("fipsNostrDiscoveryEnabled", true),
+        fipsBootstrapEnabled = json.optBoolean("fipsBootstrapEnabled", true),
         magicDnsSuffix = json.optString("magicDnsSuffix"),
         magicDnsStatus = json.optString("magicDnsStatus"),
         autoconnect = json.optBoolean("autoconnect"),

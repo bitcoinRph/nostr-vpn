@@ -59,7 +59,11 @@ public sealed class SettingsPatch
     public ushort? WireguardExitMtu { get; set; }
     public ushort? WireguardExitPersistentKeepaliveSecs { get; set; }
     public string? WireguardExitConfig { get; set; }
-    public string? MagicDnsSuffix { get; set; }
+    public bool? FipsHostTunnelEnabled { get; set; }
+    public bool? ConnectToNonRosterFipsPeers { get; set; }
+    public bool? FipsNostrDiscoveryEnabled { get; set; }
+    public bool? FipsBootstrapEnabled { get; set; }
+    public string? FipsHostInboundTcpPorts { get; set; }
     public bool? Autoconnect { get; set; }
     public bool? LaunchOnStartup { get; set; }
     public bool? CloseToTrayOnClose { get; set; }

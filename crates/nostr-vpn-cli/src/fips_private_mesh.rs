@@ -9,11 +9,13 @@ use fips_endpoint::{
 use nostr_sdk::prelude::{PublicKey, ToBech32};
 use nostr_vpn_core::config::{
     AppConfig, WireGuardExitConfig, derive_mesh_tunnel_ip, normalize_nostr_pubkey,
+    split_peer_transport_addr,
 };
 use nostr_vpn_core::data_plane::{MeshPeerStatus, PrivatePacket};
 use nostr_vpn_core::fips_control::{
     FipsControlFragmentBuffer, FipsControlFrame, NetworkRoster, PeerCapabilities, PeerEndpointHint,
-    decode_fips_control_frame, encode_fips_control_frame, encode_fips_control_messages,
+    SignedRoster, decode_fips_control_frame, encode_fips_control_frame,
+    encode_fips_control_messages,
 };
 use nostr_vpn_core::fips_mesh::{FipsMeshPeerConfig, FipsMeshRuntime};
 use nostr_vpn_core::join_requests::MeshJoinRequest;
@@ -98,11 +100,15 @@ use tokio::time::{Duration, sleep};
 #[cfg(target_os = "windows")]
 use wintun::{Adapter, MAX_RING_CAPACITY, Session};
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::fips_host_tunnel::FipsHostTunnelConfig;
+
 pub(crate) struct FipsPrivateMeshRuntime {
     endpoint: FipsEndpoint,
     mesh: RwLock<FipsMeshRuntime>,
     presence: RwLock<HashMap<String, FipsPeerPresence>>,
     link_status: RwLock<HashMap<String, FipsEndpointPeer>>,
+    other_link_status: RwLock<HashMap<String, FipsEndpointPeer>>,
     peer_capabilities: RwLock<HashMap<String, PeerCapabilitiesEntry>>,
     control_fragments: Mutex<ControlFragmentBuffer>,
 }
@@ -221,6 +227,18 @@ fn fips_nostr_discovery_policy_from_env() -> NostrDiscoveryPolicy {
         .unwrap_or(NostrDiscoveryPolicy::Open)
 }
 
+fn fips_nostr_discovery_policy_from_app(app: &AppConfig) -> NostrDiscoveryPolicy {
+    std::env::var("NVPN_FIPS_NOSTR_DISCOVERY_POLICY")
+        .ok()
+        .as_deref()
+        .and_then(parse_fips_nostr_discovery_policy)
+        .unwrap_or(if app.connect_to_non_roster_fips_peers {
+            NostrDiscoveryPolicy::Open
+        } else {
+            NostrDiscoveryPolicy::ConfiguredOnly
+        })
+}
+
 fn parse_fips_nostr_discovery_policy(value: &str) -> Option<NostrDiscoveryPolicy> {
     match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
         "disabled" | "off" | "false" | "0" => Some(NostrDiscoveryPolicy::Disabled),
@@ -300,6 +318,49 @@ fn fips_peer_ping_due(
 ) -> bool {
     let interval = fips_peer_ping_interval_secs(last_seen_at, link_connected, now);
     last_ping_sent_at.is_none_or(|sent_at| now.saturating_sub(sent_at) >= interval)
+}
+
+fn mesh_status_from_endpoint_peer(
+    pubkey: String,
+    peer: &FipsEndpointPeer,
+    now: u64,
+) -> MeshPeerStatus {
+    MeshPeerStatus {
+        pubkey,
+        connected: true,
+        endpoint_npub: normalize_fips_endpoint_npub(&peer.npub),
+        transport_addr: peer.transport_addr.clone(),
+        transport_type: peer.transport_type.clone(),
+        srtt_ms: peer.srtt_ms,
+        link_packets_sent: peer.packets_sent,
+        link_packets_recv: peer.packets_recv,
+        link_bytes_sent: peer.bytes_sent,
+        link_bytes_recv: peer.bytes_recv,
+        last_seen_at: Some(now),
+        tx_bytes: 0,
+        rx_bytes: 0,
+        error: None,
+    }
+}
+
+fn endpoint_peer_status_pubkey(peer: &FipsEndpointPeer) -> Option<String> {
+    normalize_nostr_pubkey(&peer.npub).ok()
+}
+
+fn other_endpoint_peer_statuses(
+    other_link_status: &HashMap<String, FipsEndpointPeer>,
+    now: u64,
+) -> Vec<MeshPeerStatus> {
+    let mut statuses = other_link_status
+        .values()
+        .filter_map(|peer| {
+            endpoint_peer_status_pubkey(peer)
+                .map(|pubkey| mesh_status_from_endpoint_peer(pubkey, peer, now))
+        })
+        .collect::<Vec<_>>();
+    statuses.sort_by(|left, right| left.pubkey.cmp(&right.pubkey));
+    statuses.dedup_by(|left, right| left.pubkey == right.pubkey);
+    statuses
 }
 
 fn peer_endpoint_hint_addr(hint: &PeerEndpointHint) -> Option<String> {
@@ -415,6 +476,7 @@ pub(crate) enum FipsPrivateMeshEvent {
         sender_pubkey: String,
         network_id: String,
         roster: NetworkRoster,
+        signed_roster: Option<Box<SignedRoster>>,
     },
     Capabilities {
         sender_pubkey: String,
@@ -477,6 +539,7 @@ impl FipsPrivateMeshRuntime {
             mesh: RwLock::new(FipsMeshRuntime::with_local_routes(peers, local_allowed_ips)),
             presence: RwLock::new(HashMap::new()),
             link_status: RwLock::new(HashMap::new()),
+            other_link_status: RwLock::new(HashMap::new()),
             peer_capabilities: RwLock::new(HashMap::new()),
             control_fragments: Mutex::new(ControlFragmentBuffer::default()),
         })
@@ -606,11 +669,16 @@ impl FipsPrivateMeshRuntime {
                         request,
                     }));
                 }
-                FipsControlFrame::Roster { network_id, roster } => {
+                FipsControlFrame::Roster {
+                    network_id,
+                    roster,
+                    signed_roster,
+                } => {
                     return Ok(Some(FipsPrivateMeshEvent::Roster {
                         sender_pubkey: source_pubkey,
                         network_id,
                         roster,
+                        signed_roster,
                     }));
                 }
                 FipsControlFrame::Capabilities {
@@ -689,6 +757,7 @@ impl FipsPrivateMeshRuntime {
         let now = unix_timestamp();
         let presence = self.presence.read().ok();
         let link_status = self.link_status.read().ok();
+        let other_link_status = self.other_link_status.read().ok();
         let mut statuses = self
             .mesh
             .read()
@@ -727,6 +796,11 @@ impl FipsPrivateMeshRuntime {
             status.connected = connected;
             status.error = error;
         }
+        if let Some(other_link_status) = other_link_status {
+            statuses.extend(other_endpoint_peer_statuses(&other_link_status, now));
+        }
+        statuses.sort_by(|left, right| left.pubkey.cmp(&right.pubkey));
+        statuses.dedup_by(|left, right| left.pubkey == right.pubkey);
         statuses
     }
 
@@ -741,24 +815,46 @@ impl FipsPrivateMeshRuntime {
             .read()
             .map_err(|_| anyhow!("FIPS mesh route table lock poisoned"))?;
         let mut link_status = HashMap::new();
+        let mut other_link_status = HashMap::new();
         for peer in endpoint_peers {
             if let Some(participant) = mesh.participant_for_endpoint_npub(&peer.npub) {
                 link_status.insert(participant, peer);
+            } else if let Some(pubkey) = endpoint_peer_status_pubkey(&peer) {
+                other_link_status.insert(pubkey, peer);
             }
         }
         *self
             .link_status
             .write()
             .map_err(|_| anyhow!("FIPS mesh link status lock poisoned"))? = link_status;
+        *self
+            .other_link_status
+            .write()
+            .map_err(|_| anyhow!("FIPS mesh other link status lock poisoned"))? = other_link_status;
         Ok(())
     }
 
     pub(crate) async fn relay_statuses(&self) -> Result<Vec<FipsRelayStatus>> {
-        Ok(Vec::new())
+        self.endpoint
+            .relay_statuses()
+            .await
+            .context("failed to snapshot FIPS endpoint relays")
+            .map(|relays| {
+                relays
+                    .into_iter()
+                    .map(|relay| FipsRelayStatus {
+                        url: relay.url,
+                        status: relay.status,
+                    })
+                    .collect()
+            })
     }
 
-    pub(crate) async fn update_relays(&self, _relays: &[String]) -> Result<()> {
-        Ok(())
+    pub(crate) async fn update_relays(&self, relays: &[String]) -> Result<()> {
+        self.endpoint
+            .update_relays(relays.to_vec(), relays.to_vec())
+            .await
+            .context("failed to update FIPS endpoint relays")
     }
 
     pub(crate) fn peer_pubkeys(&self) -> Vec<String> {
@@ -797,11 +893,11 @@ impl FipsPrivateMeshRuntime {
             .collect())
     }
 
-    /// Snapshot `(endpoint_npub, transport_addr)` pairs for every peer that
-    /// currently has an authenticated FIPS link, including open-discovery
+    /// Snapshot `(endpoint_npub, transport-tagged addr)` pairs for every peer
+    /// that currently has an authenticated FIPS link, including open-discovery
     /// transit peers outside the private-network roster. Used by the daemon
-    /// heartbeat to update the on-disk recent-peers cache so restarts can
-    /// seed useful overlay peers before relay discovery has warmed up.
+    /// heartbeat to update the on-disk recent-peers cache so restarts can seed
+    /// useful overlay peers before relay discovery has warmed up.
     pub(crate) async fn authenticated_peer_transport_addrs(&self) -> Result<Vec<(String, String)>> {
         let peers = self
             .endpoint
@@ -810,7 +906,10 @@ impl FipsPrivateMeshRuntime {
             .context("failed to snapshot FIPS endpoint peers")?;
         Ok(peers
             .into_iter()
-            .filter_map(|peer| peer.transport_addr.map(|addr| (peer.npub, addr)))
+            .filter_map(|peer| {
+                tag_authenticated_transport_addr(peer.transport_addr, peer.transport_type)
+                    .map(|addr| (peer.npub, addr))
+            })
             .collect())
     }
 
@@ -853,6 +952,10 @@ impl FipsPrivateMeshRuntime {
             .write()
             .map_err(|_| anyhow!("FIPS mesh link status lock poisoned"))?
             .retain(|participant, _| configured.iter().any(|value| value == participant));
+        self.other_link_status
+            .write()
+            .map_err(|_| anyhow!("FIPS mesh other link status lock poisoned"))?
+            .clear();
         self.peer_capabilities
             .write()
             .map_err(|_| anyhow!("FIPS mesh peer capabilities lock poisoned"))?
@@ -964,14 +1067,16 @@ impl FipsPrivateMeshRuntime {
     pub(crate) async fn send_roster(
         &self,
         participant: &str,
-        network_id: &str,
-        roster: NetworkRoster,
+        signed_roster: SignedRoster,
     ) -> Result<()> {
+        let network_id = signed_roster.network_id()?;
+        let roster = signed_roster.roster()?;
         self.send_control_frame(
             participant,
             &FipsControlFrame::Roster {
-                network_id: network_id.to_string(),
+                network_id,
                 roster,
+                signed_roster: Some(Box::new(signed_roster)),
             },
         )
         .await
@@ -1151,13 +1256,7 @@ impl FipsPrivateMeshRuntime {
                 addresses: peer
                     .addresses
                     .iter()
-                    .map(|hint| {
-                        let mut addr = PeerAddress::new("udp", hint.addr.clone());
-                        if let Some(seen_at_ms) = hint.seen_at_ms {
-                            addr = addr.with_seen_at_ms(seen_at_ms);
-                        }
-                        addr
-                    })
+                    .map(fips_peer_address_from_hint)
                     .collect(),
                 connect_policy: ConnectPolicy::AutoConnect,
                 auto_reconnect: true,
@@ -1202,6 +1301,10 @@ struct FipsEndpointTransportConfig {
     listen_port: u16,
     advertised_endpoint: String,
     advertise_endpoint: bool,
+    /// Find/advertise peers over Nostr relays. When false, the endpoint still
+    /// dials static/bootstrap peers and does LAN discovery, but does not use
+    /// relays for endpoint discovery or advertising.
+    nostr_discovery_enabled: bool,
     stun_servers: Vec<String>,
     nostr_relays: Vec<String>,
     share_local_candidates: bool,
@@ -1226,6 +1329,15 @@ pub(crate) struct FipsEndpointPeerTransportConfig {
     pub(crate) discovery_fallback_transit: bool,
 }
 
+fn fips_peer_address_from_hint(hint: &FipsPeerAddressHint) -> PeerAddress {
+    let (transport, addr) = split_peer_transport_addr(&hint.addr);
+    let mut peer_address = PeerAddress::new(transport, addr);
+    if let Some(seen_at_ms) = hint.seen_at_ms {
+        peer_address = peer_address.with_seen_at_ms(seen_at_ms);
+    }
+    peer_address
+}
+
 fn fips_endpoint_config(
     peers: &[FipsEndpointPeerTransportConfig],
     transport: Option<&FipsEndpointTransportConfig>,
@@ -1248,14 +1360,22 @@ fn fips_endpoint_config(
     let advertise_udp = transport
         .map(|transport| transport.advertise_endpoint)
         .unwrap_or(false);
-    let nostr_enabled = advertise_udp || !peers.is_empty();
+    // The "find peers over Nostr relays" toggle. When off we neither advertise
+    // nor stream adverts/DMs, but static + bootstrap peers (config.peers below)
+    // are still dialed directly and LAN discovery still runs.
+    let nostr_discovery_enabled = transport
+        .map(|transport| transport.nostr_discovery_enabled)
+        .unwrap_or(true);
+    let advertise_on_nostr = nostr_discovery_enabled && advertise_udp;
+    let nostr_enabled = nostr_discovery_enabled && (advertise_udp || !peers.is_empty());
     config.node.discovery.nostr.enabled = nostr_enabled;
-    config.node.discovery.nostr.advertise = advertise_udp;
-    // Open discovery by default so we can FIPS-handshake with any nvpn node we see on
-    // relays, not just configured roster peers. This is what lets us route
-    // app-mesh traffic through transit hops that aren't in our network roster
-    // (a friend-of-a-friend nvpn node can ferry our packets when direct
-    // traversal fails). Security boundary: the FIPS handshake is open; the
+    config.node.discovery.nostr.advertise = advertise_on_nostr;
+    // Open discovery by default (unless the user opts into configured-only
+    // discovery) so we can FIPS-handshake with any nvpn node we see on relays,
+    // not just configured roster peers. This is what lets us route app-mesh
+    // traffic through transit hops that aren't in our network roster (a
+    // friend-of-a-friend nvpn node can ferry our packets when direct
+    // traversal fails). Security boundary: the FIPS handshake can be open; the
     // per-network data plane is NOT. `FipsMeshRuntime::receive_endpoint_data*`
     // drops every inbound packet whose source npub doesn't own the inner
     // source IP per our roster, so a non-roster transit peer can carry frames
@@ -1291,7 +1411,7 @@ fn fips_endpoint_config(
     }
     config.transports.udp = TransportInstances::Single(UdpConfig {
         bind_addr,
-        advertise_on_nostr: Some(advertise_udp),
+        advertise_on_nostr: Some(advertise_on_nostr),
         public: Some(external_addr.is_some()),
         external_addr,
         outbound_only: Some(transport.is_none()),
@@ -1302,6 +1422,24 @@ fn fips_endpoint_config(
         mtu: Some(mesh_mtu.underlay_udp),
         ..UdpConfig::default()
     });
+    // Outbound TCP transport so peers reachable only over tcp:443 (e.g. on
+    // networks that block UDP outright) can still be dialed. bind_addr=None keeps
+    // it outbound-only — no listener.
+    let needs_tcp = peers.iter().any(|peer| {
+        peer.addresses
+            .iter()
+            .any(|hint| split_peer_transport_addr(&hint.addr).0 == "tcp")
+    });
+    if needs_tcp {
+        // Default = outbound-only (no bind_addr). Inferred type keeps this the
+        // exact `TcpConfig` of `config.transports`, which matters under the e2e's
+        // [patch.crates-io] where a second fips-core version can be in the graph,
+        // so we deliberately keep `Default::default()` over `TcpConfig::default()`.
+        #[allow(clippy::default_trait_access)]
+        {
+            config.transports.tcp = TransportInstances::Single(Default::default());
+        }
+    }
     config.peers = peers
         .iter()
         .map(|peer| FipsPeerConfig {
@@ -1310,13 +1448,7 @@ fn fips_endpoint_config(
             addresses: peer
                 .addresses
                 .iter()
-                .map(|hint| {
-                    let mut addr = PeerAddress::new("udp", hint.addr.clone());
-                    if let Some(seen_at_ms) = hint.seen_at_ms {
-                        addr = addr.with_seen_at_ms(seen_at_ms);
-                    }
-                    addr
-                })
+                .map(fips_peer_address_from_hint)
                 .collect(),
             connect_policy: ConnectPolicy::AutoConnect,
             auto_reconnect: true,
@@ -1370,8 +1502,8 @@ fn fips_endpoint_peers_from_mesh(
     // fips dialer ranks them ahead of unstamped operator hints in the
     // same try-everything pass. Authenticated non-roster entries are kept
     // too: those are overlay transit peers we successfully handshook with
-    // before, and reseeding them on restart keeps the FIPS overlay warm
-    // before relay discovery catches up.
+    // before, and reseeding them as fallback transit keeps the FIPS overlay
+    // useful before relay discovery catches up.
     for (npub, addresses) in recent_peer_endpoints {
         let npub = normalize_fips_endpoint_npub(&npub);
         let peer = peers
@@ -1379,7 +1511,7 @@ fn fips_endpoint_peers_from_mesh(
             .or_insert_with(|| FipsEndpointPeerTransportConfig {
                 npub,
                 addresses: Vec::new(),
-                discovery_fallback_transit: false,
+                discovery_fallback_transit: true,
             });
         for (addr, seen_at_ms) in addresses {
             let trimmed = addr.trim();
@@ -1456,9 +1588,13 @@ pub(crate) struct FipsPrivateTunnelConfig {
     pub(crate) peers: Vec<FipsMeshPeerConfig>,
     pub(crate) endpoint_peers: Vec<FipsEndpointPeerTransportConfig>,
     pub(crate) route_targets: Vec<String>,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(crate) fips_host: Option<FipsHostTunnelConfig>,
     pub(crate) local_advertised_routes: Vec<String>,
     pub(crate) wireguard_exit: WireGuardExitConfig,
     pub(crate) exit_node_leak_protection: bool,
+    nostr_discovery_enabled: bool,
+    nostr_discovery_policy: NostrDiscoveryPolicy,
     mesh_mtu: MeshMtu,
     #[cfg(target_os = "linux")]
     pub(crate) control_plane_bypass_hosts: Vec<Ipv4Addr>,
@@ -1530,10 +1666,18 @@ impl FipsPrivateTunnelConfig {
             .map(|participant| normalize_fips_endpoint_npub(&participant))
             .collect::<std::collections::HashSet<_>>();
         let tunnel_endpoint_hosts = fips_tunnel_endpoint_hosts(app, network_id);
-        let operator_static = filter_static_tunnel_endpoints(
+        let mut operator_static = filter_static_tunnel_endpoints(
             app.fips_static_peer_endpoints(),
             &tunnel_endpoint_hosts,
         );
+        // Built-in public bootstrap nodes as fallback transit. They share the
+        // same `discovery_fallback_transit` path as operator-configured static
+        // peers, so they ferry frames when direct traversal fails but never
+        // become roster route targets.
+        operator_static.extend(filter_static_tunnel_endpoints(
+            app.fips_bootstrap_peer_endpoints(),
+            &tunnel_endpoint_hosts,
+        ));
         let mut recent_peer_endpoints = recent_peers
             .map(|cache| cache.as_static_peer_endpoints_with_seen_at())
             .unwrap_or_default();
@@ -1563,6 +1707,8 @@ impl FipsPrivateTunnelConfig {
             fips_endpoint_peers_from_mesh(&peers, operator_static, recent_peer_endpoints);
         route_targets.sort();
         route_targets.dedup();
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let fips_host = FipsHostTunnelConfig::from_app(app)?;
 
         Ok(Self {
             identity_nsec: app.nostr.secret_key.clone(),
@@ -1581,9 +1727,13 @@ impl FipsPrivateTunnelConfig {
             peers,
             endpoint_peers,
             route_targets,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            fips_host,
             local_advertised_routes: crate::runtime_effective_advertised_routes(app),
             wireguard_exit: app.wireguard_exit.clone(),
             exit_node_leak_protection: app.exit_node_leak_protection,
+            nostr_discovery_enabled: app.fips_nostr_discovery_enabled,
+            nostr_discovery_policy: fips_nostr_discovery_policy_from_app(app),
             mesh_mtu: private_mesh_mtu_from_app(Some(app)),
             #[cfg(target_os = "linux")]
             control_plane_bypass_hosts: crate::control_plane_bypass_ipv4_hosts(app),
@@ -1596,6 +1746,20 @@ impl FipsPrivateTunnelConfig {
         routes.sort();
         routes.dedup();
         routes
+    }
+
+    fn interface_addresses(&self) -> Vec<String> {
+        let mut addresses = vec![self.local_address.clone()];
+        addresses.sort();
+        addresses.dedup();
+        addresses
+    }
+
+    fn interface_route_targets(&self) -> Vec<String> {
+        let mut targets = self.route_targets.clone();
+        targets.sort();
+        targets.dedup();
+        targets
     }
 }
 
@@ -1612,6 +1776,31 @@ fn local_interface_address_for_tunnel(tunnel_ip: &str) -> String {
 
 fn strip_cidr(value: &str) -> &str {
     value.split('/').next().unwrap_or(value)
+}
+
+fn tag_authenticated_transport_addr(
+    addr: Option<String>,
+    transport_type: Option<String>,
+) -> Option<String> {
+    let addr = addr?;
+    let addr = addr.trim();
+    if addr.is_empty() {
+        return None;
+    }
+
+    let (addr_transport, host_port) = split_peer_transport_addr(addr);
+    let transport = transport_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(addr_transport.as_str())
+        .to_ascii_lowercase();
+
+    match transport.as_str() {
+        "udp" => Some(host_port),
+        "tcp" => Some(format!("tcp:{host_port}")),
+        _ => None,
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1632,6 +1821,9 @@ pub(crate) struct FipsPrivateTunnelRuntime {
     iface: String,
     mesh: Arc<FipsPrivateMeshRuntime>,
     config: FipsPrivateTunnelConfig,
+    _tun: Arc<TunSocket>,
+    tun_fd: Arc<AsyncFd<BorrowedTunFd>>,
+    fips_host: Option<crate::fips_host_tunnel::FipsHostTunnelRuntime>,
     tun_read_task: JoinHandle<()>,
     mesh_send_task: JoinHandle<()>,
     mesh_recv_task: JoinHandle<()>,
@@ -1667,6 +1859,7 @@ impl FipsPrivateTunnelRuntime {
             listen_port: config.listen_port,
             advertised_endpoint: config.advertised_endpoint.clone(),
             advertise_endpoint: config.advertise_endpoint,
+            nostr_discovery_enabled: config.nostr_discovery_enabled,
             stun_servers: config.stun_servers.clone(),
             nostr_relays: config.nostr_relays.clone(),
             share_local_candidates: config.share_local_candidates,
@@ -1675,7 +1868,7 @@ impl FipsPrivateTunnelRuntime {
             &config.endpoint_peers,
             Some(&transport),
             config.mesh_mtu,
-            fips_nostr_discovery_policy_from_env(),
+            config.nostr_discovery_policy,
         );
         let local_allowed_ips = config.local_allowed_ips();
         let mesh = Arc::new(
@@ -1730,12 +1923,15 @@ impl FipsPrivateTunnelRuntime {
                 }
             })
         };
-        let mesh_recv_task = spawn_mesh_recv_task(Arc::clone(&mesh), tun_fd, event_tx);
+        let mesh_recv_task = spawn_mesh_recv_task(Arc::clone(&mesh), Arc::clone(&tun_fd), event_tx);
 
         let mut runtime = Self {
             iface,
             mesh,
             config: config.clone(),
+            _tun: tun,
+            tun_fd,
+            fips_host: None,
             tun_read_task,
             mesh_send_task,
             mesh_recv_task,
@@ -1752,6 +1948,9 @@ impl FipsPrivateTunnelRuntime {
             wg_upstream: None,
         };
         runtime.apply_interface_config(&config).await?;
+        runtime
+            .reconcile_fips_host_runtime(config.fips_host.clone())
+            .await?;
         Ok(runtime)
     }
 
@@ -1816,6 +2015,7 @@ impl FipsPrivateTunnelRuntime {
             || self.config.stun_servers != config.stun_servers
             || self.config.nostr_relays != config.nostr_relays
             || self.config.share_local_candidates != config.share_local_candidates
+            || self.config.nostr_discovery_policy != config.nostr_discovery_policy
             || self.config.mesh_mtu.underlay_udp != config.mesh_mtu.underlay_udp
     }
 
@@ -1829,6 +2029,8 @@ impl FipsPrivateTunnelRuntime {
             self.mesh.update_relays(&config.nostr_relays).await?;
         }
         self.apply_interface_config(&config).await?;
+        self.reconcile_fips_host_runtime(config.fips_host.clone())
+            .await?;
         self.config = config;
         Ok(())
     }
@@ -1872,10 +2074,9 @@ impl FipsPrivateTunnelRuntime {
     pub(crate) async fn send_roster(
         &self,
         participant: &str,
-        network_id: &str,
-        roster: NetworkRoster,
+        signed_roster: SignedRoster,
     ) -> Result<()> {
-        self.mesh.send_roster(participant, network_id, roster).await
+        self.mesh.send_roster(participant, signed_roster).await
     }
 
     pub(crate) async fn send_capabilities(
@@ -1918,6 +2119,7 @@ impl FipsPrivateTunnelRuntime {
         if let Some(handle) = runtime.wg_upstream.take() {
             handle.cleanup().await;
         }
+        runtime.stop_fips_host_runtime().await;
         runtime.tun_read_task.abort();
         runtime.mesh_send_task.abort();
         runtime.mesh_recv_task.abort();
@@ -1943,10 +2145,10 @@ impl FipsPrivateTunnelRuntime {
             // each peer's tunnel IP, so even when we swap the default
             // route to the WG tun below, mesh traffic still wins on
             // longest-prefix-match and stays inside the FIPS tunnel.
-            crate::apply_local_interface_network_with_mtu(
+            crate::apply_local_interface_network_with_mtu_and_addresses(
                 &self.iface,
-                &config.local_address,
-                &config.route_targets,
+                &config.interface_addresses(),
+                &config.interface_route_targets(),
                 config.mesh_mtu.tunnel,
             )
             .with_context(|| format!("failed to configure FIPS tunnel interface {}", self.iface))?;
@@ -1954,6 +2156,42 @@ impl FipsPrivateTunnelRuntime {
                 .await;
         }
         Ok(())
+    }
+
+    async fn reconcile_fips_host_runtime(
+        &mut self,
+        config: Option<FipsHostTunnelConfig>,
+    ) -> Result<()> {
+        let needs_restart = match (&self.fips_host, &config) {
+            (Some(runtime), Some(config)) => runtime.requires_restart(config),
+            (Some(_), None) => true,
+            (None, Some(_)) => true,
+            (None, None) => false,
+        };
+        if needs_restart {
+            self.stop_fips_host_runtime().await;
+        }
+
+        match config {
+            Some(config) if self.fips_host.is_none() => {
+                let runtime = crate::fips_host_tunnel::FipsHostTunnelRuntime::start(config).await?;
+                eprintln!("fips-host: .fips IPv6 resolver active");
+                self.fips_host = Some(runtime);
+            }
+            None => {
+                crate::fips_host_tunnel::FipsHostTunnelRuntime::cleanup_disabled_artifacts();
+            }
+            Some(_) => {}
+        }
+        Ok(())
+    }
+
+    async fn stop_fips_host_runtime(&mut self) {
+        if let Some(runtime) = self.fips_host.take()
+            && let Err(error) = runtime.stop().await
+        {
+            eprintln!("fips-host: failed to stop .fips runtime: {error}");
+        }
     }
 
     /// Bring the WG upstream tunnel up / down to match `wireguard_exit`.
@@ -2077,10 +2315,13 @@ impl FipsPrivateTunnelRuntime {
         };
         self.reconcile_linux_endpoint_bypass_routes(&endpoint_bypass_specs);
 
-        crate::apply_local_interface_network_with_mtu(
+        let mut interface_route_targets = route_targets.clone();
+        interface_route_targets.sort();
+        interface_route_targets.dedup();
+        crate::apply_local_interface_network_with_mtu_and_addresses(
             &self.iface,
-            &config.local_address,
-            &route_targets,
+            &config.interface_addresses(),
+            &interface_route_targets,
             config.mesh_mtu.tunnel,
         )
         .with_context(|| format!("failed to configure FIPS tunnel interface {}", self.iface))?;
@@ -2704,6 +2945,7 @@ fn spawn_tun_read_task(
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 async fn send_mesh_packet_or_log(mesh: &FipsPrivateMeshRuntime, packet: TunPipelinePacket) {
     crate::pipeline_profile::record_since(
         crate::pipeline_profile::Stage::TunToMeshQueueWait,
@@ -2867,6 +3109,7 @@ impl FipsPrivateTunnelRuntime {
             listen_port: config.listen_port,
             advertised_endpoint: config.advertised_endpoint.clone(),
             advertise_endpoint: config.advertise_endpoint,
+            nostr_discovery_enabled: config.nostr_discovery_enabled,
             stun_servers: config.stun_servers.clone(),
             nostr_relays: config.nostr_relays.clone(),
             share_local_candidates: config.share_local_candidates,
@@ -2875,7 +3118,7 @@ impl FipsPrivateTunnelRuntime {
             &config.endpoint_peers,
             Some(&transport),
             config.mesh_mtu,
-            fips_nostr_discovery_policy_from_env(),
+            config.nostr_discovery_policy,
         );
         let mesh = Arc::new(
             FipsPrivateMeshRuntime::bind_with_config(
@@ -3004,6 +3247,7 @@ impl FipsPrivateTunnelRuntime {
             || self.config.advertise_endpoint != config.advertise_endpoint
             || self.config.stun_servers != config.stun_servers
             || self.config.nostr_relays != config.nostr_relays
+            || self.config.nostr_discovery_policy != config.nostr_discovery_policy
             || self.config.mesh_mtu.underlay_udp != config.mesh_mtu.underlay_udp
     }
 
@@ -3097,10 +3341,9 @@ impl FipsPrivateTunnelRuntime {
     pub(crate) async fn send_roster(
         &self,
         participant: &str,
-        network_id: &str,
-        roster: NetworkRoster,
+        signed_roster: SignedRoster,
     ) -> Result<()> {
-        self.mesh.send_roster(participant, network_id, roster).await
+        self.mesh.send_roster(participant, signed_roster).await
     }
 
     pub(crate) async fn send_capabilities(
@@ -3407,8 +3650,7 @@ impl FipsPrivateTunnelRuntime {
     pub(crate) async fn send_roster(
         &self,
         _participant: &str,
-        _network_id: &str,
-        _roster: NetworkRoster,
+        _signed_roster: SignedRoster,
     ) -> Result<()> {
         Ok(())
     }
@@ -3457,15 +3699,17 @@ mod tests {
         FIPS_DISCOVERY_FORWARD_MIN_INTERVAL_SECS, FIPS_LAN_DISCOVERY_SCOPE_PREFIX,
         FIPS_MESH_EVENT_DRAIN_LIMIT, FIPS_NOSTR_DISCOVERY_APP, FIPS_NOSTR_FAILURE_STREAK_THRESHOLD,
         FIPS_NOSTR_OPEN_DISCOVERY_MAX_PENDING, FIPS_NOSTR_STARTUP_SWEEP_MAX_AGE_SECS,
-        FipsEndpointTransportConfig, FipsPrivateMeshEvent, FipsPrivateMeshRuntime,
-        FipsPrivateTunnelConfig, control_frame_destination_npub, control_frame_source_pubkey,
-        drain_event_batch, fips_endpoint_config, fips_endpoint_peers_from_mesh,
-        fips_lan_discovery_scope, linux_cap_eff_has_net_admin, linux_tun_setup_error,
-        parse_fips_nostr_discovery_policy, strip_cidr, unix_timestamp,
+        FipsEndpointTransportConfig, FipsPeerAddressHint, FipsPrivateMeshEvent,
+        FipsPrivateMeshRuntime, FipsPrivateTunnelConfig, control_frame_destination_npub,
+        control_frame_source_pubkey, drain_event_batch, fips_endpoint_config,
+        fips_endpoint_peers_from_mesh, fips_lan_discovery_scope, fips_peer_address_from_hint,
+        linux_cap_eff_has_net_admin, linux_tun_setup_error, other_endpoint_peer_statuses,
+        parse_fips_nostr_discovery_policy, strip_cidr, tag_authenticated_transport_addr,
+        unix_timestamp,
     };
     use fips_endpoint::{
-        Config, ConnectPolicy, NostrDiscoveryPolicy, PeerConfig as FipsPeerConfig, RoutingMode,
-        TransportInstances, UdpConfig,
+        Config, ConnectPolicy, FipsEndpointPeer, NostrDiscoveryPolicy,
+        PeerConfig as FipsPeerConfig, RoutingMode, TransportInstances, UdpConfig,
     };
     use nostr_sdk::prelude::{Keys, ToBech32};
     use nostr_vpn_core::config::{AppConfig, PendingOutboundJoinRequest, derive_mesh_tunnel_ip};
@@ -3499,6 +3743,83 @@ mod tests {
             Some(fips_endpoint::NostrDiscoveryPolicy::Disabled)
         );
         assert_eq!(parse_fips_nostr_discovery_policy("wat"), None);
+    }
+
+    #[test]
+    fn authenticated_transport_addr_preserves_tcp_type_and_legacy_udp() {
+        assert_eq!(
+            tag_authenticated_transport_addr(
+                Some("203.0.113.20:51820".to_string()),
+                Some("udp".to_string())
+            ),
+            Some("203.0.113.20:51820".to_string())
+        );
+        assert_eq!(
+            tag_authenticated_transport_addr(
+                Some("203.0.113.20:443".to_string()),
+                Some("tcp".to_string())
+            ),
+            Some("tcp:203.0.113.20:443".to_string())
+        );
+        assert_eq!(
+            tag_authenticated_transport_addr(Some("tcp:203.0.113.20:443".to_string()), None),
+            Some("tcp:203.0.113.20:443".to_string())
+        );
+    }
+
+    #[test]
+    fn fips_peer_address_hint_splits_transport_tags_for_live_updates() {
+        let tcp = fips_peer_address_from_hint(&FipsPeerAddressHint {
+            addr: "tcp:203.0.113.20:443".to_string(),
+            seen_at_ms: Some(123_000),
+        });
+        assert_eq!(tcp.transport, "tcp");
+        assert_eq!(tcp.addr, "203.0.113.20:443");
+        assert_eq!(tcp.seen_at_ms, Some(123_000));
+
+        let udp = fips_peer_address_from_hint(&FipsPeerAddressHint {
+            addr: "udp:203.0.113.21:2121".to_string(),
+            seen_at_ms: None,
+        });
+        assert_eq!(udp.transport, "udp");
+        assert_eq!(udp.addr, "203.0.113.21:2121");
+    }
+
+    #[test]
+    fn fips_private_tunnel_config_uses_non_roster_peer_setting_for_discovery_policy() {
+        if std::env::var("NVPN_FIPS_NOSTR_DISCOVERY_POLICY").is_ok() {
+            return;
+        }
+
+        let mut app = AppConfig::generated();
+        app.fips_host_tunnel_enabled = false;
+        app.connect_to_non_roster_fips_peers = false;
+        let network_id = app.effective_network_id();
+        let config = FipsPrivateTunnelConfig::from_app(
+            &app,
+            &network_id,
+            "utun100",
+            app.own_nostr_pubkey_hex().ok().as_deref(),
+            None,
+            &[],
+        )
+        .expect("configured-only tunnel config");
+        assert_eq!(
+            config.nostr_discovery_policy,
+            NostrDiscoveryPolicy::ConfiguredOnly
+        );
+
+        app.connect_to_non_roster_fips_peers = true;
+        let config = FipsPrivateTunnelConfig::from_app(
+            &app,
+            &network_id,
+            "utun100",
+            app.own_nostr_pubkey_hex().ok().as_deref(),
+            None,
+            &[],
+        )
+        .expect("open tunnel config");
+        assert_eq!(config.nostr_discovery_policy, NostrDiscoveryPolicy::Open);
     }
 
     #[test]
@@ -3585,6 +3906,47 @@ mod tests {
     }
 
     #[test]
+    fn non_roster_endpoint_peers_surface_as_mesh_statuses() {
+        let keys = Keys::generate();
+        let pubkey = keys.public_key().to_hex();
+        let npub = keys.public_key().to_bech32().expect("npub");
+        let mut peers = HashMap::new();
+        peers.insert(
+            pubkey.clone(),
+            FipsEndpointPeer {
+                npub: npub.clone(),
+                transport_addr: Some("203.0.113.9:9000".to_string()),
+                transport_type: Some("udp".to_string()),
+                link_id: 42,
+                srtt_ms: Some(7),
+                packets_sent: 11,
+                packets_recv: 12,
+                bytes_sent: 1300,
+                bytes_recv: 1400,
+            },
+        );
+
+        let statuses = other_endpoint_peer_statuses(&peers, 123);
+
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].pubkey, pubkey);
+        assert_eq!(statuses[0].endpoint_npub, npub);
+        assert!(statuses[0].connected);
+        assert_eq!(
+            statuses[0].transport_addr.as_deref(),
+            Some("203.0.113.9:9000")
+        );
+        assert_eq!(statuses[0].transport_type.as_deref(), Some("udp"));
+        assert_eq!(statuses[0].srtt_ms, Some(7));
+        assert_eq!(statuses[0].link_packets_sent, 11);
+        assert_eq!(statuses[0].link_packets_recv, 12);
+        assert_eq!(statuses[0].link_bytes_sent, 1300);
+        assert_eq!(statuses[0].link_bytes_recv, 1400);
+        assert_eq!(statuses[0].last_seen_at, Some(123));
+        assert_eq!(statuses[0].error, None);
+    }
+
+    #[test]
     fn fragmented_control_frames_reassemble_to_original_frame() {
         let roster = NetworkRoster {
             network_name: "Network 1".to_string(),
@@ -3598,6 +3960,7 @@ mod tests {
         let frame = FipsControlFrame::Roster {
             network_id: "mesh".to_string(),
             roster,
+            signed_roster: None,
         };
         let messages = encode_fips_control_messages(&frame).expect("fragment messages");
         let mut buffer = ControlFragmentBuffer::default();
@@ -3803,6 +4166,7 @@ mod tests {
                 aliases: HashMap::new(),
                 signed_at: 42,
             },
+            signed_roster: None,
         };
         let join_request = FipsControlFrame::JoinRequest {
             requested_at: 42,
@@ -3893,6 +4257,7 @@ mod tests {
 
         let mut app = AppConfig::default();
         app.nostr.secret_key = alice_nsec;
+        app.networks[0].enabled = true;
         app.networks[0].network_id = network_id.to_string();
         app.networks[0].participants = vec![
             alice_pubkey.clone(),
@@ -4198,11 +4563,10 @@ mod tests {
             }))) =
                 tokio::time::timeout(Duration::from_millis(50), alice_runtime.recv_mesh_event())
                     .await
+                && participant_pubkey == carol_pubkey
             {
-                if participant_pubkey == carol_pubkey {
-                    alice_saw_carol = true;
-                    break;
-                }
+                alice_saw_carol = true;
+                break;
             }
         }
 
@@ -4316,6 +4680,7 @@ mod tests {
             listen_port: 51820,
             advertised_endpoint: "192.168.50.20:51820".to_string(),
             advertise_endpoint: true,
+            nostr_discovery_enabled: true,
             stun_servers: vec!["stun:stun.example.org:3478".to_string()],
             nostr_relays: vec!["wss://relay.example.org".to_string()],
             share_local_candidates: true,
@@ -4371,6 +4736,46 @@ mod tests {
     }
 
     #[test]
+    fn endpoint_config_disables_nostr_when_discovery_off() {
+        let keys = Keys::generate();
+        let participant_pubkey = keys.public_key().to_hex();
+        let peer = FipsMeshPeerConfig::from_participant_pubkey(
+            &participant_pubkey,
+            vec!["10.44.1.2/32".to_string()],
+        )
+        .expect("peer config");
+        let transport = FipsEndpointTransportConfig {
+            listen_port: 51820,
+            advertised_endpoint: "192.168.50.20:51820".to_string(),
+            advertise_endpoint: true,
+            nostr_discovery_enabled: false,
+            stun_servers: vec!["stun:stun.example.org:3478".to_string()],
+            nostr_relays: vec!["wss://relay.example.org".to_string()],
+            share_local_candidates: true,
+        };
+
+        let endpoint_peers = fips_endpoint_peers_from_mesh(&[peer], Vec::new(), Vec::new());
+        let config = fips_endpoint_config(
+            &endpoint_peers,
+            Some(&transport),
+            super::resolve_private_mesh_mtu(None, None, None),
+            NostrDiscoveryPolicy::Open,
+        );
+
+        // Relay discovery + advertising are off, but the peer is still dialed
+        // directly so static/bootstrap connectivity keeps working.
+        assert!(!config.node.discovery.nostr.enabled);
+        assert!(!config.node.discovery.nostr.advertise);
+        let udp = match config.transports.udp {
+            fips_endpoint::TransportInstances::Single(udp) => udp,
+            _ => panic!("expected one UDP transport"),
+        };
+        assert!(!udp.advertise_on_nostr());
+        assert!(udp.accept_connections());
+        assert_eq!(config.peers.len(), 1);
+    }
+
+    #[test]
     fn endpoint_config_keeps_static_transit_peers_outside_mesh_routes() {
         let bob_keys = Keys::generate();
         let charlie_keys = Keys::generate();
@@ -4388,6 +4793,7 @@ mod tests {
             listen_port: 51820,
             advertised_endpoint: "10.203.0.10:51820".to_string(),
             advertise_endpoint: false,
+            nostr_discovery_enabled: true,
             stun_servers: Vec::new(),
             nostr_relays: Vec::new(),
             share_local_candidates: false,
@@ -4486,8 +4892,8 @@ mod tests {
         assert_eq!(charlie.addresses[0].addr, "10.203.0.12:51820");
         assert_eq!(charlie.addresses[0].seen_at_ms, Some(123_000));
         assert!(
-            !charlie.discovery_fallback_transit,
-            "recent non-roster peers seed direct hints but are not ambient lookup transit"
+            charlie.discovery_fallback_transit,
+            "recent non-roster peers should remain useful as fallback lookup transit"
         );
     }
 
@@ -4506,6 +4912,7 @@ mod tests {
 
         let mut app = AppConfig::default();
         app.nostr.secret_key = alice_nsec;
+        app.networks[0].enabled = true;
         app.networks[0].network_id = network_id.to_string();
         app.networks[0].participants = vec![alice_pubkey.clone(), bob_pubkey.clone()];
         app.networks[0].admins = vec![admin_pubkey.clone()];
@@ -4560,6 +4967,7 @@ mod tests {
 
         let mut app = AppConfig::default();
         app.nostr.secret_key = alice_nsec;
+        app.networks[0].enabled = true;
         app.networks[0].network_id = network_id.to_string();
         app.networks[0].participants = Vec::new();
         app.networks[0].admins = vec![admin_pubkey.clone()];
@@ -4608,6 +5016,7 @@ mod tests {
 
         let mut app = AppConfig::default();
         app.nostr.secret_key = alice_nsec;
+        app.networks[0].enabled = true;
         app.networks[0].network_id = network_id.to_string();
         app.networks[0].participants = vec![alice_pubkey.clone(), bob_pubkey.clone()];
 
@@ -4640,8 +5049,8 @@ mod tests {
         assert_eq!(charlie.addresses[0].addr, "203.0.113.55:51820");
         assert_eq!(charlie.addresses[0].seen_at_ms, Some(123_000));
         assert!(
-            !charlie.discovery_fallback_transit,
-            "recent non-roster peers should not receive fallback lookup fanout"
+            charlie.discovery_fallback_transit,
+            "recent non-roster peers should receive fallback lookup fanout"
         );
     }
 
@@ -4659,6 +5068,7 @@ mod tests {
 
         let mut app = AppConfig::default();
         app.nostr.secret_key = alice_nsec;
+        app.networks[0].enabled = true;
         app.networks[0].network_id = network_id.to_string();
         app.networks[0].participants = vec![alice_pubkey.clone(), bob_pubkey.clone()];
         app.fips_peer_endpoints.insert(

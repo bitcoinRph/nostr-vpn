@@ -4,11 +4,93 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Desktop, CLI, Android, and Windows updaters now check the htree release
+  manifest before falling back to GitHub, keeping app update checks aligned
+  with the htree release list.
+
+## 4.0.40 - 2026-05-24
+
+### Added
+
+- Admin-signed roster sync now travels over FIPS control events so members can
+  converge on the latest admin roster without a public Nostr relay publish.
+
+### Changed
+
+- `.fips` host routing now defaults off and remains an explicit opt-in.
+- Local htree release publishing now defaults to draft mode; use the explicit
+  final/promote path to repoint `latest`.
+- macOS `just run` no longer invalidates the normal Cargo cache when building
+  the app-core framework and bundled CLI.
+
 ### Fixed
 
-- macOS device search, exit-node search, and admin device rename fields no
-  longer rebuild the whole root view on each keystroke, improving text input
-  responsiveness on large rosters.
+- Config secrets are migrated out of plaintext config files on startup.
+- macOS config secrets now use private per-config sidecar files instead of the
+  System Keychain, avoiding repeated administrator prompts.
+- Mobile tunnel launch configs redact persisted secret markers before crossing
+  the platform boundary.
+
+## 4.0.39 - 2026-05-22
+
+### Added
+
+- Built-in public FIPS bootstrap nodes, dialed as fallback transit so peers can
+  still reach each other when direct NAT traversal and relays fail. They seed a
+  single editable peer list in config (shared with any custom transit peers);
+  the web settings show it with inline editing and a "reset to defaults" button,
+  and every platform has a "Use bootstrap servers" master toggle (default on).
+- Embedded `.fips` host tunnel: `.fips` hosts now route through a fips-core TUN
+  with the fips-core host firewall instead of the legacy path.
+- Import WireGuard configuration files directly from the apps on every platform.
+- Manual network join in the web UI for joining a network by id without an
+  invite, with full device id and grouped network id display.
+- Outbound TCP transport so bootstrap/transit peers advertised on `tcp:443` can
+  be reached on networks that block UDP outright. Peer addresses can be
+  transport-tagged (`tcp:` / `udp:`), while bare addresses remain UDP.
+
+### Changed
+
+- New "Find peers over relays" settings toggle (default on) to disable
+  finding/advertising FIPS peers over Nostr relays; static, bootstrap, and LAN
+  connectivity keep working when it is off. Available on web, macOS, iOS,
+  Android, Windows, and Linux, and via `nvpn set --fips-nostr-discovery-enabled`
+  / `--fips-bootstrap-enabled`.
+- Linux desktop GUI reaches settings parity with macOS, supports close-to-tray,
+  and now launches hidden on startup.
+- Diagnostics surface per-peer FIPS stats on both desktop and mobile.
+- Invite QR codes are larger and rendered as SVG for sharper scanning, and
+  invite secrets and group network ids now rotate.
+- Learned non-roster FIPS peers are now kept as fallback transit peers, so
+  authenticated overlay neighbors discovered in previous sessions can help
+  route lookups after restart.
+- Docker e2e images now build against the published FIPS crates by default;
+  set `NVPN_PATCH_LOCAL_FIPS=1` with `NVPN_FIPS_REPO_PATH` to test a local FIPS
+  checkout.
+- Device lists hide the search field when short, normal button colors are
+  muted, and macOS device/exit-node/rename fields no longer rebuild the whole
+  root view on each keystroke, keeping text input responsive on large rosters.
+- StartOS packaging refresh: web UI binds off the VPN interface, ships the
+  Nostr VPN icon, and is prepared for app submission; Umbrel app submission
+  packaging and updated app-store port.
+
+### Fixed
+
+- CLI invite import now preserves the invite secret so FIPS join requests sent
+  from imported invites are accepted by the admin.
+- Docker FIPS e2e scripts with static local topologies now disable public
+  relay/bootstrap discovery so outside peers cannot perturb deterministic
+  continuity checks.
+- Linux musl CLI release builds no longer depend on Cargo pre-extracting the
+  `rustables` registry source before the nftables header workaround is applied.
+- macOS release builds include regenerated app-core bindings and project
+  versions for the new FIPS discovery/bootstrap settings.
+- Recent FIPS peer caches preserve learned TCP transport tags while continuing
+  to accept old bare UDP endpoint entries.
+- FIPS peer discovery settings and roster propagation for stale peers.
+- Windows exit-node list build.
 
 ## 4.0.38 - 2026-05-20
 
