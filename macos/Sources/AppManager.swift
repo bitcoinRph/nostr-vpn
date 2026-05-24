@@ -1222,7 +1222,7 @@ final class AppManager: ObservableObject {
             wireguardExitMtu: 1280,
             wireguardExitPersistentKeepaliveSecs: 25,
             wireguardExitConfig: "",
-            fipsHostTunnelEnabled: true,
+            fipsHostTunnelEnabled: false,
             connectToNonRosterFipsPeers: true,
             fipsNostrDiscoveryEnabled: true,
             fipsBootstrapEnabled: true,

@@ -65,7 +65,7 @@
     listenPort: '',
     relays: '',
     advertisedRoutes: '',
-    fipsHostTunnelEnabled: true,
+    fipsHostTunnelEnabled: false,
     connectToNonRosterFipsPeers: true,
     fipsNostrDiscoveryEnabled: true,
     fipsBootstrapEnabled: true,

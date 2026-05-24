@@ -2976,6 +2976,10 @@ async fn sync_fips_private_runtime(
         if let Some(runtime) = runtime.take() {
             runtime.stop().await?;
         }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if !app.fips_host_tunnel_enabled {
+            crate::fips_host_tunnel::FipsHostTunnelRuntime::cleanup_disabled_artifacts();
+        }
         return Ok(());
     }
 

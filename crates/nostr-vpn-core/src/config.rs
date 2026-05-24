@@ -219,7 +219,7 @@ pub struct AppConfig {
     pub fips_advertise_endpoint: bool,
     #[serde(
         default = "default_fips_host_tunnel_enabled",
-        skip_serializing_if = "is_true"
+        skip_serializing_if = "is_false"
     )]
     pub fips_host_tunnel_enabled: bool,
     #[serde(

@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- `.fips` host routing now defaults off and remains an explicit opt-in.
+
 ## 4.0.39 - 2026-05-22
 
 ### Added

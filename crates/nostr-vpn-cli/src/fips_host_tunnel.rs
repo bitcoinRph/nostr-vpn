@@ -390,6 +390,7 @@ mod tests {
     #[test]
     fn app_config_builds_outbound_only_embedded_node() {
         let mut app = AppConfig::generated();
+        app.fips_host_tunnel_enabled = true;
         app.fips_host_inbound_tcp_ports = vec![443, 22, 22];
 
         let maybe_config = FipsHostTunnelConfig::from_app(&app).expect("valid fips host config");

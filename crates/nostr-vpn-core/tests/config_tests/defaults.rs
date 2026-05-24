@@ -24,10 +24,7 @@ fn generated_config_auto_populates_keys() {
     assert!(!config.nat.stun_servers.is_empty());
     assert!(config.exit_node.is_empty());
     assert!(config.exit_node_leak_protection);
-    assert_eq!(
-        config.fips_host_tunnel_enabled,
-        cfg!(any(target_os = "linux", target_os = "macos"))
-    );
+    assert!(!config.fips_host_tunnel_enabled);
     assert!(config.connect_to_non_roster_fips_peers);
     assert!(config.fips_host_inbound_tcp_ports.is_empty());
     assert!(!config.node.advertise_exit_node);
@@ -134,6 +131,23 @@ fn fips_discovery_and_bootstrap_default_on_when_missing() {
 
     assert!(config.fips_nostr_discovery_enabled);
     assert!(config.fips_bootstrap_enabled);
+}
+
+#[test]
+fn fips_host_tunnel_is_default_off_but_opt_in_persists() {
+    let default_config: AppConfig = toml::from_str("").expect("parse empty config");
+    assert!(!default_config.fips_host_tunnel_enabled);
+
+    let config = AppConfig {
+        fips_host_tunnel_enabled: true,
+        ..AppConfig::default()
+    };
+
+    let encoded = toml::to_string(&config).expect("serialize config");
+    assert!(encoded.contains("fips_host_tunnel_enabled = true"));
+
+    let decoded: AppConfig = toml::from_str(&encoded).expect("parse config");
+    assert!(decoded.fips_host_tunnel_enabled);
 }
 
 #[test]
