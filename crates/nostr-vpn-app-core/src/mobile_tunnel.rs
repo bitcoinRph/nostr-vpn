@@ -318,6 +318,17 @@ impl MobileTunnelConfig {
             error: String::new(),
         })
     }
+
+    fn redact_for_launch_configuration(&mut self) {
+        self.app_config_toml.clear();
+        self.identity_nsec.clear();
+        self.invite_secret.clear();
+        self.pending_join_invite_secret.clear();
+        if let Some(wireguard_exit) = self.wireguard_exit.as_mut() {
+            wireguard_exit.private_key.clear();
+            wireguard_exit.peer_preshared_key.clear();
+        }
+    }
 }
 
 /// Pull just the IP literal out of an `Endpoint = host:port` string.
@@ -360,11 +371,12 @@ fn persisted_app_config_toml(app: &AppConfig, config_path: &Path) -> Result<Stri
 }
 
 pub(crate) fn tunnel_config_json(data_dir: &str) -> String {
-    let config =
+    let mut config =
         MobileTunnelConfig::from_data_dir(data_dir).unwrap_or_else(|error| MobileTunnelConfig {
             error: error.to_string(),
             ..empty_config()
         });
+    config.redact_for_launch_configuration();
     serde_json::to_string(&config).unwrap_or_else(|error| {
         format!(
             r#"{{"error":"{}"}}"#,
@@ -408,6 +420,13 @@ impl MobileTunnel {
             return Err(anyhow!(config.error));
         }
         let app_config = mobile_app_config(&config)?;
+        let config = if config.app_config_toml.trim().is_empty() {
+            let config_path = non_empty_path(&config.config_path)
+                .ok_or_else(|| anyhow!("mobile tunnel config path unavailable"))?;
+            MobileTunnelConfig::from_app_with_config_path(&app_config, &config_path)?
+        } else {
+            config
+        };
         mobile_debug_log("MobileTunnel::start building tokio runtime");
         let runtime = RuntimeBuilder::new_multi_thread()
             .worker_threads(2)
@@ -3295,6 +3314,85 @@ mod tests {
         assert_eq!(wg_config.persistent_keepalive_secs, 25);
         assert_eq!(config.excluded_routes, vec!["198.51.100.20/32"]);
         assert_eq!(config.dns_servers, vec!["10.64.0.1"]);
+    }
+
+    #[test]
+    fn mobile_tunnel_launch_config_redacts_persisted_secrets() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nvpn-mobile-launch-redaction-{nonce}"));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("config.toml");
+
+        let mut app = AppConfig::generated();
+        app.ensure_defaults();
+        let own = app.own_nostr_pubkey_hex().expect("own pubkey");
+        let secret_key = app.nostr.secret_key.clone();
+        let peer = "26525c442dd039de4e728b41ee8d7f717b267ab25b7c219d53a3249e1c9174cc";
+        app.networks = vec![NetworkConfig {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            enabled: true,
+            network_id: "test".to_string(),
+            invite_secret: "join-secret".to_string(),
+            participants: vec![peer.to_string()],
+            admins: vec![own],
+            listen_for_join_requests: true,
+            invite_inviter: String::new(),
+            outbound_join_request: None,
+            inbound_join_requests: Vec::new(),
+            shared_roster_updated_at: 0,
+            shared_roster_signed_by: String::new(),
+        }];
+        app.wireguard_exit = WireGuardExitConfig {
+            enabled: true,
+            address: "10.99.99.2/32".to_string(),
+            private_key: "client-private-key".to_string(),
+            peer_public_key: "server-public-key".to_string(),
+            peer_preshared_key: "client-peer-psk".to_string(),
+            endpoint: "198.51.100.20:51820".to_string(),
+            allowed_ips: vec!["0.0.0.0/0".to_string()],
+            ..WireGuardExitConfig::default()
+        };
+        app.save(&path).expect("save config");
+
+        let json = tunnel_config_json(dir.to_str().expect("utf8 temp dir"));
+        assert!(!json.contains(&secret_key));
+        assert!(!json.contains("join-secret"));
+        assert!(!json.contains("client-private-key"));
+        assert!(!json.contains("client-peer-psk"));
+        assert!(json.contains("198.51.100.20:51820"));
+
+        let launch_config: MobileTunnelConfig = serde_json::from_str(&json).expect("launch config");
+        assert!(launch_config.app_config_toml.is_empty());
+        assert!(launch_config.identity_nsec.is_empty());
+        assert!(launch_config.invite_secret.is_empty());
+        assert!(launch_config.pending_join_invite_secret.is_empty());
+        assert_eq!(
+            launch_config
+                .wireguard_exit
+                .as_ref()
+                .expect("wireguard exit")
+                .private_key,
+            ""
+        );
+
+        let loaded = mobile_app_config(&launch_config).expect("load app config from path");
+        let runtime_config =
+            MobileTunnelConfig::from_app_with_config_path(&loaded, &path).expect("runtime config");
+        assert_eq!(runtime_config.identity_nsec, secret_key);
+        assert_eq!(
+            runtime_config
+                .wireguard_exit
+                .as_ref()
+                .expect("runtime wireguard")
+                .private_key,
+            "client-private-key"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
