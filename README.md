@@ -1,5 +1,9 @@
 # nostr-vpn
 
+<p align="center">
+  <img src="icon.svg" alt="nostr-vpn logo" width="112">
+</p>
+
 > Canonical repository: [git.iris.to](https://git.iris.to/#/npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm/nostr-vpn) (`htree://npub1xdhnr9mrv47kkrn95k6cwecearydeh8e895990n3acntwvmgk2dsdeeycm/nostr-vpn`). GitHub is a [mirror](https://github.com/mmalmi/nostr-vpn).
 
 ## Downloads
