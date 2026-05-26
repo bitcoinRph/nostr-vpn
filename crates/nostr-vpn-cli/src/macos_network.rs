@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(target_os = "macos")]
 use std::io::Write;
 
 pub(super) fn macos_default_routes_from_netstat(output: &str) -> Vec<MacosRouteSpec> {
