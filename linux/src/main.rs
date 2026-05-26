@@ -2471,19 +2471,22 @@ fn route_choice(
 fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     page_title(page, "Settings", "emblem-system-symbolic");
 
+    let (service_settling, tray_error, update, tray_available) = {
+        let model = app.borrow();
+        (
+            model.service_settling,
+            model.tray_error.clone(),
+            model.update.clone(),
+            model.tray_available,
+        )
+    };
+
     let device = card();
     section_header(&device, "This Device", "");
     setting_entry(app, &device, "Name", "node_name");
     setting_entry(app, &device, "Tunnel IP", "tunnel_ip");
     setting_entry(app, &device, "Endpoint", "endpoint");
     setting_entry(app, &device, "Listen Port", "listen_port");
-    setting_entry_enabled(
-        app,
-        &device,
-        "Open inbound TCP ports",
-        "fips_host_inbound_tcp_ports",
-        state.fips_host_tunnel_enabled,
-    );
 
     let save = icon_text_button("Save", "");
     save.add_css_class("suggested-action");
@@ -2494,6 +2497,132 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
     }
     device.append(&save);
     page.append(&device);
+
+    let general = card();
+    section_header(&general, "General", "");
+    switch_row(
+        app,
+        &general,
+        "Start VPN automatically",
+        state.autoconnect,
+        |enabled| NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                autoconnect: Some(enabled),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+    if state.startup_settings_supported {
+        switch_row(
+            app,
+            &general,
+            "Launch on startup",
+            state.launch_on_startup,
+            |enabled| NativeAppAction::UpdateSettings {
+                patch: SettingsPatch {
+                    launch_on_startup: Some(enabled),
+                    ..SettingsPatch::default()
+                },
+            },
+        );
+    }
+    if state.tray_behavior_supported {
+        switch_row_enabled(
+            app,
+            &general,
+            "Tray on close",
+            state.close_to_tray_on_close,
+            tray_available,
+            |enabled| NativeAppAction::UpdateSettings {
+                patch: SettingsPatch {
+                    close_to_tray_on_close: Some(enabled),
+                    ..SettingsPatch::default()
+                },
+            },
+        );
+    }
+    page.append(&general);
+
+    let public_fips = card();
+    section_header(&public_fips, "Public FIPS routing", "");
+    switch_row(
+        app,
+        &public_fips,
+        "Route npub.fips outside VPN",
+        state.fips_host_tunnel_enabled,
+        |enabled| NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                fips_host_tunnel_enabled: Some(enabled),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+    let public_fips_details = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    public_fips_details.set_sensitive(state.fips_host_tunnel_enabled);
+    let public_fips_address = public_fips_address(&state.own_npub);
+    detail_row(
+        &public_fips_details,
+        "Your public FIPS address",
+        &public_fips_address,
+    );
+    setting_entry_enabled(
+        app,
+        &public_fips_details,
+        "Public .fips inbound TCP ports",
+        "fips_host_inbound_tcp_ports",
+        true,
+    );
+    let save = icon_text_button("Save", "");
+    save.add_css_class("suggested-action");
+    save.set_halign(gtk::Align::Start);
+    save.set_sensitive(state.fips_host_tunnel_enabled);
+    {
+        let app = app.clone();
+        save.connect_clicked(move |_| save_device_settings(&app));
+    }
+    public_fips_details.append(&save);
+    public_fips.append(&public_fips_details);
+    page.append(&public_fips);
+
+    let fips = card();
+    section_header(&fips, "FIPS", "");
+    switch_row(
+        app,
+        &fips,
+        "Connect to non-roster FIPS peers",
+        state.connect_to_non_roster_fips_peers,
+        |enabled| NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                connect_to_non_roster_fips_peers: Some(enabled),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+    switch_row(
+        app,
+        &fips,
+        "Find peers over relays",
+        state.fips_nostr_discovery_enabled,
+        |enabled| NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                fips_nostr_discovery_enabled: Some(enabled),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+    switch_row(
+        app,
+        &fips,
+        "Use bootstrap servers",
+        state.fips_bootstrap_enabled,
+        |enabled| NativeAppAction::UpdateSettings {
+            patch: SettingsPatch {
+                fips_bootstrap_enabled: Some(enabled),
+                ..SettingsPatch::default()
+            },
+        },
+    );
+    page.append(&fips);
 
     let relays = card();
     section_header(&relays, "Relays", "");
@@ -2719,108 +2848,6 @@ fn build_settings_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         }
         system.append(&row);
     }
-    let (service_settling, tray_error, update, tray_available) = {
-        let model = app.borrow();
-        (
-            model.service_settling,
-            model.tray_error.clone(),
-            model.update.clone(),
-            model.tray_available,
-        )
-    };
-
-    settings_toggle_group_label(&system, "General");
-    switch_row(
-        app,
-        &system,
-        "Start VPN automatically",
-        state.autoconnect,
-        |enabled| NativeAppAction::UpdateSettings {
-            patch: SettingsPatch {
-                autoconnect: Some(enabled),
-                ..SettingsPatch::default()
-            },
-        },
-    );
-    if state.startup_settings_supported {
-        switch_row(
-            app,
-            &system,
-            "Launch on startup",
-            state.launch_on_startup,
-            |enabled| NativeAppAction::UpdateSettings {
-                patch: SettingsPatch {
-                    launch_on_startup: Some(enabled),
-                    ..SettingsPatch::default()
-                },
-            },
-        );
-    }
-    if state.tray_behavior_supported {
-        switch_row_enabled(
-            app,
-            &system,
-            "Tray on close",
-            state.close_to_tray_on_close,
-            tray_available,
-            |enabled| NativeAppAction::UpdateSettings {
-                patch: SettingsPatch {
-                    close_to_tray_on_close: Some(enabled),
-                    ..SettingsPatch::default()
-                },
-            },
-        );
-    }
-    settings_toggle_group_label(&system, "FIPS");
-    switch_row(
-        app,
-        &system,
-        "Route to npub.fips addresses outside VPN",
-        state.fips_host_tunnel_enabled,
-        |enabled| NativeAppAction::UpdateSettings {
-            patch: SettingsPatch {
-                fips_host_tunnel_enabled: Some(enabled),
-                ..SettingsPatch::default()
-            },
-        },
-    );
-    switch_row(
-        app,
-        &system,
-        "Connect to non-roster FIPS peers",
-        state.connect_to_non_roster_fips_peers,
-        |enabled| NativeAppAction::UpdateSettings {
-            patch: SettingsPatch {
-                connect_to_non_roster_fips_peers: Some(enabled),
-                ..SettingsPatch::default()
-            },
-        },
-    );
-    switch_row(
-        app,
-        &system,
-        "Find peers over relays",
-        state.fips_nostr_discovery_enabled,
-        |enabled| NativeAppAction::UpdateSettings {
-            patch: SettingsPatch {
-                fips_nostr_discovery_enabled: Some(enabled),
-                ..SettingsPatch::default()
-            },
-        },
-    );
-    switch_row(
-        app,
-        &system,
-        "Use bootstrap servers",
-        state.fips_bootstrap_enabled,
-        |enabled| NativeAppAction::UpdateSettings {
-            patch: SettingsPatch {
-                fips_bootstrap_enabled: Some(enabled),
-                ..SettingsPatch::default()
-            },
-        },
-    );
-
     let status_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     status_row.append(&badge(
         if state.service_installed {
@@ -3858,14 +3885,6 @@ where
     switch_row_enabled(app, parent, title, active, true, action);
 }
 
-fn settings_toggle_group_label(parent: &gtk::Box, title: &str) {
-    let label = gtk::Label::new(Some(title));
-    label.add_css_class("dim-label");
-    label.set_xalign(0.0);
-    label.set_margin_top(6);
-    parent.append(&label);
-}
-
 fn switch_row_enabled<F>(
     app: &AppRef,
     parent: &gtk::Box,
@@ -3937,6 +3956,15 @@ fn detail_row(parent: &gtk::Box, title: &str, value: &str) {
     value_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
     row.append(&value_label);
     parent.append(&row);
+}
+
+fn public_fips_address(own_npub: &str) -> String {
+    let trimmed = own_npub.trim();
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!("{trimmed}.fips")
+    }
 }
 
 fn connect_remove_participant_confirmation(

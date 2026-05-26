@@ -908,6 +908,31 @@ label {
   font-size: 0.82rem;
 }
 
+.dependent-settings {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.dependent-settings.disabled {
+  opacity: 0.74;
+}
+
+.readonly-value-row {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.value-with-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
 input,
 textarea {
   width: 100%;

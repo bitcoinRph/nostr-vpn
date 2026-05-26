@@ -351,13 +351,25 @@ internal fun DeviceSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit)
         OutlinedTextField(tunnelIp, { tunnelIp = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Tunnel IP") })
         OutlinedTextField(endpoint, { endpoint = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Endpoint") })
         OutlinedTextField(port, { port = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Listen Port") })
-        Text(
-            "General",
-            modifier = Modifier.padding(top = 4.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = Muted,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Button(onClick = {
+            dispatch(
+                NativeActions.updateSettings(
+                    "nodeName" to nodeName,
+                    "endpoint" to endpoint,
+                    "tunnelIp" to tunnelIp,
+                    "listenPort" to port.toIntOrNull(),
+                ),
+            )
+        }) {
+            Text("Save")
+        }
+    }
+}
+
+@Composable
+internal fun GeneralSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit) {
+    AppCard {
+        Text("General", style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
                 checked = state.autoconnect,
@@ -365,13 +377,22 @@ internal fun DeviceSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit)
             )
             Text("Start VPN automatically")
         }
-        Text(
-            "FIPS",
-            modifier = Modifier.padding(top = 8.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = Muted,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = state.exitNodeLeakProtection,
+                onCheckedChange = { enabled ->
+                    dispatch(NativeActions.updateSettings("exitNodeLeakProtection" to enabled))
+                },
+            )
+            Text("Block internet if exit node disconnects")
+        }
+    }
+}
+
+@Composable
+internal fun FipsSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit) {
+    AppCard {
+        Text("FIPS", style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
                 checked = state.connectToNonRosterFipsPeers,
@@ -398,18 +419,6 @@ internal fun DeviceSettingsCard(state: AppState, dispatch: (JSONObject) -> Unit)
                 },
             )
             Text("Use bootstrap servers")
-        }
-        Button(onClick = {
-            dispatch(
-                NativeActions.updateSettings(
-                    "nodeName" to nodeName,
-                    "endpoint" to endpoint,
-                    "tunnelIp" to tunnelIp,
-                    "listenPort" to port.toIntOrNull(),
-                ),
-            )
-        }) {
-            Text("Save")
         }
     }
 }

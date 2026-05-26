@@ -169,6 +169,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         {
             _actionInFlight = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(PublicFipsRoutingEnabled));
             CommandManager.InvalidateRequerySuggested();
         }
     }
@@ -485,6 +486,8 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public bool SelectedParticipantCanManage => ActiveNetwork?.LocalIsAdmin == true
         && SelectedParticipant is { IsSelf: false };
     public string ActiveNetworkName => DisplayNetworkName(ActiveNetwork);
+    public string PublicFipsAddress => string.IsNullOrWhiteSpace(State.OwnNpub) ? "" : $"{State.OwnNpub}.fips";
+    public bool PublicFipsRoutingEnabled => State.FipsHostTunnelEnabled && !ActionInFlight;
     public Brush ShownNetworkStatusBrush => ActiveNetwork?.Enabled == true ? ActiveNetworkBrush : InactiveNetworkBrush;
     public bool ShowNetworkStatusDot => State.Networks.Count > 1;
     public bool HasIncomingJoinRequests => State.Networks.Any(network => network.InboundJoinRequests.Count > 0);
@@ -1412,6 +1415,8 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(VpnStatusBrush));
         OnPropertyChanged(nameof(UpdateStripeText));
         OnPropertyChanged(nameof(ThisDeviceCopyValue));
+        OnPropertyChanged(nameof(PublicFipsAddress));
+        OnPropertyChanged(nameof(PublicFipsRoutingEnabled));
         OnPropertyChanged(nameof(InviteBroadcastButtonText));
         OnPropertyChanged(nameof(NearbyDiscoveryButtonText));
         OnPropertyChanged(nameof(NoNearbyInvitesNoticeVisibility));

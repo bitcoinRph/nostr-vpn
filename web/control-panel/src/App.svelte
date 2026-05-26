@@ -103,6 +103,7 @@
   $: shownNetwork = state
     ? state.networks.find((network) => network.id === shownNetworkId) ?? activeNetwork ?? state.networks[0] ?? null
     : null;
+  $: publicFipsAddress = state?.ownNpub ? `${state.ownNpub}.fips` : '';
   $: incomingJoinRequestCount = state
     ? state.networks.reduce((count, network) => count + network.inboundJoinRequests.length, 0)
     : 0;
@@ -1818,8 +1819,7 @@
             <div class="panel wide">
               <div class="section-heading">
                 <div>
-                  <h3>FIPS</h3>
-                  <p>Direct peer routing</p>
+                  <h3>Public FIPS routing</h3>
                 </div>
               </div>
 
@@ -1832,14 +1832,42 @@
                 />
               </label>
 
-              <label>
-                <span>Inbound TCP allowlist</span>
-                <input
-                  bind:value={settingsDraft.fipsHostInboundTcpPorts}
-                  disabled={!settingsDraft.fipsHostTunnelEnabled}
-                  on:input={() => (settingsDirty = true)}
-                />
-              </label>
+              <div class="dependent-settings" class:disabled={!settingsDraft.fipsHostTunnelEnabled}>
+                <div class="readonly-value-row">
+                  <span>Your public FIPS address</span>
+                  <div class="value-with-action">
+                    <input
+                      aria-label="Your public FIPS address"
+                      value={publicFipsAddress}
+                      disabled={!settingsDraft.fipsHostTunnelEnabled}
+                      readonly
+                    />
+                    <CopyButton
+                      value={publicFipsAddress}
+                      label="Public FIPS address"
+                      disabled={!settingsDraft.fipsHostTunnelEnabled}
+                      on:copied={handleCopied}
+                    />
+                  </div>
+                </div>
+
+                <label>
+                  <span>Public .fips inbound TCP ports</span>
+                  <input
+                    bind:value={settingsDraft.fipsHostInboundTcpPorts}
+                    disabled={!settingsDraft.fipsHostTunnelEnabled}
+                    on:input={() => (settingsDirty = true)}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="panel wide">
+              <div class="section-heading">
+                <div>
+                  <h3>FIPS</h3>
+                </div>
+              </div>
 
               <label class="switch-row">
                 <span>Connect to non-roster FIPS peers</span>

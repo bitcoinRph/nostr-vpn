@@ -941,6 +941,8 @@ private struct SettingsPage: View {
         ScrollView {
             LazyVStack(spacing: 14) {
                 DeviceSettingsCard(model: model)
+                GeneralSettingsCard(model: model)
+                FipsSettingsCard(model: model)
                 RelaySettingsCard(model: model)
                 DiagnosticsCard(state: model.state)
             }
@@ -1343,32 +1345,6 @@ private struct DeviceSettingsCard: View {
             TextField("Listen Port", text: $port)
                 .keyboardType(.numberPad)
                 .textFieldStyle(.roundedBorder)
-            SettingsToggleGroupLabel("General")
-            Toggle("Start VPN automatically", isOn: Binding(
-                get: { model.state.autoconnect },
-                set: { value in
-                    model.dispatch(NativeActions.updateSettings(["autoconnect": value]), status: "Saving")
-                }
-            ))
-            SettingsToggleGroupLabel("FIPS")
-            Toggle("Connect to non-roster FIPS peers", isOn: Binding(
-                get: { model.state.connectToNonRosterFipsPeers },
-                set: { value in
-                    model.dispatch(NativeActions.updateSettings(["connectToNonRosterFipsPeers": value]), status: "Saving")
-                }
-            ))
-            Toggle("Find peers over relays", isOn: Binding(
-                get: { model.state.fipsNostrDiscoveryEnabled },
-                set: { value in
-                    model.dispatch(NativeActions.updateSettings(["fipsNostrDiscoveryEnabled": value]), status: "Saving")
-                }
-            ))
-            Toggle("Use bootstrap servers", isOn: Binding(
-                get: { model.state.fipsBootstrapEnabled },
-                set: { value in
-                    model.dispatch(NativeActions.updateSettings(["fipsBootstrapEnabled": value]), status: "Saving")
-                }
-            ))
             Button("Save") {
                 var patch: [String: Any] = [
                     "nodeName": nodeName,
@@ -1397,18 +1373,49 @@ private struct DeviceSettingsCard: View {
     }
 }
 
-private struct SettingsToggleGroupLabel: View {
-    let title: String
-
-    init(_ title: String) {
-        self.title = title
-    }
+private struct GeneralSettingsCard: View {
+    @ObservedObject var model: AppModel
 
     var body: some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.top, 4)
+        AppCard {
+            Text("General")
+                .font(.headline)
+            Toggle("Start VPN automatically", isOn: Binding(
+                get: { model.state.autoconnect },
+                set: { value in
+                    model.dispatch(NativeActions.updateSettings(["autoconnect": value]), status: "Saving")
+                }
+            ))
+        }
+    }
+}
+
+private struct FipsSettingsCard: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        AppCard {
+            Text("FIPS")
+                .font(.headline)
+            Toggle("Connect to non-roster FIPS peers", isOn: Binding(
+                get: { model.state.connectToNonRosterFipsPeers },
+                set: { value in
+                    model.dispatch(NativeActions.updateSettings(["connectToNonRosterFipsPeers": value]), status: "Saving")
+                }
+            ))
+            Toggle("Find peers over relays", isOn: Binding(
+                get: { model.state.fipsNostrDiscoveryEnabled },
+                set: { value in
+                    model.dispatch(NativeActions.updateSettings(["fipsNostrDiscoveryEnabled": value]), status: "Saving")
+                }
+            ))
+            Toggle("Use bootstrap servers", isOn: Binding(
+                get: { model.state.fipsBootstrapEnabled },
+                set: { value in
+                    model.dispatch(NativeActions.updateSettings(["fipsBootstrapEnabled": value]), status: "Saving")
+                }
+            ))
+        }
     }
 }
 

@@ -1270,6 +1270,7 @@ struct RootView: View {
         VStack(alignment: .leading, spacing: 14) {
             deviceSettings
             generalSettings
+            publicFipsSettings
             fipsSettings
             relaySettings
             networkSettings
@@ -1386,20 +1387,42 @@ struct RootView: View {
         }
     }
 
+    private var publicFipsSettings: some View {
+        surface {
+            sectionHeader("Public FIPS routing", systemImage: "network")
+            VStack(alignment: .leading, spacing: 8) {
+                settingsToggleRow("Route npub.fips outside VPN", isOn: Binding(
+                    get: { state.fipsHostTunnelEnabled },
+                    set: { manager.setFipsHostTunnel($0) }
+                ))
+                VStack(alignment: .leading, spacing: 8) {
+                    detailValueRow("Your public FIPS address", publicFipsAddress)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Public .fips inbound TCP ports")
+                            .foregroundStyle(.secondary)
+                        TextField("", text: $fipsHostInboundTcpPorts)
+                    }
+                    Button {
+                        manager.saveFipsHostInboundTcpPorts(fipsHostInboundTcpPorts)
+                    } label: {
+                        Label("Save", systemImage: "checkmark")
+                    }
+                    .disabled(manager.actionInFlight)
+                }
+                .disabled(!state.fipsHostTunnelEnabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var publicFipsAddress: String {
+        state.ownNpub.isEmpty ? "" : "\(state.ownNpub).fips"
+    }
+
     private var fipsSettings: some View {
         surface {
             sectionHeader("FIPS", systemImage: "shield.fill")
             VStack(alignment: .leading, spacing: 8) {
-                settingsToggleRow("Route to npub.fips addresses outside VPN", isOn: Binding(
-                    get: { state.fipsHostTunnelEnabled },
-                    set: { manager.setFipsHostTunnel($0) }
-                ))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Open inbound TCP ports")
-                        .foregroundStyle(.secondary)
-                    TextField("", text: $fipsHostInboundTcpPorts)
-                        .disabled(!state.fipsHostTunnelEnabled)
-                }
                 settingsToggleRow("Connect to non-roster FIPS peers", isOn: Binding(
                     get: { state.connectToNonRosterFipsPeers },
                     set: { manager.setConnectToNonRosterFipsPeers($0) }
@@ -1414,12 +1437,6 @@ struct RootView: View {
                 ))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Button {
-                manager.saveFipsHostInboundTcpPorts(fipsHostInboundTcpPorts)
-            } label: {
-                Label("Save", systemImage: "checkmark")
-            }
-            .disabled(manager.actionInFlight)
         }
     }
 

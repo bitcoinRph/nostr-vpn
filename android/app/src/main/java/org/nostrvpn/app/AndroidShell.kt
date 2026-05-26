@@ -914,20 +914,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
     selfUpdateActions: SelfUpdateActions,
 ) {
     item { DeviceSettingsCard(state, dispatch) }
+    item { GeneralSettingsCard(state, dispatch) }
+    item { FipsSettingsCard(state, dispatch) }
     item { RelaySettingsCard(state, dispatch) }
-    item {
-        AppCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = state.exitNodeLeakProtection,
-                    onCheckedChange = { enabled ->
-                        dispatch(NativeActions.updateSettings("exitNodeLeakProtection" to enabled))
-                    },
-                )
-                Text("Block internet if exit node disconnects")
-            }
-        }
-    }
     if (selfUpdateState.supported) {
         item { SelfUpdateCard(selfUpdateState, selfUpdateActions) }
     }
