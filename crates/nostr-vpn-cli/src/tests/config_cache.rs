@@ -1,7 +1,7 @@
-use std::fs;
+use std::{collections::HashMap, fs};
 
 use crate::*;
-use nostr_sdk::prelude::{Keys, ToBech32};
+use nostr_sdk::prelude::{Keys, Tag, ToBech32};
 use nostr_vpn_core::config::{NetworkConfig, PendingOutboundJoinRequest};
 
 fn activate_first_network(config: &mut AppConfig) {
@@ -234,6 +234,173 @@ fn forwarded_signed_roster_can_be_selected_for_peer_sync() {
             .is_none(),
         "explicit admin publish should not re-sign or forward another admin's stored artifact"
     );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn inbound_fips_roster_requires_signed_event() {
+    let nonce = unix_timestamp();
+    let dir = std::env::temp_dir().join(format!("nvpn-unsigned-roster-{nonce}"));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let config_path = dir.join("config.toml");
+    let mut status = String::new();
+
+    let mut config = AppConfig::generated();
+    activate_first_network(&mut config);
+    config.networks[0].network_id = "mesh".to_string();
+
+    let error = persist_shared_network_roster(&mut config, &config_path, None, &mut status)
+        .expect_err("unsigned roster frame must be rejected");
+
+    assert!(
+        error.to_string().contains("missing signed roster event"),
+        "unexpected error: {error:#}"
+    );
+    assert_eq!(config.networks[0].shared_roster_updated_at, 0);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn inbound_fips_roster_accepts_admin_signed_event() {
+    let nonce = unix_timestamp();
+    let dir = std::env::temp_dir().join(format!("nvpn-admin-roster-{nonce}"));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let config_path = dir.join("config.toml");
+    let mut status = String::new();
+
+    let mut config = AppConfig::generated();
+    activate_first_network(&mut config);
+    let admin = config.nostr_keys().expect("admin keys");
+    let admin_hex = admin.public_key().to_hex();
+    let member_hex = Keys::generate().public_key().to_hex();
+    config.networks[0].name = "Original".to_string();
+    config.networks[0].network_id = "mesh".to_string();
+    config.networks[0].admins = vec![admin_hex.clone()];
+    config.networks[0].shared_roster_updated_at = 0;
+    config.networks[0].shared_roster_signed_by.clear();
+
+    let signed = SignedRoster::sign(
+        "mesh",
+        NetworkRoster {
+            network_name: "Home".to_string(),
+            participants: vec![member_hex.clone()],
+            admins: vec![admin_hex.clone()],
+            aliases: HashMap::new(),
+            signed_at: 1_726_000_000,
+        },
+        &admin,
+    )
+    .expect("sign roster");
+
+    let result =
+        persist_shared_network_roster(&mut config, &config_path, Some(&signed), &mut status)
+            .expect("admin-signed roster should apply");
+
+    assert_eq!(result.as_deref(), Some("Home"));
+    assert_eq!(config.networks[0].name, "Home");
+    assert_eq!(config.networks[0].participants, vec![member_hex]);
+    assert_eq!(config.networks[0].admins, vec![admin_hex.clone()]);
+    assert_eq!(config.networks[0].shared_roster_updated_at, 1_726_000_000);
+    assert_eq!(config.networks[0].shared_roster_signed_by, admin_hex);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn inbound_fips_roster_rejects_tampered_signed_event() {
+    let nonce = unix_timestamp();
+    let dir = std::env::temp_dir().join(format!("nvpn-tampered-roster-{nonce}"));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let config_path = dir.join("config.toml");
+    let mut status = String::new();
+
+    let mut config = AppConfig::generated();
+    activate_first_network(&mut config);
+    let admin = config.nostr_keys().expect("admin keys");
+    let admin_hex = admin.public_key().to_hex();
+    let member_hex = Keys::generate().public_key().to_hex();
+    config.networks[0].name = "Original".to_string();
+    config.networks[0].network_id = "mesh".to_string();
+    config.networks[0].admins = vec![admin_hex.clone()];
+    config.networks[0].shared_roster_updated_at = 0;
+    config.networks[0].shared_roster_signed_by.clear();
+
+    let signed = SignedRoster::sign(
+        "mesh",
+        NetworkRoster {
+            network_name: "Home".to_string(),
+            participants: vec![member_hex],
+            admins: vec![admin_hex],
+            aliases: HashMap::new(),
+            signed_at: 1_726_000_000,
+        },
+        &admin,
+    )
+    .expect("sign roster");
+    let mut event = signed.event.clone();
+    event
+        .tags
+        .push(Tag::parse(&["name", "Office"]).expect("tag"));
+    let tampered = SignedRoster { event };
+
+    let error =
+        persist_shared_network_roster(&mut config, &config_path, Some(&tampered), &mut status)
+            .expect_err("tampered signed roster frame must be rejected");
+
+    assert!(
+        error.to_string().contains("invalid roster event signature"),
+        "unexpected error: {error:#}"
+    );
+    assert_eq!(config.networks[0].name, "Original");
+    assert_eq!(config.networks[0].shared_roster_updated_at, 0);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn inbound_fips_roster_ignores_signed_event_from_non_admin_author() {
+    let nonce = unix_timestamp();
+    let dir = std::env::temp_dir().join(format!("nvpn-non-admin-roster-{nonce}"));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let config_path = dir.join("config.toml");
+    let mut status = String::new();
+
+    let known_admin = Keys::generate();
+    let outsider = Keys::generate();
+    let known_admin_hex = known_admin.public_key().to_hex();
+    let outsider_hex = outsider.public_key().to_hex();
+    let member_hex = Keys::generate().public_key().to_hex();
+
+    let mut config = AppConfig::generated();
+    activate_first_network(&mut config);
+    config.networks[0].name = "Original".to_string();
+    config.networks[0].network_id = "mesh".to_string();
+    config.networks[0].admins = vec![known_admin_hex.clone()];
+    config.networks[0].shared_roster_updated_at = 0;
+    config.networks[0].shared_roster_signed_by.clear();
+
+    let signed = SignedRoster::sign(
+        "mesh",
+        NetworkRoster {
+            network_name: "Home".to_string(),
+            participants: vec![member_hex],
+            admins: vec![known_admin_hex, outsider_hex],
+            aliases: HashMap::new(),
+            signed_at: 1_726_000_000,
+        },
+        &outsider,
+    )
+    .expect("sign roster");
+
+    let result =
+        persist_shared_network_roster(&mut config, &config_path, Some(&signed), &mut status)
+            .expect("valid event from non-admin author should be ignored");
+
+    assert!(result.is_none());
+    assert_eq!(config.networks[0].name, "Original");
+    assert_eq!(config.networks[0].shared_roster_updated_at, 0);
 
     let _ = fs::remove_dir_all(&dir);
 }

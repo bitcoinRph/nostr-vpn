@@ -2795,38 +2795,14 @@ fn persist_inbound_join_request(
 fn persist_shared_network_roster(
     app: &mut AppConfig,
     config_path: &Path,
-    sender_pubkey: &str,
-    network_id: &str,
-    roster: &NetworkRoster,
     signed_roster: Option<&SignedRoster>,
     vpn_status: &mut String,
 ) -> Result<Option<String>> {
-    let (apply_network_id, apply_roster, signed_by) = if let Some(signed_roster) = signed_roster {
-        signed_roster.verify()?;
-        (
-            signed_roster.network_id()?,
-            signed_roster.roster()?,
-            signed_roster.signer_pubkey_hex()?,
-        )
-    } else {
-        (
-            network_id.to_string(),
-            roster.clone(),
-            sender_pubkey.to_string(),
-        )
-    };
-    let changed = app.apply_admin_signed_shared_roster(
-        &apply_network_id,
-        &apply_roster.network_name,
-        apply_roster.participants.clone(),
-        apply_roster.admins.clone(),
-        apply_roster.aliases.clone(),
-        apply_roster.signed_at,
-        &signed_by,
-    )?;
-    if let Some(signed_roster) = signed_roster
-        && signed_roster_is_current_for_app(app, &apply_network_id, signed_roster)
-    {
+    let signed_roster =
+        signed_roster.ok_or_else(|| anyhow!("FIPS roster frame is missing signed roster event"))?;
+    let changed = app.apply_verified_admin_signed_shared_roster(signed_roster)?;
+    let apply_network_id = signed_roster.network_id()?;
+    if signed_roster_is_current_for_app(app, &apply_network_id, signed_roster) {
         upsert_signed_roster(
             &signed_rosters_file_path(config_path),
             signed_roster.clone(),
@@ -2888,15 +2864,11 @@ fn drain_fips_mesh_events(
             }
             crate::fips_private_mesh::FipsPrivateMeshEvent::Roster {
                 sender_pubkey,
-                network_id,
-                roster,
                 signed_roster,
+                ..
             } => match persist_shared_network_roster(
                 app,
                 config_path,
-                &sender_pubkey,
-                &network_id,
-                &roster,
                 signed_roster.as_deref(),
                 vpn_status,
             ) {

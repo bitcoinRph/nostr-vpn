@@ -1026,11 +1026,7 @@ async fn handle_mobile_control_frame(
     note_mobile_peer_rx(presence, &source_pubkey, message.data.len());
 
     match frame {
-        FipsControlFrame::Roster {
-            network_id,
-            roster,
-            signed_roster,
-        } => {
+        FipsControlFrame::Roster { signed_roster, .. } => {
             apply_mobile_roster_frame(
                 endpoint,
                 mesh,
@@ -1041,9 +1037,6 @@ async fn handle_mobile_control_frame(
                 app_config_dirty,
                 config_path,
                 join_request_active,
-                &source_pubkey,
-                &network_id,
-                &roster,
                 signed_roster.as_deref(),
             )
             .await?;
@@ -1106,20 +1099,10 @@ async fn apply_mobile_roster_frame(
     app_config_dirty: &AtomicBool,
     config_path: Option<&Path>,
     join_request_active: &AtomicBool,
-    source_pubkey: &str,
-    network_id: &str,
-    roster: &NetworkRoster,
     signed_roster: Option<&SignedRoster>,
 ) -> Result<()> {
-    let Some(updated) = apply_mobile_roster(
-        app_config,
-        app_config_dirty,
-        config_path,
-        source_pubkey,
-        network_id,
-        roster,
-        signed_roster,
-    )?
+    let Some(updated) =
+        apply_mobile_roster(app_config, app_config_dirty, config_path, signed_roster)?
     else {
         return Ok(());
     };
@@ -1232,39 +1215,17 @@ fn apply_mobile_roster(
     app_config: &Arc<RwLock<AppConfig>>,
     app_config_dirty: &AtomicBool,
     config_path: Option<&Path>,
-    sender_pubkey: &str,
-    network_id: &str,
-    roster: &NetworkRoster,
     signed_roster: Option<&SignedRoster>,
 ) -> Result<Option<MobileTunnelConfig>> {
     let mut app = app_config
         .write()
         .map_err(|_| anyhow!("mobile app config lock poisoned"))?;
     app.ensure_defaults();
-    let (apply_network_id, apply_roster, signed_by) = if let Some(signed_roster) = signed_roster {
-        signed_roster.verify()?;
-        (
-            signed_roster.network_id()?,
-            signed_roster.roster()?,
-            signed_roster.signer_pubkey_hex()?,
-        )
-    } else {
-        (
-            network_id.to_string(),
-            roster.clone(),
-            sender_pubkey.to_string(),
-        )
-    };
-    let changed = app.apply_admin_signed_shared_roster(
-        &apply_network_id,
-        &apply_roster.network_name,
-        apply_roster.participants.clone(),
-        apply_roster.admins.clone(),
-        apply_roster.aliases.clone(),
-        apply_roster.signed_at,
-        &signed_by,
-    )?;
-    if let (Some(config_path), Some(signed_roster)) = (config_path, signed_roster)
+    let signed_roster =
+        signed_roster.ok_or_else(|| anyhow!("FIPS roster frame is missing signed roster event"))?;
+    let changed = app.apply_verified_admin_signed_shared_roster(signed_roster)?;
+    let apply_network_id = signed_roster.network_id()?;
+    if let Some(config_path) = config_path
         && mobile_signed_roster_is_current_for_app(&app, &apply_network_id, signed_roster)
         && let Err(error) = upsert_signed_roster(
             &signed_rosters_file_path(config_path),
@@ -2501,6 +2462,80 @@ mod tests {
     use super::*;
     use nostr_sdk::prelude::{Keys, ToBech32};
     use nostr_vpn_core::config::{NetworkConfig, PendingOutboundJoinRequest};
+
+    fn mobile_app_with_admin(admin_hex: String) -> Arc<RwLock<AppConfig>> {
+        let mut app = AppConfig::generated();
+        app.networks = vec![NetworkConfig {
+            id: "test".to_string(),
+            name: "Original".to_string(),
+            enabled: true,
+            network_id: "mesh".to_string(),
+            invite_secret: "join-secret".to_string(),
+            participants: Vec::new(),
+            admins: vec![admin_hex],
+            listen_for_join_requests: true,
+            invite_inviter: String::new(),
+            outbound_join_request: None,
+            inbound_join_requests: Vec::new(),
+            shared_roster_updated_at: 0,
+            shared_roster_signed_by: String::new(),
+        }];
+        Arc::new(RwLock::new(app))
+    }
+
+    #[test]
+    fn mobile_inbound_roster_requires_signed_event() {
+        let admin_hex = Keys::generate().public_key().to_hex();
+        let app = mobile_app_with_admin(admin_hex);
+        let dirty = AtomicBool::new(false);
+
+        let error = apply_mobile_roster(&app, &dirty, None, None)
+            .expect_err("unsigned mobile roster frame must be rejected");
+
+        assert!(
+            error.to_string().contains("missing signed roster event"),
+            "unexpected error: {error:#}"
+        );
+        assert!(!dirty.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn mobile_inbound_roster_ignores_non_admin_event_author() {
+        let known_admin = Keys::generate();
+        let outsider = Keys::generate();
+        let member_hex = Keys::generate().public_key().to_hex();
+        let known_admin_hex = known_admin.public_key().to_hex();
+        let outsider_hex = outsider.public_key().to_hex();
+        let app = mobile_app_with_admin(known_admin_hex.clone());
+        let dirty = AtomicBool::new(false);
+        let signed = SignedRoster::sign(
+            "mesh",
+            NetworkRoster {
+                network_name: "Home".to_string(),
+                participants: vec![member_hex],
+                admins: vec![known_admin_hex, outsider_hex],
+                aliases: HashMap::new(),
+                signed_at: 1_726_000_000,
+            },
+            &outsider,
+        )
+        .expect("sign roster");
+
+        let updated = apply_mobile_roster(&app, &dirty, None, Some(&signed))
+            .expect("valid event from non-admin author should be ignored");
+
+        assert!(updated.is_none());
+        assert!(!dirty.load(Ordering::Relaxed));
+        assert_eq!(
+            app.read()
+                .expect("app config")
+                .networks
+                .first()
+                .expect("network")
+                .shared_roster_updated_at,
+            0
+        );
+    }
 
     #[test]
     fn mobile_config_routes_only_private_peer_addresses() {

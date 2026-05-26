@@ -1,5 +1,6 @@
 use super::*;
 use nostr_vpn_core::config::{PendingOutboundJoinRequest, normalize_runtime_network_id};
+use nostr_vpn_core::fips_control::{NetworkRoster, SignedRoster};
 
 #[test]
 fn default_relays_match_hashtree_defaults() {
@@ -538,6 +539,73 @@ fn apply_admin_signed_shared_roster_ignores_unknown_signer() {
         .expect("ignore unknown signer");
 
     assert!(!changed);
+}
+
+#[test]
+fn apply_verified_admin_signed_shared_roster_rejects_tampered_event() {
+    let current_admin = Keys::generate();
+    let member = Keys::generate();
+    let current_admin_hex = current_admin.public_key().to_hex();
+    let member_hex = member.public_key().to_hex();
+
+    let mut config = AppConfig::generated();
+    config.networks[0].network_id = "mesh-home".to_string();
+    config.networks[0].admins = vec![current_admin_hex.clone()];
+    config.ensure_defaults();
+
+    let roster = NetworkRoster {
+        network_name: "Home".to_string(),
+        participants: vec![member_hex],
+        admins: vec![current_admin_hex],
+        aliases: std::collections::HashMap::new(),
+        signed_at: 1_726_000_000,
+    };
+    let signed = SignedRoster::sign("mesh-home", roster, &current_admin).expect("sign roster");
+    let mut event = signed.event.clone();
+    event
+        .tags
+        .push(nostr_sdk::prelude::Tag::parse(&["name", "Office"]).expect("tag"));
+    let tampered = SignedRoster { event };
+
+    let error = config
+        .apply_verified_admin_signed_shared_roster(&tampered)
+        .expect_err("tampered roster event must be rejected");
+
+    assert!(
+        error.to_string().contains("invalid roster event signature"),
+        "unexpected error: {error:#}"
+    );
+    assert_eq!(config.networks[0].shared_roster_updated_at, 0);
+}
+
+#[test]
+fn apply_verified_admin_signed_shared_roster_ignores_non_admin_author() {
+    let known_admin = Keys::generate();
+    let outsider = Keys::generate();
+    let member = Keys::generate();
+    let known_admin_hex = known_admin.public_key().to_hex();
+    let outsider_hex = outsider.public_key().to_hex();
+    let member_hex = member.public_key().to_hex();
+
+    let mut config = AppConfig::generated();
+    config.networks[0].network_id = "mesh-home".to_string();
+    config.networks[0].admins = vec![known_admin_hex.clone()];
+    config.ensure_defaults();
+
+    let roster = NetworkRoster {
+        network_name: "Home".to_string(),
+        participants: vec![member_hex],
+        admins: vec![known_admin_hex, outsider_hex],
+        aliases: std::collections::HashMap::new(),
+        signed_at: 1_726_000_000,
+    };
+    let signed = SignedRoster::sign("mesh-home", roster, &outsider).expect("sign roster");
+    let changed = config
+        .apply_verified_admin_signed_shared_roster(&signed)
+        .expect("valid signature by non-admin author should be ignored");
+
+    assert!(!changed);
+    assert_eq!(config.networks[0].shared_roster_updated_at, 0);
 }
 
 #[test]

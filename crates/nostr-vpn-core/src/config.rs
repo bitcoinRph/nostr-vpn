@@ -46,7 +46,7 @@ use crate::config_secrets::{
     SecretPersistence, config_file_needs_secret_migration, delete_config_secrets,
     hydrate_config_secrets, prepare_config_secrets_for_save,
 };
-use crate::fips_control::{PeerEndpointHint, peer_endpoint_hint_addr};
+use crate::fips_control::{PeerEndpointHint, SignedRoster, peer_endpoint_hint_addr};
 use crate::network_roster::{
     canonical_npub_key, canonicalize_inbound_join_requests, canonicalize_outbound_join_request,
     normalize_inbound_join_requests, normalize_network_admins, normalize_npub_key,
@@ -1811,6 +1811,25 @@ impl AppConfig {
         self.normalize_selected_exit_node();
         self.normalize_peer_aliases();
         Ok(true)
+    }
+
+    pub fn apply_verified_admin_signed_shared_roster(
+        &mut self,
+        signed_roster: &SignedRoster,
+    ) -> Result<bool> {
+        signed_roster.verify()?;
+        let network_id = signed_roster.network_id()?;
+        let roster = signed_roster.roster()?;
+        let signed_by = signed_roster.signer_pubkey_hex()?;
+        self.apply_admin_signed_shared_roster(
+            &network_id,
+            &roster.network_name,
+            roster.participants,
+            roster.admins,
+            roster.aliases,
+            roster.signed_at,
+            &signed_by,
+        )
     }
 
     pub fn mesh_members_pubkeys(&self) -> Vec<String> {
