@@ -470,6 +470,11 @@ pub(crate) fn macos_underlay_default_route_from_routes(
 }
 
 #[cfg(target_os = "macos")]
+pub(crate) fn macos_underlay_default_route_from_system() -> Result<Option<MacosRouteSpec>> {
+    crate::macos_network::macos_underlay_default_route_from_system()
+}
+
+#[cfg(target_os = "macos")]
 pub(crate) fn delete_macos_managed_route(
     target: &str,
     gateway: Option<&str>,
@@ -511,8 +516,26 @@ pub(crate) fn apply_macos_route_spec(
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn write_macos_ip_forward(enabled: bool) -> Result<()> {
-    crate::macos_network::write_macos_ip_forward(enabled)
+pub(crate) fn macos_pf_enabled() -> Result<bool> {
+    crate::macos_network::macos_pf_enabled()
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn apply_macos_exit_node_pf_rules(
+    tunnel_iface: &str,
+    outbound_iface: &str,
+    tunnel_source_cidr: &str,
+) -> Result<()> {
+    crate::macos_network::apply_macos_exit_node_pf_rules(
+        tunnel_iface,
+        outbound_iface,
+        tunnel_source_cidr,
+    )
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn enable_macos_pf() -> Result<()> {
+    crate::macos_network::enable_macos_pf()
 }
 
 #[cfg(target_os = "macos")]
@@ -544,7 +567,7 @@ fn linux_ip_forward_path(family: LinuxExitNodeIpFamily) -> &'static str {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) fn linux_exit_node_source_cidr(tunnel_ip: &str) -> Option<String> {
     let octets = strip_cidr(tunnel_ip).parse::<Ipv4Addr>().ok()?.octets();
     if octets[0] == 10 && octets[1] == 44 {

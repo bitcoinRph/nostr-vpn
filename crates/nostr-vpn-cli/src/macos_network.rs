@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Write;
 
 pub(super) fn macos_default_routes_from_netstat(output: &str) -> Vec<MacosRouteSpec> {
     let mut routes = Vec::new();
@@ -480,24 +481,90 @@ fn delete_macos_direct_route_variants(target: &str, iface: &str) -> Result<()> {
     }
 }
 
-#[cfg(target_os = "macos")]
-pub(super) fn write_macos_ip_forward(enabled: bool) -> Result<()> {
-    run_checked(ProcessCommand::new("sysctl").arg("-w").arg(format!(
-        "net.inet.ip.forwarding={}",
-        if enabled { "1" } else { "0" }
-    )))
+#[cfg(any(target_os = "macos", test))]
+const MACOS_PF_EXIT_ANCHOR: &str = "com.apple/to.nostrvpn/exit";
+
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn macos_exit_node_pf_rules(
+    tunnel_iface: &str,
+    outbound_iface: &str,
+    tunnel_source_cidr: &str,
+) -> String {
+    format!(
+        concat!(
+            "nat on {outbound_iface} inet from {tunnel_source_cidr} to any -> ({outbound_iface})\n",
+            "pass in quick on {tunnel_iface} inet from {tunnel_source_cidr} to any keep state\n",
+            "pass out quick on {outbound_iface} inet from {tunnel_source_cidr} to any keep state\n",
+        ),
+        tunnel_iface = tunnel_iface,
+        outbound_iface = outbound_iface,
+        tunnel_source_cidr = tunnel_source_cidr,
+    )
 }
 
 #[cfg(target_os = "macos")]
-const MACOS_PF_EXIT_ANCHOR: &str = "com.apple/to.nostrvpn/exit";
+pub(super) fn macos_pf_enabled() -> Result<bool> {
+    let output = command_stdout_checked(ProcessCommand::new("pfctl").arg("-s").arg("info"))?;
+    Ok(output
+        .lines()
+        .map(str::trim)
+        .any(|line| line.eq_ignore_ascii_case("Status: Enabled")))
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn apply_macos_exit_node_pf_rules(
+    tunnel_iface: &str,
+    outbound_iface: &str,
+    tunnel_source_cidr: &str,
+) -> Result<()> {
+    let rules = macos_exit_node_pf_rules(tunnel_iface, outbound_iface, tunnel_source_cidr);
+    let mut command = ProcessCommand::new("pfctl")
+        .arg("-a")
+        .arg(MACOS_PF_EXIT_ANCHOR)
+        .arg("-f")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to execute pfctl")?;
+    if let Some(stdin) = command.stdin.as_mut() {
+        stdin
+            .write_all(rules.as_bytes())
+            .context("failed to write nvpn PF rules")?;
+    }
+    let output = command
+        .wait_with_output()
+        .context("failed to wait for pfctl")?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(anyhow!(
+        "command failed: pfctl -a {MACOS_PF_EXIT_ANCHOR} -f -\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout).trim(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn enable_macos_pf() -> Result<()> {
+    run_checked(ProcessCommand::new("pfctl").arg("-e"))
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn macos_pf_anchor_flush_args() -> Vec<String> {
+    vec![
+        "-a".to_string(),
+        MACOS_PF_EXIT_ANCHOR.to_string(),
+        "-F".to_string(),
+        "all".to_string(),
+    ]
+}
 
 #[cfg(target_os = "macos")]
 pub(super) fn cleanup_macos_pf_nat() -> Result<()> {
-    run_checked(
-        ProcessCommand::new("pfctl")
-            .arg("-a")
-            .arg(MACOS_PF_EXIT_ANCHOR)
-            .arg("-F")
-            .arg("nat"),
-    )
+    let mut command = ProcessCommand::new("pfctl");
+    command.args(macos_pf_anchor_flush_args());
+    run_checked(&mut command)
 }

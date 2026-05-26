@@ -36,6 +36,8 @@ use std::net::{IpAddr, SocketAddr, SocketAddrV4};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::process::Command as ProcessCommand;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use std::sync::Arc;
 #[cfg(target_os = "windows")]
@@ -1836,6 +1838,8 @@ pub(crate) struct FipsPrivateTunnelRuntime {
     original_default_ipv6_route: Option<String>,
     #[cfg(target_os = "linux")]
     exit_node_runtime: crate::LinuxExitNodeRuntime,
+    #[cfg(target_os = "macos")]
+    exit_node_runtime: crate::MacosExitNodeRuntime,
     /// Userspace WG upstream tunnel (Mullvad/Proton-style). Owned for
     /// the lifetime of "WG upstream is enabled in config"; dropped on
     /// disable. Populated by `reconcile_macos_wg_upstream` after a
@@ -1944,6 +1948,8 @@ impl FipsPrivateTunnelRuntime {
             original_default_ipv6_route: None,
             #[cfg(target_os = "linux")]
             exit_node_runtime: crate::LinuxExitNodeRuntime::default(),
+            #[cfg(target_os = "macos")]
+            exit_node_runtime: crate::MacosExitNodeRuntime::default(),
             #[cfg(target_os = "macos")]
             wg_upstream: None,
         };
@@ -2116,6 +2122,8 @@ impl FipsPrivateTunnelRuntime {
         #[cfg(target_os = "linux")]
         runtime.cleanup_linux_network_state();
         #[cfg(target_os = "macos")]
+        runtime.cleanup_macos_exit_node_forwarding();
+        #[cfg(target_os = "macos")]
         if let Some(handle) = runtime.wg_upstream.take() {
             handle.cleanup().await;
         }
@@ -2154,6 +2162,10 @@ impl FipsPrivateTunnelRuntime {
             .with_context(|| format!("failed to configure FIPS tunnel interface {}", self.iface))?;
             self.reconcile_macos_wg_upstream(&config.wireguard_exit)
                 .await;
+            self.reconcile_macos_exit_node_forwarding(
+                &config.local_address,
+                &config.local_advertised_routes,
+            );
         }
         Ok(())
     }
@@ -2254,6 +2266,93 @@ impl FipsPrivateTunnelRuntime {
                 eprintln!("fips: WG upstream not started: {error}");
             }
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn reconcile_macos_exit_node_forwarding(&mut self, local_address: &str, routes: &[String]) {
+        let route_families = crate::linux_exit_node_default_route_families(routes);
+        if !route_families.ipv4 {
+            self.cleanup_macos_exit_node_forwarding();
+            return;
+        }
+        if route_families.ipv6 {
+            eprintln!(
+                "fips: IPv6 exit-node forwarding is disabled on macOS until nvpn has IPv6 PF source filtering"
+            );
+        }
+
+        let Some(tunnel_source_cidr) = crate::linux_exit_node_source_cidr(local_address) else {
+            eprintln!("fips: invalid IPv4 tunnel address '{local_address}'");
+            self.cleanup_macos_exit_node_forwarding();
+            return;
+        };
+
+        let outbound_iface = match crate::macos_underlay_default_route_from_system() {
+            Ok(Some(route)) => route.interface,
+            Ok(None) => {
+                eprintln!("fips: failed to resolve macOS underlay default route for exit NAT");
+                self.cleanup_macos_exit_node_forwarding();
+                return;
+            }
+            Err(error) => {
+                eprintln!("fips: failed to resolve macOS underlay default route: {error}");
+                self.cleanup_macos_exit_node_forwarding();
+                return;
+            }
+        };
+
+        let already_configured = self.exit_node_runtime.outbound_iface.as_deref()
+            == Some(outbound_iface.as_str())
+            && self.exit_node_runtime.tunnel_source_cidr.as_deref()
+                == Some(tunnel_source_cidr.as_str());
+        if already_configured {
+            return;
+        }
+
+        self.cleanup_macos_exit_node_forwarding();
+        match crate::macos_pf_enabled() {
+            Ok(enabled) => {
+                self.exit_node_runtime.pf_was_enabled = Some(enabled);
+                if !enabled && let Err(error) = crate::enable_macos_pf() {
+                    eprintln!("fips: failed to enable macOS PF for exit NAT: {error}");
+                    self.cleanup_macos_exit_node_forwarding();
+                    return;
+                }
+            }
+            Err(error) => {
+                eprintln!("fips: failed to read macOS PF state: {error}");
+                self.cleanup_macos_exit_node_forwarding();
+                return;
+            }
+        }
+
+        if let Err(error) =
+            crate::apply_macos_exit_node_pf_rules(&self.iface, &outbound_iface, &tunnel_source_cidr)
+        {
+            eprintln!("fips: failed to install macOS exit PF rules: {error}");
+            self.cleanup_macos_exit_node_forwarding();
+            return;
+        }
+
+        self.exit_node_runtime.outbound_iface = Some(outbound_iface);
+        self.exit_node_runtime.tunnel_source_cidr = Some(tunnel_source_cidr);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn cleanup_macos_exit_node_forwarding(&mut self) {
+        if self.exit_node_runtime.pf_was_enabled.is_some()
+            && let Err(error) = crate::cleanup_macos_pf_nat()
+        {
+            eprintln!("fips: failed to remove macOS exit PF rules: {error}");
+        }
+
+        if self.exit_node_runtime.pf_was_enabled == Some(false)
+            && let Err(error) = crate::run_checked(ProcessCommand::new("pfctl").arg("-d"))
+        {
+            eprintln!("fips: failed to restore macOS PF enabled state: {error}");
+        }
+
+        self.exit_node_runtime = crate::MacosExitNodeRuntime::default();
     }
 
     #[cfg(target_os = "linux")]

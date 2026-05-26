@@ -2454,6 +2454,14 @@ struct LinuxExitNodeRuntime {
     wireguard_exit: Option<LinuxWireGuardExitRuntime>,
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Default)]
+struct MacosExitNodeRuntime {
+    outbound_iface: Option<String>,
+    tunnel_source_cidr: Option<String>,
+    pf_was_enabled: Option<bool>,
+}
+
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LinuxWireGuardExitRuntime {

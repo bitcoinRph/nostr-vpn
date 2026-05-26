@@ -286,6 +286,30 @@ fn legacy_macos_exit_cleanup_leaves_global_ipv4_forwarding_alone() {
     assert!(!plan.restore_ipv4_forwarding);
 }
 
+#[test]
+fn macos_exit_node_pf_rules_are_scoped_to_tunnel_source_and_outbound_iface() {
+    let rules = crate::macos_network::macos_exit_node_pf_rules("utun42", "en0", "10.44.0.0/16");
+
+    assert_eq!(
+        rules,
+        concat!(
+            "nat on en0 inet from 10.44.0.0/16 to any -> (en0)\n",
+            "pass in quick on utun42 inet from 10.44.0.0/16 to any keep state\n",
+            "pass out quick on en0 inet from 10.44.0.0/16 to any keep state\n",
+        )
+    );
+    assert!(!rules.contains("net.inet.ip.forwarding"));
+    assert!(!rules.contains("pass in quick on en0"));
+}
+
+#[test]
+fn macos_exit_node_cleanup_flushes_only_nvpn_anchor() {
+    assert_eq!(
+        crate::macos_network::macos_pf_anchor_flush_args(),
+        vec!["-a", "com.apple/to.nostrvpn/exit", "-F", "all"]
+    );
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn macos_underlay_repair_resets_tunnel_runtime() {
