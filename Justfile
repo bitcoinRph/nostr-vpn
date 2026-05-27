@@ -48,6 +48,7 @@ info:
     @echo "  just ios-smoke-device"
     @echo
     @echo "Checks"
+    @echo "  just icons"
     @echo "  just test"
     @echo "  just mobile-test-kit"
     @echo "  just mobile-test-kit-rust"
@@ -161,6 +162,9 @@ macos-xcodeproj:
 
 macos-build:
     ./scripts/macos-build macos-build
+
+icons:
+    ./scripts/regen-app-icons
 
 release:
     node scripts/local-release.mjs

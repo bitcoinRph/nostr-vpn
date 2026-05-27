@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Regenerate Nostr VPN app icon rasters from SVG sources.
+
+The app icon comes from the root icon.svg. Desktop targets keep transparent
+rounded corners because those platforms display the bitmap directly; iOS keeps a
+full square bitmap because the OS applies its own mask. The macOS menu-bar
+template icon comes from assets/tray-icon.svg.
+
+Requires the Rust resvg CLI and Pillow:
+  cargo install resvg
+  python3 -m pip install Pillow
+"""
+from __future__ import annotations
+
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
+
+REPO = Path(__file__).resolve().parent.parent
+APP_SVG = REPO / "icon.svg"
+TRAY_SVG = REPO / "assets/tray-icon.svg"
+
+IOS_DIR = REPO / "ios/Resources/Assets.xcassets/AppIcon.appiconset"
+MAC_DIR = REPO / "macos/Resources/Assets.xcassets/AppIcon.appiconset"
+MAC_TRAY_DIR = REPO / "macos/Resources/Assets.xcassets/TrayIcon.imageset"
+LINUX_DIR = REPO / "linux/resources"
+WINDOWS_DIR = REPO / "windows/NostrVpn.Windows/Assets"
+
+ROUND_RADIUS_FRACTION = 0.195
+
+IOS_OUTPUTS = {
+    "AppIcon-20x20@1x.png": 20,
+    "AppIcon-20x20@2x-ipad.png": 40,
+    "AppIcon-20x20@2x.png": 40,
+    "AppIcon-20x20@3x.png": 60,
+    "AppIcon-29x29@1x.png": 29,
+    "AppIcon-29x29@2x-ipad.png": 58,
+    "AppIcon-29x29@2x.png": 58,
+    "AppIcon-29x29@3x.png": 87,
+    "AppIcon-40x40@1x.png": 40,
+    "AppIcon-40x40@2x-ipad.png": 80,
+    "AppIcon-40x40@2x.png": 80,
+    "AppIcon-40x40@3x.png": 120,
+    "AppIcon-60x60@2x.png": 120,
+    "AppIcon-60x60@3x.png": 180,
+    "AppIcon-76x76@2x.png": 152,
+    "AppIcon-83.5x83.5@2x.png": 167,
+    "AppIcon-1024.png": 1024,
+}
+
+MAC_OUTPUTS = {
+    "icon_16x16.png": 16,
+    "icon_16x16@2x.png": 32,
+    "icon_32x32.png": 32,
+    "icon_32x32@2x.png": 64,
+    "icon_128x128.png": 128,
+    "icon_128x128@2x.png": 256,
+    "icon_256x256.png": 256,
+    "icon_256x256@2x.png": 512,
+    "icon_512x512.png": 512,
+    "icon_512x512@2x.png": 1024,
+}
+
+LINUX_OUTPUTS = {
+    "nostr-vpn-16.png": 16,
+    "nostr-vpn-22.png": 22,
+    "nostr-vpn-24.png": 24,
+    "nostr-vpn-32.png": 32,
+    "nostr-vpn-48.png": 48,
+    "nostr-vpn-64.png": 64,
+    "nostr-vpn-128.png": 128,
+    "nostr-vpn-256.png": 256,
+    "nostr-vpn-512.png": 512,
+}
+
+LINUX_TRAY_OUTPUTS = {
+    "nostr-vpn-tray-24.png": 24,
+    "nostr-vpn-tray-48.png": 48,
+}
+
+MAC_TRAY_OUTPUTS = {
+    "tray-template.png": 18,
+    "tray-template@2x.png": 36,
+    "tray-template@3x.png": 54,
+}
+
+ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
+SVG_COPIES = [
+    REPO / "umbrel/icon.svg",
+    REPO / "web/control-panel/src/lib/nostr-vpn-icon.svg",
+    REPO / "web/control-panel/public/favicon.svg",
+]
+
+
+def resvg() -> str:
+    path = shutil.which("resvg")
+    if path is None:
+        raise SystemExit("resvg is required. Install it with: cargo install resvg")
+    return path
+
+
+RESVG = resvg()
+
+
+def render_svg(svg: Path, size: int) -> Image.Image:
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        subprocess.run(
+            [
+                RESVG,
+                "--quiet",
+                "--width",
+                str(size),
+                "--height",
+                str(size),
+                str(svg),
+                tmp.name,
+            ],
+            check=True,
+        )
+        return Image.open(tmp.name).convert("RGBA")
+
+
+def rounded_corners(image: Image.Image) -> Image.Image:
+    image = image.convert("RGBA")
+    width, height = image.size
+    radius = round(min(width, height) * ROUND_RADIUS_FRACTION)
+    mask = Image.new("L", image.size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle((0, 0, width, height), radius=radius, fill=255)
+    alpha = image.getchannel("A")
+    alpha = Image.composite(alpha, Image.new("L", image.size, 0), mask)
+    image.putalpha(alpha)
+    return image
+
+
+def save_png(path: Path, image: Image.Image, rgb: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out = image.convert("RGB") if rgb else image.convert("RGBA")
+    out.save(path, "PNG", optimize=True)
+    print(f"  {path.relative_to(REPO)}")
+
+
+def write_png_outputs(out_dir: Path, outputs: dict[str, int], rounded: bool, rgb: bool) -> None:
+    for filename, size in outputs.items():
+        image = render_svg(APP_SVG, size)
+        if rounded:
+            image = rounded_corners(image)
+        save_png(out_dir / filename, image, rgb=rgb)
+
+
+def write_linux_tray() -> None:
+    for filename, size in LINUX_TRAY_OUTPUTS.items():
+        save_png(LINUX_DIR / filename, rounded_corners(render_svg(APP_SVG, size)))
+
+
+def write_mac_tray() -> None:
+    for filename, size in MAC_TRAY_OUTPUTS.items():
+        save_png(MAC_TRAY_DIR / filename, render_svg(TRAY_SVG, size))
+
+
+def write_ico(path: Path, source_svg: Path, rounded: bool) -> None:
+    images = []
+    for size in ICO_SIZES:
+        image = render_svg(source_svg, size)
+        if rounded:
+            image = rounded_corners(image)
+        images.append(image)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    images[-1].save(path, format="ICO", sizes=[image.size for image in images], append_images=images[:-1])
+    print(f"  {path.relative_to(REPO)}")
+
+
+def sync_svg_copies() -> None:
+    source = APP_SVG.read_text(encoding="utf-8")
+    for path in SVG_COPIES:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+        print(f"  {path.relative_to(REPO)}")
+
+
+def main() -> None:
+    print("svg copies:")
+    sync_svg_copies()
+
+    print("ios app icons:")
+    write_png_outputs(IOS_DIR, IOS_OUTPUTS, rounded=False, rgb=True)
+
+    print("macos app icons:")
+    write_png_outputs(MAC_DIR, MAC_OUTPUTS, rounded=True, rgb=False)
+
+    print("macos tray icons:")
+    write_mac_tray()
+
+    print("linux app icons:")
+    write_png_outputs(LINUX_DIR, LINUX_OUTPUTS, rounded=True, rgb=False)
+
+    print("linux tray icons:")
+    write_linux_tray()
+
+    print("windows icons:")
+    write_ico(WINDOWS_DIR / "nostr-vpn.ico", APP_SVG, rounded=True)
+    write_ico(WINDOWS_DIR / "nostr-vpn-tray.ico", APP_SVG, rounded=True)
+
+
+if __name__ == "__main__":
+    main()
