@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.44 - 2026-05-27
+
+### Fixed
+
+- FIPS now uses `fips-core` 0.3.21, porting upstream admission and tree
+  stability fixes for saturated meshes.
+- Add Network now keeps a local "Join request sent" status visible after
+  requesting access until the Add Network surface closes.
+
 ## 4.0.43 - 2026-05-27
 
 ### Changed

@@ -54,6 +54,7 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     private string _manualJoinAdminId = "";
     private string _manualJoinMeshId = "";
     private bool _manualJoinExpanded;
+    private string _addNetworkJoinStatus = "";
     private string _updateStatus = "";
     private Uri? _updateAssetUrl;
     private bool _updateChecking;
@@ -80,7 +81,11 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
         SyncLaunchOnStartupRegistration();
 
         ShowDevicesCommand = new RelayCommand(_ => Page = AppPage.Devices);
-        ShowAddNetworkCommand = new RelayCommand(_ => Page = AppPage.AddNetwork);
+        ShowAddNetworkCommand = new RelayCommand(_ =>
+        {
+            AddNetworkJoinStatus = "";
+            Page = AppPage.AddNetwork;
+        });
         ShowAddDeviceCommand = new RelayCommand(
             _ => Page = AppPage.AddDevice,
             _ => ActiveNetwork is { LocalIsAdmin: true, Enabled: true });
@@ -156,6 +161,10 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             if (_page == value)
             {
                 return;
+            }
+            if (_page == AppPage.AddNetwork && value != AppPage.AddNetwork)
+            {
+                AddNetworkJoinStatus = "";
             }
             _page = value;
             OnPropertyChanged();
@@ -580,15 +589,37 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
     public string DiagnosticsPeers => $"{State.ConnectedPeerCount}/{State.ExpectedPeerCount}";
     public string DiagnosticsFips => $"{State.FipsConnectedPeerCount}/{State.FipsRosterPeerCount} direct";
     public string DiagnosticsOtherFips => $"{State.NonFipsRosterPeerCount}";
-    public bool CanRequestActiveNetworkJoin => ActiveNetwork is { OutboundJoinRequest: null } network && !string.IsNullOrWhiteSpace(network.InviteInviterNpub);
+    public bool CanRequestActiveNetworkJoin => string.IsNullOrWhiteSpace(AddNetworkJoinStatus)
+        && ActiveNetwork is { OutboundJoinRequest: null } network
+        && !string.IsNullOrWhiteSpace(network.InviteInviterNpub);
+    public string AddNetworkJoinStatus
+    {
+        get => _addNetworkJoinStatus;
+        private set
+        {
+            if (_addNetworkJoinStatus == value)
+            {
+                return;
+            }
+            _addNetworkJoinStatus = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ActiveNetworkJoinStatus));
+            OnPropertyChanged(nameof(CanRequestActiveNetworkJoin));
+        }
+    }
+
     public string ActiveNetworkJoinStatus
     {
         get
         {
+            if (!string.IsNullOrWhiteSpace(AddNetworkJoinStatus))
+            {
+                return AddNetworkJoinStatus;
+            }
             var network = ActiveNetwork;
             if (network?.OutboundJoinRequest is not null)
             {
-                return "Join requested";
+                return "Join request sent";
             }
             return CanRequestActiveNetworkJoin ? "Invite needs approval" : "";
         }
@@ -870,10 +901,18 @@ public sealed class AppViewModel : INotifyPropertyChanged, IDisposable
             : DispatchAsync(NativeActions.ResetNetworkInvite(network.Id), "Resetting invite");
     }
 
-    public Task RequestActiveNetworkJoinAsync()
+    public async Task RequestActiveNetworkJoinAsync()
     {
         var network = ActiveNetwork;
-        return network is null ? Task.CompletedTask : DispatchAsync(NativeActions.RequestNetworkJoin(network.Id), "Requesting access");
+        if (network is null)
+        {
+            return;
+        }
+        await DispatchAsync(NativeActions.RequestNetworkJoin(network.Id), "Requesting access");
+        if (string.IsNullOrWhiteSpace(State.Error))
+        {
+            AddNetworkJoinStatus = "Join request sent";
+        }
     }
 
     public Task AcceptJoinRequestAsync(NativeInboundJoinRequestState request)

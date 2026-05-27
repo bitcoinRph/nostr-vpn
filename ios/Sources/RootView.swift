@@ -474,6 +474,7 @@ private struct JoinNetworkCard: View {
     @State private var manualExpanded = false
     @State private var manualAdminId = ""
     @State private var manualNetworkId = ""
+    @State private var joinRequestStatus = ""
 
     private var manualAdminInvalid: Bool {
         let trimmed = manualAdminId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -484,6 +485,12 @@ private struct JoinNetworkCard: View {
         let admin = manualAdminId.trimmingCharacters(in: .whitespacesAndNewlines)
         let mesh = normalizeNetworkIdInput(manualNetworkId)
         return !admin.isEmpty && !mesh.isEmpty && isValidDeviceId(admin)
+    }
+
+    private var requestNetwork: NetworkState? {
+        model.activeNetwork ?? model.state.networks.first { network in
+            network.outboundJoinRequest != nil || !network.inviteInviterNpub.isEmpty
+        }
     }
 
     var body: some View {
@@ -559,15 +566,16 @@ private struct JoinNetworkCard: View {
             }
             .font(.subheadline)
 
-            if let network = model.activeNetwork {
-                if network.outboundJoinRequest != nil {
-                    Pill("Join requested", tint: .orange)
+            if let network = requestNetwork {
+                if !joinRequestStatus.isEmpty || network.outboundJoinRequest != nil {
+                    Pill("Join request sent", tint: .orange)
                 } else if !network.inviteInviterNpub.isEmpty {
                     Button {
                         model.dispatch(
                             NativeActions.requestNetworkJoin(networkId: network.id),
                             status: "Requesting access"
                         )
+                        joinRequestStatus = "Join request sent"
                     } label: {
                         Label("Request Access", systemImage: "person.badge.plus")
                     }

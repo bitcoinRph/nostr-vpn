@@ -43,6 +43,7 @@
   let manualNetworkId = '';
   let newNetworkName = '';
   let addNetworkOpen = false;
+  let addNetworkJoinStatus = '';
   let addDeviceOpen = false;
   let diagnosticsOpen = false;
   let shownNetworkId = '';
@@ -103,6 +104,15 @@
   $: shownNetwork = state
     ? state.networks.find((network) => network.id === shownNetworkId) ?? activeNetwork ?? state.networks[0] ?? null
     : null;
+  $: addNetworkRequestNetwork =
+    (shownNetwork?.outboundJoinRequest || shownNetwork?.inviteInviterNpub
+      ? shownNetwork
+      : null) ??
+    state?.networks.find((network) => network.outboundJoinRequest || network.inviteInviterNpub) ??
+    null;
+  $: addNetworkJoinRequestSent = Boolean(
+    addNetworkJoinStatus || addNetworkRequestNetwork?.outboundJoinRequest,
+  );
   $: publicFipsAddress = state?.ownNpub ? `${state.ownNpub}.fips` : '';
   $: incomingJoinRequestCount = state
     ? state.networks.reduce((count, network) => count + network.inboundJoinRequests.length, 0)
@@ -294,6 +304,16 @@
     noticeTimer = window.setTimeout(() => {
       notice = '';
     }, 2600);
+  }
+
+  function openAddNetwork() {
+    addNetworkJoinStatus = '';
+    addNetworkOpen = true;
+  }
+
+  function closeAddNetwork() {
+    addNetworkOpen = false;
+    addNetworkJoinStatus = '';
   }
 
   function messageOf(value: unknown): string {
@@ -718,7 +738,7 @@
     const ok = await importNetworkInvite(invite, 'Importing');
     if (ok) {
       inviteDraft = '';
-      addNetworkOpen = false;
+      closeAddNetwork();
       tab = 'devices';
     }
   }
@@ -756,8 +776,23 @@
       const createdNetwork = next.networks.find((network) => !existingIds.has(network.id));
       shownNetworkId = createdNetwork?.id ?? preferredNetworkId(next, '');
       newNetworkName = '';
-      addNetworkOpen = false;
+      closeAddNetwork();
       tab = 'devices';
+    }
+  }
+
+  async function requestNetworkJoin() {
+    const network = addNetworkRequestNetwork;
+    if (!network || network.outboundJoinRequest || !network.inviteInviterNpub) {
+      return;
+    }
+    const next = await runState(
+      '/api/request_network_join',
+      { networkId: network.id },
+      'Requesting access',
+    );
+    if (next) {
+      addNetworkJoinStatus = 'Join request sent';
     }
   }
 
@@ -779,7 +814,7 @@
       shownNetworkId = createdNetwork?.id ?? preferredNetworkId(next, '');
       manualAdminNpub = '';
       manualNetworkId = '';
-      addNetworkOpen = false;
+      closeAddNetwork();
       tab = 'devices';
     }
   }
@@ -971,7 +1006,7 @@
           class="header-icon-button"
           aria-label="Add Network"
           title="Add Network"
-          on:click={() => (addNetworkOpen = true)}
+          on:click={openAddNetwork}
         >
           <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
             <path d="M8 3.5v9M3.5 8h9" />
@@ -1183,7 +1218,7 @@
       {/if}
 
       {#if addNetworkOpen}
-        <Modal title="Add Network" titleId="add-network-title" on:close={() => (addNetworkOpen = false)}>
+        <Modal title="Add Network" titleId="add-network-title" on:close={closeAddNetwork}>
           <form class="modal-section" on:submit|preventDefault={addNetwork}>
             <div class="section-heading">
               <div>
@@ -1218,6 +1253,22 @@
                 Paste
               </button>
             </div>
+            {#if addNetworkRequestNetwork}
+              <div class="badge-row">
+                {#if addNetworkJoinRequestSent}
+                  <span class="badge warn">Join request sent</span>
+                {:else if addNetworkRequestNetwork.inviteInviterNpub}
+                  <button
+                    class="secondary-button"
+                    type="button"
+                    disabled={Boolean(busyAction)}
+                    on:click={requestNetworkJoin}
+                  >
+                    Request Access
+                  </button>
+                {/if}
+              </div>
+            {/if}
           </form>
 
           <form class="modal-section" on:submit|preventDefault={manualAddNetwork}>

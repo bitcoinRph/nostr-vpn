@@ -28,6 +28,7 @@ struct RootView: View {
     @State private var shownNetworkId: String?
     @State private var addNetworkPresented = false
     @State private var addDevicePresented = false
+    @State private var addNetworkJoinStatus = ""
     @State private var manualJoinExpanded = false
     @State private var manualJoinAdminId = ""
     @State private var manualJoinMeshId = ""
@@ -85,6 +86,11 @@ struct RootView: View {
         .onChange(of: shownNetwork?.enabled) { _, enabled in
             if addDevicePresented && enabled != true {
                 addDevicePresented = false
+            }
+        }
+        .onChange(of: addNetworkPresented) { _, presented in
+            if !presented {
+                addNetworkJoinStatus = ""
             }
         }
         .sheet(isPresented: $showingQrScanner) {
@@ -1005,6 +1011,9 @@ struct RootView: View {
     }
 
     private func joinNetworkSection(_ network: NativeNetworkState?) -> some View {
+        let requestNetwork = network ?? state.networks.first { candidate in
+            candidate.outboundJoinRequest != nil || !candidate.inviteInviterNpub.isEmpty
+        }
         surface {
             sectionHeader("Join Network", systemImage: "arrow.down.circle")
             Text("Paste invite code")
@@ -1040,12 +1049,13 @@ struct RootView: View {
                     Label("From file", systemImage: "qrcode.viewfinder")
                 }
             }
-            if let network {
-                if network.outboundJoinRequest != nil {
-                    badge("Join requested", style: .warn)
+            if let network = requestNetwork {
+                if !addNetworkJoinStatus.isEmpty || network.outboundJoinRequest != nil {
+                    badge("Join request sent", style: .warn)
                 } else if !network.inviteInviterNpub.isEmpty {
                     Button {
                         manager.requestNetworkJoin(networkId: network.id)
+                        addNetworkJoinStatus = "Join request sent"
                     } label: {
                         Label("Request Access", systemImage: "person.badge.plus")
                     }

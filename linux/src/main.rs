@@ -133,6 +133,7 @@ struct AppModel {
     update_policy: UpdateAutoCheckPolicy,
     update_sender: Sender<updater::UpdateEvent>,
     update_receiver: Receiver<updater::UpdateEvent>,
+    add_network_join_status: String,
     allow_close: bool,
     service_settling: bool,
     diagnostics_expanded: bool,
@@ -189,6 +190,7 @@ impl AppModel {
             update_policy,
             update_sender,
             update_receiver,
+            add_network_join_status: String::new(),
             allow_close: false,
             service_settling: false,
             diagnostics_expanded,
@@ -903,6 +905,7 @@ fn import_invite(app: &AppRef, invite: String) {
         let mut model = app.borrow_mut();
         model.drafts.invite.clear();
         model.notice.clear();
+        model.add_network_join_status.clear();
     }
     let state = dispatch(app, NativeAppAction::ImportNetworkInvite { invite });
     if active_network(&state).is_some() {
@@ -921,7 +924,13 @@ fn set_notice(app: &AppRef, notice: impl Into<String>) {
 }
 
 fn set_page(app: &AppRef, page: Page) {
-    app.borrow_mut().page = page;
+    {
+        let mut model = app.borrow_mut();
+        if model.page == Page::Share && page != Page::Share {
+            model.add_network_join_status.clear();
+        }
+        model.page = page;
+    }
     render(app);
 }
 
@@ -2006,20 +2015,25 @@ fn build_share_page(app: &AppRef, page: &gtk::Box, state: &NativeAppState) {
         },
     );
 
-    if network.outbound_join_request.is_some() {
-        column.append(&badge("Join requested", "warn"));
+    let add_network_join_status = app.borrow().add_network_join_status.clone();
+    if !add_network_join_status.trim().is_empty() || network.outbound_join_request.is_some() {
+        column.append(&badge("Join request sent", "warn"));
     } else if !network.invite_inviter_npub.is_empty() {
         let request = icon_text_button("Request Access", "contact-new-symbolic");
         {
             let app = app.clone();
             let network_id = network.id.clone();
             request.connect_clicked(move |_| {
-                dispatch(
+                let state = dispatch(
                     &app,
                     NativeAppAction::RequestNetworkJoin {
                         network_id: network_id.clone(),
                     },
                 );
+                if state.error.trim().is_empty() {
+                    app.borrow_mut().add_network_join_status = "Join request sent".to_string();
+                    render(&app);
+                }
             });
         }
         column.append(&request);

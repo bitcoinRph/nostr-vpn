@@ -487,10 +487,13 @@ private fun NetworkSetupCard(
 ) {
     var networkName by remember { mutableStateOf("My Network") }
     var inviteInput by remember { mutableStateOf("") }
+    var joinRequestStatus by remember { mutableStateOf("") }
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboard = remember(context) {
         context.getSystemService(android.content.ClipboardManager::class.java)
     }
+    val requestNetwork = state.activeNetwork
+        ?: state.networks.firstOrNull { it.outboundJoinRequest || it.inviteInviterNpub.isNotBlank() }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SetupChoiceCard("Create Network", Color(0xFF16A34A)) {
@@ -545,6 +548,25 @@ private fun NetworkSetupCard(
                     modifier = Modifier.weight(1f),
                 ) {
                     Text("Scan")
+                }
+            }
+            if (requestNetwork != null) {
+                if (joinRequestStatus.isNotBlank() || requestNetwork.outboundJoinRequest) {
+                    Text(
+                        "Join request sent",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF9A3412),
+                    )
+                } else if (requestNetwork.inviteInviterNpub.isNotBlank()) {
+                    OutlinedButton(
+                        onClick = {
+                            dispatch(NativeActions.requestNetworkJoin(requestNetwork.id))
+                            joinRequestStatus = "Join request sent"
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Request Access")
+                    }
                 }
             }
 

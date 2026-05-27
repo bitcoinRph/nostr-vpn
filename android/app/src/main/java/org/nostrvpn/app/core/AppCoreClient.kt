@@ -46,6 +46,9 @@ object NativeActions {
     fun manualAddNetwork(adminNpub: String, meshNetworkId: String) =
         action("manual_add_network", "adminNpub" to adminNpub, "meshNetworkId" to meshNetworkId)
 
+    fun requestNetworkJoin(networkId: String) =
+        action("request_network_join", "networkId" to networkId)
+
     fun setNetworkEnabled(networkId: String, enabled: Boolean) =
         action("set_network_enabled", "networkId" to networkId, "enabled" to enabled)
 
