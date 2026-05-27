@@ -4,10 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 4.0.43 - 2026-05-27
+
 ### Changed
 
 - Settings now label relay-based FIPS discovery as "Find peers over Nostr
   relays", and bootstrap servers default off for new configs.
+- Release checks now include a Rust dependency audit.
+
+### Fixed
+
+- FIPS now uses `fips-core` 0.3.20, which caps connected UDP file descriptor
+  use, fixes connected UDP drain shutdown, and keeps YAML config overlays from
+  replacing unrelated `node` defaults.
+- Admin roster events are now signed with the current Nostr SDK APIs and
+  verified before being accepted.
+- The daemon now reports "Network route refresh failed" for route refresh
+  failures instead of the previous "return" typo.
+- The web settings save button is scoped to public FIPS routing changes instead
+  of appearing as an unrelated page footer action.
 
 ## 4.0.42 - 2026-05-26
 

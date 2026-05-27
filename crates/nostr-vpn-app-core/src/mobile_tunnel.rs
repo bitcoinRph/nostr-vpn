@@ -2728,7 +2728,9 @@ mod tests {
 
     #[test]
     fn mobile_config_seeds_bootstrap_transit_peers() {
-        let app = AppConfig::generated();
+        let mut app = AppConfig::generated();
+        app.fips_bootstrap_enabled = true;
+        app.ensure_defaults();
         let mobile = MobileTunnelConfig::from_app(&app).expect("mobile config");
         let config = fips_endpoint_config("nostr-vpn:test", &mobile);
 
