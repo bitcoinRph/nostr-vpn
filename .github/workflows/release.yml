@@ -472,9 +472,62 @@ jobs:
             dist/nostr-vpn-${{ env.RELEASE_TAG }}-android-arm64.aab
           retention-days: 7
 
+  build-startos:
+    name: Build StartOS s9pk (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    needs: verify
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mirrors ARCHES in the Makefile: x86 -> x86_64, arm -> aarch64.
+        # The aarch64 image is built on the x86 runner via QEMU emulation,
+        # which setup-build-env configures.
+        target: [x86, arm]
+    steps:
+      - name: Free up disk space
+        uses: start9labs/shared-workflows/.github/actions/free-disk-space@master
+
+      - name: Set up the StartOS build environment
+        # Installs Node 22, squashfs-tools-ng, QEMU, Docker Buildx, the Rust
+        # toolchain, and start-cli — everything `make` needs to pack a .s9pk.
+        uses: start9labs/shared-workflows/.github/actions/setup-build-env@master
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          submodules: recursive
+
+      - name: Initialize developer signing key
+        run: start-cli init-key
+
+      - name: Build the .s9pk
+        run: |
+          RUST_LOG=debug RUST_BACKTRACE=1 make ${{ matrix.target }}
+          echo ""
+          echo "SHA256SUMs:"
+          sha256sum ./*.s9pk
+
+      - name: Upload s9pk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: s9pk-${{ matrix.target }}
+          path: ./*.s9pk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
   release:
     name: Create GitHub release
-    if: ${{ always() && needs.verify.result == 'success' && needs.build-cli.result == 'success' && needs.build-macos-app.result == 'success' && needs.build-linux-app.result == 'success' && needs.build-windows-app.result == 'success' && needs.build-android-app.result == 'success' }}
+    # Publish as long as the release gate and the StartOS package build
+    # succeed. The other platform jobs are best-effort: they require signing
+    # secrets (macOS notarization, Android keystore, etc.) that may not be
+    # configured, so their failures must not block the release. `needs` still
+    # lists them so the release waits for them and attaches whatever artifacts
+    # they managed to produce.
+    if: ${{ always() && needs.verify.result == 'success' && needs.build-startos.result == 'success' }}
     needs:
       - verify
       - build-cli
@@ -482,6 +535,7 @@ jobs:
       - build-linux-app
       - build-windows-app
       - build-android-app
+      - build-startos
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -513,6 +567,7 @@ jobs:
             --built-line "Built Linux x64 desktop Debian package." \
             --built-line "Built Windows x64 installer." \
             --built-line "Built signed Android arm64 APK/AAB." \
+            --built-line "Built StartOS .s9pk packages (x86_64, aarch64)." \
             --out release-notes.md
 
       - name: Create GitHub release
