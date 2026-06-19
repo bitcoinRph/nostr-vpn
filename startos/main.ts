@@ -58,14 +58,16 @@ export const main = sdk.setupMain(async ({ effects }) => {
     .addDaemon('web', {
       subcontainer: webSub,
       exec: {
+        // Bind every interface inside the subcontainer so the StartOS proxy
+        // can reach the control panel regardless of the container's interface
+        // names or assigned address. The previous eth0-detection approach
+        // failed to start the web daemon whenever that lookup came up empty.
         command: [
-          'sh',
-          '-ec',
-          [
-            'bind_ip="$(ip -4 -o addr show dev eth0 scope global | awk \'{ split($4, a, "/"); print a[1]; exit }\')"',
-            'test -n "$bind_ip"',
-            `exec /usr/local/bin/nvpn-web --listen "$bind_ip:${uiPort}" --config /data/config/nvpn/config.toml`,
-          ].join('\n'),
+          '/usr/local/bin/nvpn-web',
+          '--listen',
+          `0.0.0.0:${uiPort}`,
+          '--config',
+          '/data/config/nvpn/config.toml',
         ],
         env: {
           ...commonEnv,
