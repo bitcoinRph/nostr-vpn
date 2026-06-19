@@ -1,0 +1,151 @@
+name: StartOS s9pk
+
+# Build the StartOS `.s9pk` package(s) and attach them to a GitHub release.
+#
+# Triggers:
+#   * Pushing a version tag (`v*`) — the documented release flow for this repo
+#     (`git tag vX.Y.Z && git push origin vX.Y.Z`). Tag pushes reliably start a
+#     workflow run, whereas the `release: published` event is suppressed for
+#     releases created by the built-in GITHUB_TOKEN (as the main release.yml
+#     does), so keying off tags is what makes this run automatically.
+#   * Manual `workflow_dispatch` — optionally targeting a specific release tag;
+#     defaults to the latest published release.
+#
+# The job builds each architecture's `.s9pk` (via the package Makefile) and
+# uploads them as assets on the target release, creating the release if it does
+# not exist yet. This keeps working even when the full multi-platform
+# release.yml is gated by signing secrets that aren't configured.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach the .s9pk to (defaults to the latest release)'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: startos-s9pk-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve target release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Resolve tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="$(gh release view --repo "${{ github.repository }}" --json tagName --jq '.tagName')"
+          fi
+          if [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
+            echo "::error::No release tag to target. Push a 'v*' tag, create a release, or pass the 'tag' input."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Target release tag: ${TAG}"
+
+  build:
+    name: Build .s9pk (make ${{ matrix.target }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mirrors `ARCHES` in the Makefile: x86 -> x86_64, arm -> aarch64.
+        # The aarch64 image is built on the x86 runner via QEMU emulation,
+        # which `setup-build-env` configures.
+        target: [x86, arm]
+    steps:
+      - name: Free up disk space
+        # Building the Rust workspace plus per-arch Docker images is
+        # disk-heavy; reclaim space the hosted runner doesn't need.
+        uses: start9labs/shared-workflows/.github/actions/free-disk-space@master
+
+      - name: Set up the StartOS build environment
+        # Installs Node 22, squashfs-tools-ng, QEMU, Docker Buildx, the Rust
+        # toolchain, and start-cli — everything `make` needs to pack a .s9pk.
+        uses: start9labs/shared-workflows/.github/actions/setup-build-env@master
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          submodules: recursive
+
+      - name: Initialize developer signing key
+        # Ephemeral per-run key used to sign the package. Sideloaded packages
+        # signed by an unknown key are expected outside the Start9 registry.
+        run: start-cli init-key
+
+      - name: Build the .s9pk
+        run: |
+          RUST_LOG=debug RUST_BACKTRACE=1 make ${{ matrix.target }}
+          echo ""
+          echo "SHA256SUMs:"
+          sha256sum ./*.s9pk
+
+      - name: Upload .s9pk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: s9pk-${{ matrix.target }}
+          path: ./*.s9pk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Attach .s9pk to release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download built .s9pk artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: s9pk-*
+          merge-multiple: true
+
+      - name: Attach .s9pk files to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "Packages to attach to release ${TAG}:"
+          ls -lh artifacts/*.s9pk
+
+          # Create the release if it doesn't already exist (e.g. the heavier
+          # multi-platform release.yml hasn't published one). Mark it as a
+          # prerelease when the tag contains a pre-release suffix (e.g. -beta.1).
+          if ! gh release view "${TAG}" --repo "${REPO}" >/dev/null 2>&1; then
+            PRERELEASE_FLAG=""
+            case "${TAG}" in
+              *-*) PRERELEASE_FLAG="--prerelease" ;;
+            esac
+            gh release create "${TAG}" --repo "${REPO}" --title "${TAG}" \
+              --notes "StartOS \`.s9pk\` packages for ${TAG}." ${PRERELEASE_FLAG} || true
+          fi
+
+          gh release upload "${TAG}" artifacts/*.s9pk --repo "${REPO}" --clobber
+          echo "Attached $(ls artifacts/*.s9pk | wc -l) package(s) to ${TAG}."
