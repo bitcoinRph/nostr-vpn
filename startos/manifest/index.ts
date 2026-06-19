@@ -10,7 +10,6 @@ export const manifest = setupManifest({
   marketingUrl: 'https://github.com/mmalmi/nostr-vpn',
   donationUrl: null,
   description: { short, long },
-  nestedRuntime: true,
   volumes: ['main'],
   images: {
     app: {
