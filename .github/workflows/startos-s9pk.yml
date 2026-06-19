@@ -1,25 +1,18 @@
 name: StartOS s9pk
 
-# Build the StartOS `.s9pk` package(s) and attach them to a GitHub release.
+# Manually build the StartOS `.s9pk` package(s) and attach them to a GitHub
+# release.
 #
-# Triggers:
-#   * Pushing a version tag (`v*`) — the documented release flow for this repo
-#     (`git tag vX.Y.Z && git push origin vX.Y.Z`). Tag pushes reliably start a
-#     workflow run, whereas the `release: published` event is suppressed for
-#     releases created by the built-in GITHUB_TOKEN (as the main release.yml
-#     does), so keying off tags is what makes this run automatically.
-#   * Manual `workflow_dispatch` — optionally targeting a specific release tag;
-#     defaults to the latest published release.
+# Automatic `.s9pk` builds on `v*` tag pushes are handled by release.yml (the
+# `build-startos` job). This workflow is a manual escape hatch for rebuilding
+# and re-attaching the package to any existing tag/release without re-running
+# the full multi-platform release pipeline.
 #
-# The job builds each architecture's `.s9pk` (via the package Makefile) and
-# uploads them as assets on the target release, creating the release if it does
-# not exist yet. This keeps working even when the full multi-platform
-# release.yml is gated by signing secrets that aren't configured.
+# It builds each architecture's `.s9pk` (via the package Makefile) and uploads
+# them as assets on the target release, creating the release if it does not
+# exist yet.
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -46,15 +39,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "push" ]; then
-            TAG="${{ github.ref_name }}"
-          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
             TAG="${{ github.event.inputs.tag }}"
           else
             TAG="$(gh release view --repo "${{ github.repository }}" --json tagName --jq '.tagName')"
           fi
           if [ -z "${TAG}" ] || [ "${TAG}" = "null" ]; then
-            echo "::error::No release tag to target. Push a 'v*' tag, create a release, or pass the 'tag' input."
+            echo "::error::No release tag to target. Create a release or pass the 'tag' input."
             exit 1
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
